@@ -1,0 +1,120 @@
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .models import Brand, BrandVersion, Design, PresetVersion
+from .routers_assets import get_db
+
+router = APIRouter(prefix="/api")
+
+KINDS = ("광고 이미지", "아이콘 세트")
+ICON_PURPOSES = ("웹용", "사용자 지정")
+
+
+class BriefIn(BaseModel):
+    product_name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=1000)
+    key_message: str = Field(default="", max_length=200)
+    target: str = Field(default="", max_length=300)
+
+
+class IconIn(BaseModel):
+    purpose: str
+    width: int | None = Field(default=None, ge=16, le=4096)
+    height: int | None = Field(default=None, ge=16, le=4096)
+
+    @field_validator("purpose")
+    @classmethod
+    def _p(cls, v: str) -> str:
+        if v not in ICON_PURPOSES:
+            raise ValueError(f"용도는 {ICON_PURPOSES} 중 하나")
+        return v
+
+    @model_validator(mode="after")
+    def _size(self):
+        # 웹용 기본 크기는 아직 정해지지 않았다 (6-4에서 확정). 사용자 지정은 크기가 필수.
+        if self.purpose == "사용자 지정" and not (self.width and self.height):
+            raise ValueError("사용자 지정은 가로·세로 크기를 입력해야 합니다")
+        return self
+
+
+class DesignIn(BaseModel):
+    brand_id: int
+    kind: str
+    brief: BriefIn
+    preset_version_ids: list[int] = []
+    icon: IconIn | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def _k(cls, v: str) -> str:
+        if v not in KINDS:
+            raise ValueError(f"시안 종류는 {KINDS} 중 하나")
+        return v
+
+
+def _out(d: Design, db: Session) -> dict:
+    brand = db.get(Brand, d.brand_id)
+    bv = db.get(BrandVersion, d.brand_version_id)
+    cur = db.get(BrandVersion, brand.current_version_id) if brand and brand.current_version_id else None
+    presets = []
+    for pid in d.preset_version_ids:
+        v = db.get(PresetVersion, pid)
+        if v:
+            presets.append({"id": v.id, "platform": v.placement.platform.name, "name": v.placement.name,
+                            "width": v.production_width, "height": v.production_height, "status": v.status})
+    return {
+        "id": d.id, "kind": d.kind, "status": d.status, "brief": d.brief, "presets": presets,
+        "brand": {"id": d.brand_id, "name": brand.name if brand else None,
+                  "version_no": bv.version_no if bv else None,
+                  "current_version_no": cur.version_no if cur else None},
+        # 브랜드가 새 버전으로 바뀌어 이 시안이 이전 버전 기준이면 표시
+        "brand_outdated": bool(bv and cur and cur.id != bv.id),
+        "created_at": d.created_at.isoformat(),
+    }
+
+
+@router.post("/designs")
+def create_design(body: DesignIn, db: Session = Depends(get_db)):
+    brand = db.get(Brand, body.brand_id)
+    if not brand or not brand.current_version_id:
+        raise HTTPException(400, "브랜드를 찾을 수 없습니다")
+    ids = list(dict.fromkeys(body.preset_version_ids))
+    if body.kind == "광고 이미지":
+        if not ids:
+            raise HTTPException(400, "광고 이미지 시안은 규격을 1개 이상 선택해야 합니다")
+        for pid in ids:
+            v = db.get(PresetVersion, pid)
+            if not v or not v.active:
+                raise HTTPException(400, f"선택할 수 없는 규격입니다: {pid}")
+            if v.status == "확인 필요":
+                raise HTTPException(400, f"공식 규격이 확인되지 않아 선택할 수 없습니다: {v.placement.name}")
+        if body.icon:
+            raise HTTPException(400, "광고 이미지 시안에는 아이콘 용도를 지정하지 않습니다")
+    else:
+        if ids:
+            raise HTTPException(400, "아이콘 세트는 광고 규격이 아니라 용도를 선택합니다")
+        if not body.icon:
+            raise HTTPException(400, "아이콘 세트는 용도(웹용 / 사용자 지정)를 선택해야 합니다")
+    brief = body.brief.model_dump()
+    if body.icon:
+        brief["icon"] = body.icon.model_dump()
+    d = Design(brand_id=brand.id, brand_version_id=brand.current_version_id,
+               preset_version_ids=ids, brief=brief, kind=body.kind, status="미검수")
+    db.add(d)
+    db.commit()
+    return _out(d, db)
+
+
+@router.get("/designs")
+def list_designs(db: Session = Depends(get_db)):
+    return [_out(d, db) for d in db.scalars(select(Design).order_by(Design.id.desc())).all()]
+
+
+@router.get("/designs/{design_id}")
+def get_design(design_id: int, db: Session = Depends(get_db)):
+    d = db.get(Design, design_id)
+    if not d:
+        raise HTTPException(404, "시안을 찾을 수 없습니다")
+    return _out(d, db)
