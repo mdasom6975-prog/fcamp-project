@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "kucha",
+  "brand": {
+    "name": "쿠챠",
+    "description": "성인(만 19세 이상)이 실물 캐릭터 굿즈를 발견하고 수집하는 즐거움을 제공하는 온라인 랜덤 커머스",
+    "logo_asset_id": null,
+    "logo_margin_percent": 25,
+    "colors": [
+      { "role": "주조색", "hex": "#4C69FE" },
+      { "role": "보조색", "hex": "#734CFE" },
+      { "role": "강조색", "hex": "#FE964C" },
+      { "role": "주의색", "hex": "#FE4C4C" },
+      { "role": "배경색", "hex": "#F6F7FA" },
+      { "role": "텍스트색", "hex": "#1B1F2A" }
+    ],
+    "fonts": [
+      { "role": "제목", "source": "provided", "name": "Pretendard-Bold" },
+      { "role": "본문", "source": "provided", "name": "Pretendard-Regular" }
+    ],
+    "icon_style": { "stroke_width": 2, "corner": "둥근", "fill": "윤곽" },
+    "image_tone": {
+      "description": "밝고 중립적인 배경, 균형 잡힌 노출. 정돈된 상품 광고 구성(편집형 커머스)으로 정보 위계가 분명함. 부드럽고 둥근 형태, 무광 레진 재질, 스튜디오 확산광의 자연스러운 그림자. 성인 대상이되 아동 광고처럼 보이지 않게. 피사체는 상표 없는 범용 캡슐 토이. 금지: 카지노 네온·잭팟·룰렛, 빨강-금색 카지노 색상, 과도한 광택, 서비스 이용 단계·앱 화면·버튼·순서도, 미승인 캐릭터·가짜 로고, 이미지 안의 글자.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "명확함 · 호기심 · 친근함 · 간결함 · 신뢰감. 성인 대상. 발견·기대·공개·수집의 감정을 표현하고 서비스 이용 순서는 설명하지 않는다. 확인되지 않은 혜택·확률·가격은 쓰지 않는다. 성별·소득을 추정하지 않고 미성년자를 타깃하지 않는다.",
+      "headline_max_chars": null,
+      "polite": true
+    },
+    "required_phrases": ["쿠챠"],
+    "forbidden_phrases": [
+      "최저가", "무조건 무료배송", "100% 당첨", "손해 없음", "중복 없음", "시크릿 보장", "희귀 보장",
+      "특정 상품 선택", "원하는 상품을 고르", "카지노", "잭팟", "룰렛", "슬롯머신", "베팅", "코인",
+      "경품", "투자", "수익", "가격 비교", "디지털 아이템", "쿠지"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "source": "Kucha_AI_Marketing_Asset_Guidelines_v1.pdf (쿠챠 브랜드 프롬프트 데이터 명세서 v1.0)",
+    "official_references": ["kucha.kr", "kucha.kr/legal/terms", "kucha.kr/gacha/236", "kucha.kr/kuji"],
+    "checked_at": "2026-10-13",
+    "logo": null,
+    "rule_sources": {
+      "colors": "가이드 04 시각 기준 — 주요 파랑·보조 보라·주의 빨강·강조 주황·기본 글자·기본 배경 (공식)",
+      "image_tone": "가이드 04 키워드 사전 + 07 제외·금지 사전 casino_v1 · quality_v1 · context_v1 · ip_v1 · text_v1",
+      "voice": "가이드 03 문체(voice) · persona_guardrails · 02 brand_experience (가설)",
+      "required_phrases": "가이드 02 brand_name=쿠챠 '공식 · 항상'",
+      "forbidden_phrases": "가이드 02 not_category + 07 service_v1 · casino_v1 · claim_v1 · live_guard_v1(쿠지 준비 중 → 광고 제작 금지)",
+      "levels": "RFP: 로고·허용 색상·필수/금지 표현은 필수(위반 시 검수 완료 차단), 톤·어조는 권장(사람 평가)"
+    },
+    "team_decisions_not_in_guide": [
+      "폰트: 가이드에 없음 → Pretendard 를 임시 적용하고 구분을 '권장'으로 둠 (기업 확인 후 변경)",
+      "아이콘 스타일: 가이드의 '부드러운 곡선(soft_rounded)' 만 있어 선 굵기 2px·윤곽형은 프로젝트 기본값",
+      "로고 여백 25%: 가이드에 없음, 프로젝트 기본값",
+      "존댓말(polite=true): 가이드의 '친근함·신뢰감·성인 대상' 해석. 반말 허용 여부는 질문 목록",
+      "'주의색 #FE4C4C' 역할명은 가이드 표기(주의 빨강)를 따름. 사용 조건은 질문 목록",
+      "금지 표현 '쿠지': 가이드 feature_status.kuji=prelaunch · block_kuji_campaign_until_live=true 를 문구 금지로 옮김 (출시 후 해제)"
+    ],
+    "excluded_from_generation": "service_flow(라인업 보기 → 무작위 뽑기 → 결과 확인 → 보관함 → 배송·합배송)는 교육용 정보이므로 어떤 생성 프롬프트에도 넣지 않는다 (가이드 01 compile_to_prompt=false)",
+    "age_gate": "만 19세 이상 (공식) — 카피·이미지 모두 미성년자 타깃 금지",
+    "live_claims_rule": "가격·재고·확률·배송·혜택·보관기간은 출처 URL·확인일·만료일이 있는 값만 쓴다. 없으면 쓰지 않는다"
+  }
+}

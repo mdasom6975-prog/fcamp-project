@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "malkkeum",
+  "brand": {
+    "name": "말끔",
+    "description": "오늘 맡기면 내일 도착하는 세탁 수거·배송 앱 (RFP 예시 가상 브랜드, 교차 테스트용)",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "colors": [
+      { "role": "주조색", "hex": "#1E3A8A" },
+      { "role": "보조색", "hex": "#3B82F6" },
+      { "role": "배경색", "hex": "#DBEAFE" },
+      { "role": "텍스트색", "hex": "#1E293B" }
+    ],
+    "fonts": [
+      { "role": "제목", "source": "provided", "name": "Pretendard-Bold" },
+      { "role": "본문", "source": "provided", "name": "Pretendard-Regular" }
+    ],
+    "icon_style": { "stroke_width": 2, "corner": "둥근", "fill": "윤곽" },
+    "image_tone": {
+      "description": "사진은 밝고 깨끗한 톤. 세탁물·셔츠·문 앞 수거 장면. 과장 없는 생활 서비스 느낌.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "친근한 존댓말, 짧은 문장, 느낌표 1개 이하.",
+      "headline_max_chars": 15,
+      "polite": true
+    },
+    "required_phrases": ["말끔"],
+    "forbidden_phrases": ["최저가", "100% 보장"],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "source": "콘텐츠_노코더스 RFP 개요.pdf p.12 MODULE 1 · BRAND KIT (가상 브랜드 '말끔')",
+    "checked_at": "2026-10-12",
+    "logo": { "note": "RFP 예시: 원본 비율 2.4:1 고정, 재생성 금지. 로고 파일은 팀이 제작해 등록" },
+    "rule_sources": {
+      "필수 규칙(검수 완료 차단)": "로고 원본·비율 유지, 텍스트·도형은 허용 색상만, 금지 표현 미포함",
+      "권장 규칙(경고)": "헤드라인 15자 이내, 사진은 밝고 깨끗한 톤",
+      "수정 가능": "배경 이미지, 레이아웃 배치, 본문 문장"
+    },
+    "icon_set_example": ["수거 신청", "배송 추적", "수거 일정", "결제", "알림", "주소 관리", "클린 케어", "이용 내역", "마이페이지", "고객 문의"]
+  }
+}
