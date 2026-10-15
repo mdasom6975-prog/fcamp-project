@@ -7,3 +7,4 @@ fonttools
 python-multipart
 openai
 resvg-py
+httpx

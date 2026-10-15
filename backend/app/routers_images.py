@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from . import compose, imagegen
 from .db import BASE_DIR, STORAGE_DIR
-from .models import Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, PresetVersion
+from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
+                     PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db
 from .routers_review import invalidate_reviews
 
@@ -49,11 +50,22 @@ def _latest(db: Session, design_id: int, pid: int, kind: str) -> GeneratedImage 
         GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
 
 
+def _latest_design_bg(db: Session, design_id: int) -> GeneratedImage | None:
+    return db.scalar(select(GeneratedImage).where(
+        GeneratedImage.design_id == design_id, GeneratedImage.kind == "background"
+    ).order_by(GeneratedImage.id.desc()).limit(1))
+
+
 def _design(db: Session, design_id: int) -> Design:
     d = db.get(Design, design_id)
     if not d or d.kind != "광고 이미지":
         raise HTTPException(404, "광고 이미지 시안을 찾을 수 없습니다")
     return d
+
+
+@router.get("/image-usage")
+def image_usage():
+    return imagegen.usage()
 
 
 @router.get("/designs/{design_id}/images")
@@ -78,6 +90,73 @@ def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
     invalidate_reviews(db, design_id, v.preset_version_id)
     db.commit()
     return {"selected": variant_id, "preset_id": v.preset_version_id}
+
+
+def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage]:
+    """배경을 1회만 생성하고 시안에 포함된 모든 규격에 같은 파일로 연결한다. {preset_id: 배경 행}"""
+    sizes = [(pid, pv.production_width, pv.production_height) for pid in d.preset_version_ids
+             if (pv := db.get(PresetVersion, pid)) and pv.production_width]
+    if not sizes:
+        raise HTTPException(400, "제작 크기가 정해진 규격이 없습니다")
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand = db.get(Brand, d.brand_id)
+    _, w, h = sizes[0]  # 구도 안내(여백 위치)는 첫 번째 규격 기준
+    try:
+        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, compose.template_for(w, h))
+        bg = imagegen.generate_background(prompt, w, h)
+    except imagegen.QuotaExceeded as e:
+        raise HTTPException(429, str(e))
+    except Exception as e:  # 키 등 민감 정보는 메시지에 넣지 않는다
+        raise HTTPException(502, f"이미지 생성에 실패했습니다 ({type(e).__name__})")
+    STORAGE_DIR.mkdir(exist_ok=True)
+    path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
+    bg.save(path)
+    rows: dict[int, GeneratedImage] = {}
+    for pid, _w, _h in sizes:
+        rows[pid] = GeneratedImage(design_id=d.id, preset_version_id=pid, kind="background",
+                                   file_path=str(path), width=bg.width, height=bg.height, prompt=prompt,
+                                   brand_version_id=bv.id, layout={})
+        db.add(rows[pid])
+    db.flush()
+    return rows
+
+
+@router.post("/designs/{design_id}/background/regenerate")
+def regenerate_background(design_id: int, db: Session = Depends(get_db)):
+    """시안 전체의 배경을 1회만 새로 생성하고, 모든 매체가 같은 원본을 공유하도록 연결한다."""
+    d = _design(db, design_id)
+    rows = create_shared_background(db, d)
+    db.commit()
+    return {"preset_ids": list(rows)}
+
+
+@router.post("/designs/{design_id}/reset-generated")
+def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True), db: Session = Depends(get_db)):
+    """시안의 생성 결과(배경·합성·편집 요소·검수 결과)만 지운다. 브랜드·규격·입력 내용(brief)·아이콘은 유지하고,
+    카피는 include_copy=True 일 때만 지운다. 이미지 생성 API 호출 테스트를 처음부터 다시 하기 위한 용도."""
+    d = _design(db, design_id)
+    imgs = db.scalars(select(GeneratedImage).where(GeneratedImage.design_id == design_id)).all()
+    paths = {g.file_path for g in imgs}
+    for g in imgs:
+        db.delete(g)
+    for model in (Element, DesignSnapshot, ReviewResult):
+        for r in db.scalars(select(model).where(model.design_id == design_id)).all():
+            db.delete(r)
+    if include_copy:
+        for r in db.scalars(select(CopyVariant).where(CopyVariant.design_id == design_id)).all():
+            db.delete(r)
+    d.status = "미검수"
+    db.flush()
+    # 다른 행이 같은 파일을 쓰지 않을 때만 파일 삭제 (경로는 STORAGE_DIR 하위만)
+    still = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
+    removed = 0
+    for p in paths - still:
+        fp = Path(p)
+        if STORAGE_DIR in fp.parents and fp.exists():
+            fp.unlink()
+            removed += 1
+    db.commit()
+    return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy}
 
 
 @router.post("/designs/{design_id}/presets/{preset_id}/image")
@@ -105,13 +184,25 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
         if not sel:
             raise HTTPException(400, "합성에 사용할 카피를 먼저 선택해 주세요")
 
-    # 배경: 있으면 재사용(비용 없음), 없거나 다시 만들기 요청이면 새로 생성
-    bg_row = None if regenerate_background else _latest(db, design_id, preset_id, "background")
-    if bg_row is None or not Path(bg_row.file_path).exists():
+    # 배경은 시안당 한 번만 생성하고, 매체별로는 같은 원본을 각 규격 크기에 맞춰 리사이즈(cover_crop)한다.
+    # 다시 만들기를 요청했거나 이 시안에 배경이 하나도 없을 때만 새로 생성한다.
+    src = _latest_design_bg(db, design_id)
+    bg_row = None
+    if not regenerate_background and src is not None and Path(src.file_path).exists():
+        bg_row = _latest(db, design_id, preset_id, "background")
+        if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
+            bg_row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="background",
+                                    file_path=src.file_path, width=src.width, height=src.height,
+                                    prompt=src.prompt, brand_version_id=src.brand_version_id, layout={})
+            db.add(bg_row)
+            db.flush()
+    if bg_row is None:
         tpl = compose.template_for(w, h)
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, tpl)
         try:
+            prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, tpl)
             bg = imagegen.generate_background(prompt, w, h)
+        except imagegen.QuotaExceeded as e:
+            raise HTTPException(429, str(e))
         except Exception as e:  # 키 등 민감 정보는 메시지에 넣지 않는다
             raise HTTPException(502, f"이미지 생성에 실패했습니다 ({type(e).__name__})")
         STORAGE_DIR.mkdir(exist_ok=True)

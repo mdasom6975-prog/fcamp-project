@@ -14,6 +14,8 @@ from .models import Asset
 router = APIRouter(prefix="/api")
 FONT_DIR = BASE_DIR / "fonts"
 MAX_BYTES = 10 * 1024 * 1024
+LOGO_MAX_BYTES = 300 * 1024      # 로고 파일 크기 기준 (300KB 이하)
+PRODUCT_MAX_BYTES = 200 * 1024   # 제품 이미지 크기 기준 (200KB 이하)
 
 PROVIDED_FONTS = [
     {"name": "Pretendard-Regular", "label": "Pretendard Regular", "file": "Pretendard-Regular.otf"},
@@ -46,9 +48,9 @@ def provided_fonts():
 @router.post("/assets")
 async def upload_asset(kind: str = Form(...), brand_id: int | None = Form(None),
                        file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """kind: logo | font | tone_ref"""
-    if kind not in ("logo", "font", "tone_ref"):
-        raise HTTPException(400, "kind 는 logo / font / tone_ref")
+    """kind: logo | font | tone_ref | product"""
+    if kind not in ("logo", "font", "tone_ref", "product"):
+        raise HTTPException(400, "kind 는 logo / font / tone_ref / product")
     data = await file.read()
     if not data:
         raise HTTPException(400, "빈 파일입니다")
@@ -58,6 +60,8 @@ async def upload_asset(kind: str = Form(...), brand_id: int | None = Form(None),
     width = height = None
 
     if kind == "logo":
+        if len(data) > LOGO_MAX_BYTES:
+            raise HTTPException(400, "로고 파일은 300KB 이하여야 합니다")
         if ext == "svg":
             width, height = _svg_size(data)
             mime = "image/svg+xml"
@@ -76,6 +80,19 @@ async def upload_asset(kind: str = Form(...), brand_id: int | None = Form(None),
             mime = "image/png"
         else:
             raise HTTPException(400, "로고는 PNG(투명) 또는 SVG 만 올릴 수 있습니다")
+    elif kind == "product":
+        if len(data) > PRODUCT_MAX_BYTES:
+            raise HTTPException(400, "제품 이미지는 200KB 이하여야 합니다")
+        if ext not in ("png", "jpg", "jpeg", "webp"):
+            raise HTTPException(400, "제품 이미지는 PNG·JPG·WEBP 만 올릴 수 있습니다")
+        try:
+            im = Image.open(io.BytesIO(data))
+            im.verify()
+            im = Image.open(io.BytesIO(data))
+            width, height = im.size
+        except Exception:
+            raise HTTPException(400, "이미지 파일을 읽을 수 없습니다")
+        mime = {"png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
     elif kind == "font":
         if ext not in ("ttf", "otf"):
             raise HTTPException(400, "폰트는 TTF 또는 OTF 만 올릴 수 있습니다")

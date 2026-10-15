@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from . import icons
 from .db import STORAGE_DIR
-from .models import Brand, BrandVersion, Design, IconAsset
+from .models import Brand, BrandVersion, Design, GeneratedImage, IconAsset
 from .routers_assets import get_db
 from .routers_review import invalidate_reviews
 
@@ -18,9 +18,18 @@ WEB_SIZE = (256, 256)   # 웹용 아이콘 기본 크기 (사용자 결정)
 
 def _design(db: Session, design_id: int) -> Design:
     d = db.get(Design, design_id)
-    if not d or d.kind != "아이콘 세트":
-        raise HTTPException(404, "아이콘 세트 시안을 찾을 수 없습니다")
+    if not d:
+        raise HTTPException(404, "캠페인을 찾을 수 없습니다")
     return d
+
+
+def _version_set(db: Session, version_id: int) -> list[IconAsset]:
+    """브랜드 규칙 버전 하나에는 아이콘 세트가 한 세트만 있다. (가장 최근 차수의 세트)"""
+    last = db.scalar(select(func.max(IconAsset.batch_no)).where(IconAsset.brand_version_id == version_id))
+    if not last:
+        return []
+    return list(db.scalars(select(IconAsset).where(IconAsset.brand_version_id == version_id, IconAsset.batch_no == last)
+                           .order_by(IconAsset.position)).all())
 
 
 def _size(d: Design) -> tuple[int, int]:
@@ -66,17 +75,20 @@ def _save(db, d, bv, batch, pos, name, concept, elements, style, w, h, forbidden
 @router.get("/designs/{design_id}/icons")
 def list_icons(design_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
-    last = db.scalar(select(func.max(IconAsset.batch_no)).where(IconAsset.design_id == d.id))
-    if not last:
-        return []
-    rows = db.scalars(select(IconAsset).where(IconAsset.design_id == d.id, IconAsset.batch_no == last)
-                      .order_by(IconAsset.position)).all()
-    return [_out(a) for a in rows]
+    return [_out(a) for a in _version_set(db, d.brand_version_id)]
 
 
 @router.post("/designs/{design_id}/icons")
 def create_icons(design_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
+    # 규칙 버전마다 한 세트만: 이미 있으면 새로 만들지 않는다 (개별 아이콘은 다시 그릴 수 있다)
+    if _version_set(db, d.brand_version_id):
+        raise HTTPException(409, "이 브랜드 규칙 버전의 아이콘 세트는 이미 있습니다. 개별 아이콘은 다시 그릴 수 있습니다.")
+    if d.kind == "광고 이미지":
+        has_image = db.scalar(select(func.count()).select_from(GeneratedImage).where(
+            GeneratedImage.design_id == d.id, GeneratedImage.kind == "composite"))
+        if not has_image:
+            raise HTTPException(400, "광고 이미지를 먼저 생성한 뒤 아이콘 세트를 만들 수 있습니다")
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, (w, h) = _style(bv), _size(d)
@@ -101,7 +113,7 @@ def create_icons(design_id: int, db: Session = Depends(get_db)):
                                         [str(x.get("name")) for x in items], icons.COUNT - len(items))
         except Exception:
             break
-    batch = (db.scalar(select(func.max(IconAsset.batch_no)).where(IconAsset.design_id == d.id)) or 0) + 1
+    batch = 1
     made, skipped = 0, []
     for i, it in enumerate(items, 1):
         name = str(it.get("name") or "").strip()
@@ -129,13 +141,14 @@ def regenerate_icon(design_id: int, icon_id: int, db: Session = Depends(get_db))
     """한 아이콘만 다시 그린다. 스타일은 세트와 동일하게 코드가 강제한다."""
     d = _design(db, design_id)
     a = db.get(IconAsset, icon_id)
-    if not a or a.design_id != d.id:
+    if not a or a.brand_version_id != d.brand_version_id:
         raise HTTPException(404, "아이콘을 찾을 수 없습니다")
     bv = db.get(BrandVersion, a.brand_version_id)
     brand = db.get(Brand, d.brand_id)
-    style, (w, h) = _style(bv), _size(d)
+    src = db.get(Design, a.design_id) or d      # 세트를 만든 캠페인의 설명 기준으로 다시 그린다
+    style, (w, h) = _style(bv), (a.width, a.height)
     try:
-        els = icons.redraw_one(brand.name, d.brief, a.name, a.concept, style)
+        els = icons.redraw_one(brand.name, src.brief, a.name, a.concept, style)
         _save(db, d, bv, a.batch_no, a.position, a.name, a.concept, els, style, w, h,
               bv.forbidden_phrases or [], existing=a)
     except Exception as e:

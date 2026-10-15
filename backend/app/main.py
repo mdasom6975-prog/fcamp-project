@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select, text
 
 from . import models  # noqa: F401  (테이블 등록)
 from .db import DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
@@ -14,6 +14,7 @@ from .routers_icons import router as icons_router
 from .routers_images import router as images_router
 from .routers_designs import router as designs_router
 from .routers_presets import router as presets_router
+from .routers_spec_update import router as spec_update_router
 from .routers_review import router as review_router
 from .seed import deactivate_excluded, seed
 
@@ -23,6 +24,10 @@ async def lifespan(app: FastAPI):
     DB_PATH.parent.mkdir(exist_ok=True)
     STORAGE_DIR.mkdir(exist_ok=True)
     Base.metadata.create_all(engine)
+    # create_all 은 기존 테이블에 컬럼을 추가하지 않으므로, 없으면 직접 추가한다 (기존 데이터 보존)
+    if "description" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE brands ADD COLUMN description VARCHAR(300) NOT NULL DEFAULT ''"))
     with SessionLocal() as db:
         seed(db)
         deactivate_excluded(db)
@@ -39,6 +44,7 @@ app.include_router(edit_router)
 app.include_router(review_router)
 app.include_router(export_router)
 app.include_router(designs_router)
+app.include_router(spec_update_router)  # /presets/{id} 보다 먼저 등록해야 update-status 가 가려지지 않는다
 app.include_router(presets_router)
 
 

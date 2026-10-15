@@ -1,6 +1,6 @@
 export type Level = '필수' | '권장' | '수정가능'
 export const ITEM_LABELS: Record<string, string> = {
-  logo: '로고', colors: '색상', fonts: '폰트', icon_style: '아이콘 스타일',
+  logo: '로고', colors: '허용 색상', fonts: '폰트', icon_style: '아이콘 스타일',
   image_tone: '이미지 톤', voice: '문구 어조',
   required_phrases: '필수 표현', forbidden_phrases: '금지 표현',
 }
@@ -8,13 +8,14 @@ export type ColorRow = { role: string; hex: string }
 export type FontRow = { role: string; source: 'provided' | 'upload'; name?: string | null; asset_id?: number | null; fileName?: string }
 export type BrandForm = {
   name: string
+  description: string
   logo_asset_id: number | null
   logo_margin_percent: number | null
   colors: ColorRow[]
   fonts: FontRow[]
   icon_style: { stroke_width: number; corner: '각진' | '둥근'; fill: '윤곽' | '채움' }
   image_tone: { description: string; reference_asset_ids: number[] }
-  voice: { description: string; sample_phrases: string[] }
+  voice: { description: string; headline_max_chars: number | null; polite: boolean }
   required_phrases: string[]
   forbidden_phrases: string[]
   levels: Record<string, Level>
@@ -40,7 +41,7 @@ export const api = {
     fetch('/api/brands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => j<any>(r)),
   update: (id: number, b: BrandForm) =>
     fetch(`/api/brands/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => j<any>(r)),
-  upload: (kind: 'logo' | 'font' | 'tone_ref', file: File) => {
+  upload: (kind: 'logo' | 'font' | 'tone_ref' | 'product', file: File) => {
     const f = new FormData()
     f.append('kind', kind)
     f.append('file', file)

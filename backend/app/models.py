@@ -15,6 +15,7 @@ class Brand(Base):
     __tablename__ = "brands"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(String(300), default="", server_default="")  # 서비스 설명(선택)
     current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     versions: Mapped[list["BrandVersion"]] = relationship(back_populates="brand")
@@ -212,3 +213,17 @@ class IconAsset(Base):
     height: Mapped[int] = mapped_column(Integer)
     violations: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class SourceCheck(Base):
+    """규격 공식 페이지 확인 이력. 규격 수치는 자동으로 바꾸지 않고, 원문 변경 여부만 기록한다."""
+    __tablename__ = "source_checks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(50))
+    url: Mapped[str] = mapped_column(String(500), unique=True)
+    last_fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    status: Mapped[str] = mapped_column(String(20))        # 기준 저장 | 변경 없음 | 변경 감지 | 실패
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 마지막으로 변경을 감지한 시각
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)

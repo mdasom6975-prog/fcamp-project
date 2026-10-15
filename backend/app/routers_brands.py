@@ -49,7 +49,8 @@ def _version_from(b: BrandIn, brand_id: int, version_no: int) -> BrandVersion:
         fonts=[f.model_dump() for f in b.fonts],
         icon_style=b.icon_style.model_dump() if b.icon_style else {},
         image_tone=b.image_tone.model_dump(),
-        voice={"description": b.voice.description, "sample_phrases": _clean(b.voice.sample_phrases)},
+        voice={"description": b.voice.description,
+               "headline_max_chars": b.voice.headline_max_chars, "polite": b.voice.polite},
         required_phrases=_clean(b.required_phrases),
         forbidden_phrases=_clean(b.forbidden_phrases),
     )
@@ -84,14 +85,20 @@ def brand_defaults():
 @router.get("/brands")
 def list_brands(db: Session = Depends(get_db)):
     brands = db.scalars(select(Brand).order_by(Brand.id)).all()
-    return [{"id": b.id, "name": b.name, "current_version_id": b.current_version_id,
-             "created_at": b.created_at.isoformat()} for b in brands]
+    out = []
+    for b in brands:
+        v = db.get(BrandVersion, b.current_version_id) if b.current_version_id else None
+        out.append({"id": b.id, "name": b.name, "description": b.description,
+                    "current_version_id": b.current_version_id,
+                    "current_version_no": v.version_no if v else None,
+                    "created_at": b.created_at.isoformat()})
+    return out
 
 
 @router.post("/brands")
 def create_brand(body: BrandIn, db: Session = Depends(get_db)):
     _check_refs(body, db)
-    brand = Brand(name=body.name.strip())
+    brand = Brand(name=body.name.strip(), description=body.description.strip())
     db.add(brand)
     db.flush()
     v = _version_from(body, brand.id, 1)
@@ -99,7 +106,7 @@ def create_brand(body: BrandIn, db: Session = Depends(get_db)):
     db.flush()
     brand.current_version_id = v.id
     db.commit()
-    return {"id": brand.id, "name": brand.name, "version": _version_out(v), "warnings": _warnings(body)}
+    return {"id": brand.id, "name": brand.name, "description": brand.description, "version": _version_out(v), "warnings": _warnings(body)}
 
 
 @router.get("/brands/{brand_id}")
@@ -112,7 +119,8 @@ def get_brand(brand_id: int, version_id: int | None = None, db: Session = Depend
     cur = next((v for v in versions if v.id == (version_id or brand.current_version_id)), None)
     if not cur:
         raise HTTPException(404, "버전을 찾을 수 없습니다")
-    return {"id": brand.id, "name": brand.name, "current_version_id": brand.current_version_id,
+    return {"id": brand.id, "name": brand.name, "description": brand.description,
+            "current_version_id": brand.current_version_id,
             "version": _version_out(cur),
             "versions": [{"id": v.id, "version_no": v.version_no,
                           "created_at": v.created_at.isoformat()} for v in versions]}
@@ -128,9 +136,10 @@ def update_brand(brand_id: int, body: BrandIn, db: Session = Depends(get_db)):
     last = db.scalar(select(BrandVersion.version_no).where(BrandVersion.brand_id == brand_id)
                      .order_by(BrandVersion.version_no.desc()).limit(1)) or 0
     brand.name = body.name.strip()
+    brand.description = body.description.strip()
     v = _version_from(body, brand_id, last + 1)
     db.add(v)
     db.flush()
     brand.current_version_id = v.id
     db.commit()
-    return {"id": brand.id, "name": brand.name, "version": _version_out(v), "warnings": _warnings(body)}
+    return {"id": brand.id, "name": brand.name, "description": brand.description, "version": _version_out(v), "warnings": _warnings(body)}

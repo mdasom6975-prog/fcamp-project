@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 type Condition = { name: string; value: string | null; level: string; status: string; note?: string | null }
 type TextLimit = {
@@ -13,6 +13,15 @@ type Preset = {
   reviewable: boolean
 }
 type Platform = { id: number; name: string; media_only: boolean; note: string | null; ad_types: { name: string; presets: Preset[] }[] }
+
+type SourceState = { url: string; status: string; error: string | null; changed_at: string | null }
+type UpdateState = {
+  last_run: string | null; cooldown_left: number; running: boolean
+  platforms: { name: string; last_fetched_at: string | null; sources: SourceState[] }[]
+}
+
+const fmtTime = (iso: string | null) => (iso ? iso.replace('T', ' ').slice(0, 16) : '-')
+const fmtLeft = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 
 const badge = (s: string) => (s === '확인됨' ? 'b-ok' : s === '충돌' ? 'b-warn' : 'b-need')
 
@@ -120,18 +129,49 @@ function Detail({ p, platform }: { p: Preset; platform: string }) {
 export default function PresetLibrary() {
   const [platforms, setPlatforms] = useState<Platform[] | null>(null)
   const [error, setError] = useState(false)
-  const [picked, setPicked] = useState<number[]>([])
   const [focus, setFocus] = useState<{ p: Preset; platform: string } | null>(null)
+
+  const [upd, setUpd] = useState<UpdateState | null>(null)
+  const [updBusy, setUpdBusy] = useState(false)
+  const [updMsg, setUpdMsg] = useState<string | null>(null)
+  const [left, setLeft] = useState(0)
+
+  const applyUpdate = useCallback((u: UpdateState) => { setUpd(u); setLeft(u.cooldown_left) }, [])
 
   useEffect(() => {
     fetch('/api/presets').then((r) => r.json()).then(setPlatforms).catch(() => setError(true))
-  }, [])
+    fetch('/api/presets/update-status').then((r) => r.json()).then(applyUpdate).catch(() => {})
+  }, [applyUpdate])
+
+  // 대기 시간 카운트다운 (서버가 최소 간격을 강제하고, 화면은 버튼만 잠근다)
+  useEffect(() => {
+    if (left <= 0) return
+    const t = setInterval(() => setLeft((v) => Math.max(0, v - 1)), 1000)
+    return () => clearInterval(t)
+  }, [left > 0]) // eslint-disable-line
+
+  const runUpdate = async () => {
+    if (updBusy || left > 0) return
+    setUpdBusy(true); setUpdMsg(null)
+    try {
+      const r = await fetch('/api/presets/update', { method: 'POST' })
+      const j = await r.json().catch(() => ({}))
+      if (r.status === 429) { setLeft(j.cooldown_left ?? 0); setUpdMsg(j.detail); return }
+      if (!r.ok) throw new Error(j.detail || '업데이트에 실패했습니다')
+      applyUpdate(j)
+      const bad = (j as UpdateState).platforms.flatMap((p) => p.sources).filter((s) => s.status === '실패').length
+      const chg = (j as UpdateState).platforms.flatMap((p) => p.sources).filter((s) => s.status === '변경 감지').length
+      setUpdMsg(chg ? `원문 변경 ${chg}건을 감지했습니다. 공식 페이지를 확인하세요.` : bad ? `${bad}건을 가져오지 못했습니다.` : '최신 상태를 확인했습니다. 변경은 없습니다.')
+    } catch (e) {
+      setUpdMsg((e as Error).message)
+    } finally {
+      setUpdBusy(false)
+    }
+  }
 
   if (error) return <main className="page"><p>규격을 불러오지 못했습니다.</p></main>
   if (!platforms) return <main className="page"><p>불러오는 중…</p></main>
 
-  const all = platforms.flatMap((pl) => pl.ad_types.flatMap((a) => a.presets.map((p) => ({ p, platform: pl.name }))))
-  const toggle = (id: number) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
   const rows = platforms.flatMap((pl) => pl.ad_types.flatMap((a) => a.presets.map((p) => ({ p, platform: pl.name, adType: a.name }))))
   const mediaOnly = platforms.filter((pl) => pl.media_only)
@@ -140,10 +180,18 @@ export default function PresetLibrary() {
   return (
     <div className="lib">
       <div className="lib-head">
-        <h1>규격 라이브러리</h1>
+        <div className="lib-title">
+          <h1>규격 라이브러리</h1>
+          <div className="lib-update">
+            <button type="button" className="primary" onClick={runUpdate} disabled={updBusy || left > 0}>
+              {updBusy ? '업데이트 중…' : left > 0 ? `${fmtLeft(left)} 후 가능` : '규격 업데이트'}
+            </button>
+            <span className="muted">마지막 확인 {fmtTime(upd?.last_run ?? null)}</span>
+          </div>
+        </div>
+        {updMsg && <div className={`notice ${updMsg.includes('실패') || updMsg.includes('가져오지') || updMsg.includes('후 다시') ? 'err' : 'ok'}`}>{updMsg}</div>}
         <p className="muted">
           규격 {rows.length}개 · 공식 확인 {verified}개 ({platforms.filter((pl) => !pl.media_only).length}개 매체)
-          {' · '}제작할 지면을 체크하세요. 여러 규격을 함께 선택할 수 있습니다.
         </p>
       </div>
 
@@ -152,14 +200,11 @@ export default function PresetLibrary() {
           <section className="spec-table-wrap">
             <table className="spec-table">
               <thead>
-                <tr><th>선택</th><th>매체</th><th>광고 유형</th><th>지면</th><th>크기</th><th>확인일</th><th>상태</th></tr>
+                <tr><th>매체</th><th>광고 유형</th><th>지면</th><th>크기</th><th>확인일</th></tr>
               </thead>
               <tbody>
                 {rows.map(({ p, platform, adType }) => (
                   <tr key={p.id} className={focus?.p.id === p.id ? 'on' : ''} onClick={() => setFocus({ p, platform })}>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" aria-label={`${platform} ${p.name} 선택`} checked={picked.includes(p.id)} onChange={() => toggle(p.id)} />
-                    </td>
                     <td className="strong">{platform}</td>
                     <td className="muted">{adType}</td>
                     <td>
@@ -168,7 +213,6 @@ export default function PresetLibrary() {
                     </td>
                     <td className="muted">{p.production_width}×{p.production_height}{p.ratio ? ` · ${p.ratio}` : ''}</td>
                     <td className="muted">{p.checked_at ?? '-'}</td>
-                    <td><span className={`badge ${badge(p.status)}`}>{p.status}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -181,18 +225,6 @@ export default function PresetLibrary() {
               <br />선택할 수 있는 지면이 없습니다. 공식 규격이 확인되면 추가됩니다.
             </div>
           ))}
-
-          <section className="card selected">
-            <h3>선택한 규격 {picked.length}개</h3>
-            {picked.length === 0 ? <p className="muted">선택한 규격이 없습니다.</p> : (
-              <ul>
-                {all.filter(({ p }) => picked.includes(p.id)).map(({ p, platform }) => (
-                  <li key={p.id}>{platform} · {p.name} — 제작 {p.production_width}×{p.production_height}px
-                    {p.status !== '확인됨' && <span className={`badge ${badge(p.status)}`}>{p.status}</span>}</li>
-                ))}
-              </ul>
-            )}
-          </section>
         </div>
 
         <div className="lib-detail">

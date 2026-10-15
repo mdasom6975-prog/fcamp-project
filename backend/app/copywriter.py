@@ -95,7 +95,8 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
     )
     user = f"""[브랜드] {brand_name}
 - 어조: {voice.get('description') or '지정 없음'}
-- 예시 문구: {' / '.join(voice.get('sample_phrases', [])) or '없음'}
+- 헤드라인 권장 길이: {str(voice['headline_max_chars']) + '자 이내' if voice.get('headline_max_chars') else '지정 없음'}
+- 존댓말: {'존댓말로 작성' if voice.get('polite') else '지정 없음'}
 - 반드시 포함할 표현(headline, body, cta 중 어디든): {', '.join(brand.get('required_phrases', [])) or '없음'}
 - 절대 쓰지 말 표현: {', '.join(brand.get('forbidden_phrases', [])) or '없음'}
 

@@ -68,11 +68,13 @@ class ToneIn(BaseModel):
 
 class VoiceIn(BaseModel):
     description: str = ""
-    sample_phrases: list[str] = []
+    headline_max_chars: int | None = Field(default=None, ge=5, le=40)   # 헤드라인 권장 길이(자 이내)
+    polite: bool = False                                                # 존댓말로 작성
 
 
 class BrandIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=300)
     logo_asset_id: int | None = None
     logo_margin_percent: float | None = Field(default=None, ge=0, le=100)
     colors: list[ColorIn] = []

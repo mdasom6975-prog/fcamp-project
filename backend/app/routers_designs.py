@@ -3,8 +3,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Brand, BrandVersion, Design, PresetVersion
+from .models import Asset, Brand, BrandVersion, Design, PresetVersion
 from .routers_assets import get_db
+from .routers_review import invalidate_reviews
 
 router = APIRouter(prefix="/api")
 
@@ -17,6 +18,7 @@ class BriefIn(BaseModel):
     description: str = Field(default="", max_length=1000)
     key_message: str = Field(default="", max_length=200)
     target: str = Field(default="", max_length=300)
+    product_image_asset_id: int | None = None      # 제품 이미지(선택)
 
 
 class IconIn(BaseModel):
@@ -54,6 +56,29 @@ class DesignIn(BaseModel):
         return v
 
 
+def _check_product_image(asset_id: int | None, db: Session) -> None:
+    if asset_id is None:
+        return
+    a = db.get(Asset, asset_id)
+    if not a or a.kind != "product":
+        raise HTTPException(400, "제품 이미지 파일이 아닙니다")
+
+
+def _check_presets(ids: list[int], db: Session) -> None:
+    for pid in ids:
+        v = db.get(PresetVersion, pid)
+        if not v or not v.active:
+            raise HTTPException(400, f"선택할 수 없는 규격입니다: {pid}")
+        if v.status == "확인 필요":
+            raise HTTPException(400, f"공식 규격이 확인되지 않아 선택할 수 없습니다: {v.placement.name}")
+
+
+class DesignPatch(BaseModel):
+    brief: BriefIn | None = None                  # None 이면 입력은 그대로 둔다
+    preset_version_ids: list[int] | None = None   # None 이면 규격은 그대로 둔다
+    brand_id: int | None = None                   # 지정하면 그 브랜드의 '현재(최신) 버전'으로 맞춘다
+
+
 def _out(d: Design, db: Session) -> dict:
     brand = db.get(Brand, d.brand_id)
     bv = db.get(BrandVersion, d.brand_version_id)
@@ -80,16 +105,11 @@ def create_design(body: DesignIn, db: Session = Depends(get_db)):
     brand = db.get(Brand, body.brand_id)
     if not brand or not brand.current_version_id:
         raise HTTPException(400, "브랜드를 찾을 수 없습니다")
+    if body.kind != "광고 이미지":
+        raise HTTPException(400, "캠페인은 광고 이미지를 만드는 용도입니다. 아이콘 세트는 광고 이미지 생성 후 브랜드 규칙 버전마다 한 세트씩 만들 수 있습니다")
     ids = list(dict.fromkeys(body.preset_version_ids))
     if body.kind == "광고 이미지":
-        if not ids:
-            raise HTTPException(400, "광고 이미지 시안은 규격을 1개 이상 선택해야 합니다")
-        for pid in ids:
-            v = db.get(PresetVersion, pid)
-            if not v or not v.active:
-                raise HTTPException(400, f"선택할 수 없는 규격입니다: {pid}")
-            if v.status == "확인 필요":
-                raise HTTPException(400, f"공식 규격이 확인되지 않아 선택할 수 없습니다: {v.placement.name}")
+        _check_presets(ids, db)      # 규격은 비어 있어도 된다(캠페인 안에서 나중에 선택)
         if body.icon:
             raise HTTPException(400, "광고 이미지 시안에는 아이콘 용도를 지정하지 않습니다")
     else:
@@ -97,6 +117,7 @@ def create_design(body: DesignIn, db: Session = Depends(get_db)):
             raise HTTPException(400, "아이콘 세트는 광고 규격이 아니라 용도를 선택합니다")
         if not body.icon:
             raise HTTPException(400, "아이콘 세트는 용도(웹용 / 사용자 지정)를 선택해야 합니다")
+    _check_product_image(body.brief.product_image_asset_id, db)
     brief = body.brief.model_dump()
     if body.icon:
         brief["icon"] = body.icon.model_dump()
@@ -108,8 +129,11 @@ def create_design(body: DesignIn, db: Session = Depends(get_db)):
 
 
 @router.get("/designs")
-def list_designs(db: Session = Depends(get_db)):
-    return [_out(d, db) for d in db.scalars(select(Design).order_by(Design.id.desc())).all()]
+def list_designs(brand_id: int | None = None, db: Session = Depends(get_db)):
+    q = select(Design).order_by(Design.id.desc())
+    if brand_id is not None:
+        q = q.where(Design.brand_id == brand_id)
+    return [_out(d, db) for d in db.scalars(q).all()]
 
 
 @router.get("/designs/{design_id}")
@@ -117,4 +141,32 @@ def get_design(design_id: int, db: Session = Depends(get_db)):
     d = db.get(Design, design_id)
     if not d:
         raise HTTPException(404, "시안을 찾을 수 없습니다")
+    return _out(d, db)
+
+
+@router.patch("/designs/{design_id}")
+def update_design(design_id: int, body: DesignPatch, db: Session = Depends(get_db)):
+    """입력(메시지)·규격 수정. 바뀌면 기존 검수 결과는 무효화된다."""
+    d = db.get(Design, design_id)
+    if not d:
+        raise HTTPException(404, "시안을 찾을 수 없습니다")
+    if body.brief is not None:
+        _check_product_image(body.brief.product_image_asset_id, db)
+        d.brief = {**(d.brief or {}), **body.brief.model_dump()}      # icon 같은 기존 키는 보존
+    if body.brand_id is not None:
+        # 같은 브랜드면 최신 규칙 버전 적용, 다른 브랜드면 브랜드 변경
+        brand = db.get(Brand, body.brand_id)
+        if not brand or not brand.current_version_id:
+            raise HTTPException(400, "브랜드를 찾을 수 없습니다")
+        d.brand_id, d.brand_version_id = brand.id, brand.current_version_id
+    if body.preset_version_ids is not None:
+        if d.kind != "광고 이미지":
+            raise HTTPException(400, "아이콘 세트에는 광고 규격을 지정하지 않습니다")
+        ids = list(dict.fromkeys(body.preset_version_ids))
+        _check_presets(ids, db)
+        d.preset_version_ids = ids
+    invalidate_reviews(db, d.id)
+    if d.status == "검수 완료":
+        d.status = "수정됨"
+    db.commit()
     return _out(d, db)

@@ -7,7 +7,7 @@
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 HORIZONTAL, SQUARE, VERTICAL = "가로형", "정사각", "세로형"
 
@@ -113,6 +113,46 @@ def _margins(w: int, h: int, safe: dict | None) -> tuple[int, int, int, int, str
     return l, t, r, b, src
 
 
+def _busyness(region: Image.Image) -> float:
+    """영역이 얼마나 복잡한지(질감·대비) + 피부색 비율. 값이 클수록 로고를 올리기 나쁜 자리다 (사람·디테일 회피용 휴리스틱)."""
+    small = region.convert("RGB").resize((48, 48), Image.BILINEAR)
+    gray = small.convert("L")
+    std = ImageStat.Stat(gray).stddev[0] / 64
+    edge = ImageStat.Stat(gray.filter(ImageFilter.FIND_EDGES).crop((1, 1, 47, 47))).mean[0] / 32   # 테두리 1px 은 필터 아티팩트라 제외
+    px = list(small.getdata())
+    skin = sum(1 for r, g, b in px if r > 95 and g > 40 and b > 20 and r > g and r > b
+               and abs(r - g) > 15 and max(r, g, b) - min(r, g, b) > 15) / len(px)
+    return std + edge + skin * 1.5
+
+
+def pick_logo_corner(canvas: Image.Image, boxes: dict[str, list[int]], pad: int) -> tuple[str, float, dict]:
+    """후보 위치 중 가장 비어 있는 곳을 고른다. 기본(좌상단)이 충분히 괜찮으면 그대로 둔다."""
+    W, H = canvas.size
+    scores = {}
+    for name, (x0, y0, x1, y1) in boxes.items():
+        r = canvas.crop((max(0, x0 - pad), max(0, y0 - pad), min(W, x1 + pad), min(H, y1 + pad)))
+        scores[name] = _busyness(r)
+    default = next(iter(boxes))
+    best = min(scores, key=scores.get)
+    if scores[default] <= scores[best] * 1.15 + 0.1:
+        best = default
+    return best, scores[best], scores
+
+
+def _logo_plate(canvas: Image.Image, logo: Image.Image, box: list[int]) -> Image.Image:
+    """복잡한 배경 위에서 로고가 묻히지 않게 반투명 판을 깐다. 로고가 밝으면 어두운 판, 어두우면 밝은 판."""
+    a = logo.getchannel("A")
+    lum = logo.convert("L")
+    px = [v for v, al in zip(lum.getdata(), a.getdata()) if al > 128]
+    light_logo = bool(px) and sum(px) / len(px) > 140
+    x0, y0, x1, y1 = box
+    p = round((y1 - y0) * 0.25)
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(overlay).rounded_rectangle((x0 - p, y0 - p, x1 + p, y1 + p), radius=p,
+                                              fill=(0, 0, 0, 150) if light_logo else (255, 255, 255, 170))
+    return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+
+
 def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
             scrim_hex: str | None) -> tuple[Image.Image, dict]:
@@ -133,12 +173,28 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         logo_box = [cl, ct, cl + lw, ct + lh]
     pad = round((logo_box[3] - logo_box[1]) * (logo_margin_pct or 0) / 100) if logo_box else 0
 
+    # 1-1) 로고 위치 자동 선택: 후보 중 이미지가 가장 단순한 곳(사람·디테일 회피). 후보는 문구 영역과 겹치지 않는 곳만 쓴다.
+    logo_plate = False
+    if logo_box:
+        lw, lh = logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]
+        cands = {"좌상단": [cl, ct, cl + lw, ct + lh], "우상단": [cr - lw, ct, cr, ct + lh]}
+        if tpl == HORIZONTAL:   # 가로형은 문구가 왼쪽 55%에 있어 오른쪽 아래도 비어 있다
+            cands["우하단"] = [cr - lw, cb - lh, cr, cb]
+        corner, score, _ = pick_logo_corner(canvas, cands, pad)
+        logo_box = cands[corner]
+        report["logo_placement"] = {"corner": corner, "busyness": round(score, 2)}
+        if score > 0.8:
+            logo_plate = True
+            report["warnings"].append("로고 주변 이미지가 복잡해 반투명 판을 깔았습니다")
+    left_logo = bool(logo_box) and logo_box[0] <= cl + 1
+
     # 2) 문구 영역
     if tpl == HORIZONTAL:
         tx0, tx1 = cl, cl + round((cr - cl) * 0.55)
     else:
         tx0, tx1 = cl, cr
-    ty0 = (logo_box[3] + pad + round(h * 0.02)) if logo_box else ct
+    # 문구는 로고 아래에서 시작한다. 로고가 오른쪽이고 문구가 왼쪽 55%인 가로형은 로고와 겹치지 않아 위까지 쓴다.
+    ty0 = (logo_box[3] + pad + round(h * 0.02)) if (logo_box and (left_logo or tpl != HORIZONTAL)) else ct
     ty1 = cb
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
@@ -186,6 +242,8 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     # 6) 로고 합성
     if logo is not None and logo_box:
         lg = logo.resize((logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]), Image.LANCZOS)
+        if logo_plate:
+            canvas = _logo_plate(canvas, lg, logo_box)
         canvas.paste(lg, (logo_box[0], logo_box[1]), lg)
         report["elements"].append({"type": "logo", "box": logo_box, "locked": True,
                                    "note": "원본 비율 유지"})

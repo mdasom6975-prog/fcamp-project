@@ -8,12 +8,12 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import compose, copywriter, editing, imagegen
+from . import compose, copywriter, editing
 from .db import STORAGE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
-from .routers_images import _color, _img_out
+from .routers_images import _color, _img_out, create_shared_background
 
 router = APIRouter(prefix="/api")
 PREVIEW_MAX = 900
@@ -296,22 +296,33 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         raise HTTPException(400, "편집 화면을 먼저 열어 주세요")
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
-    W, H = pv.production_width, pv.production_height
+    extra: dict = {}
     if element == "background":
         img_el = next(r for r in rows if r.type == "image")
         if img_el.locked:
             raise HTTPException(400, "배경이 잠겨 있어 재생성할 수 없습니다")
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, compose.template_for(W, H))
-        try:
-            bg = imagegen.generate_background(prompt, W, H)
-        except Exception as e:
-            raise HTTPException(502, f"이미지 생성에 실패했습니다 ({type(e).__name__})")
-        path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
-        bg.save(path)
-        db.add(GeneratedImage(design_id=d.id, preset_version_id=preset_id, kind="background", file_path=str(path),
-                              width=bg.width, height=bg.height, prompt=prompt, brand_version_id=bv.id, layout={}))
-        db.flush()
+        # 배경은 모든 매체가 공유한다: 1회 생성 후 전체 규격에 연결하고, 편집 중인 다른 매체도 새 배경으로 다시 그린다.
+        create_shared_background(db, d)
         img_el.props = {**img_el.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}   # 새 이미지는 자르기 초기화
+        db.flush()
+        applied, skipped = [], []
+        for pid in d.preset_version_ids:
+            if pid == preset_id:
+                continue
+            opv = db.get(PresetVersion, pid)
+            orows = _els(db, d.id, pid)
+            name = opv.placement.name if opv else str(pid)
+            if not orows:
+                skipped.append({"preset_id": pid, "name": name, "reason": "편집 전 상태입니다. '문구 다시 합성'으로 새 배경을 반영하세요"})
+                continue
+            oimg = next((r for r in orows if r.type == "image"), None)
+            if oimg is None or oimg.locked:
+                skipped.append({"preset_id": pid, "name": name, "reason": "배경이 잠겨 있어 이전 배경을 유지합니다"})
+                continue
+            oimg.props = {**oimg.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}
+            _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
+            applied.append(pid)
+        extra = {"applied": applied, "skipped": skipped}
     elif element == "text":
         t = next((r for r in rows if r.type == "text"), None)
         if t is None or t.locked:
@@ -339,7 +350,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         raise HTTPException(400, "element 는 background 또는 text")
     res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
     db.commit()
-    return {**res, "elements": [_el_out(r) for r in rows]}
+    return {**res, **extra, "elements": [_el_out(r) for r in rows]}
 
 
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/reset")

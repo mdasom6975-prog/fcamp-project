@@ -54,9 +54,9 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
     setEls((l) => l.map((e) => (e.id === id ? { ...e, props: { ...e.props, ...p } } : e)))
   const nudge = (e: El, dx: number, dy: number) => patch(e.id, { x: e.props.x + dx, y: e.props.y + dy })
 
-  const run = async (fn: () => Promise<any>, okText: string) => {
+  const run = async (fn: () => Promise<any>, okText: string | ((j: any) => string)) => {
     setBusy(true); setMsg(null)
-    try { const j = await fn(); if (j?.elements) setEls(j.elements); if (j?.warnings) setWarns(j.warnings); setMsg({ ok: true, text: okText }); onSaved() }
+    try { const j = await fn(); if (j?.elements) setEls(j.elements); if (j?.warnings) setWarns(j.warnings); setMsg({ ok: true, text: typeof okText === 'function' ? okText(j) : okText }); onSaved() }
     catch (e) { setMsg({ ok: false, text: (e as Error).message }) }
     finally { setBusy(false) }
   }
@@ -64,7 +64,14 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
   const save = () => run(() => call('PUT', base, { elements: payload(els) }), '저장했습니다. (저장 시점 스냅샷이 남았습니다)')
   const reset = () => run(() => call('POST', `${base}/reset`), '처음 상태(자동 배치)로 되돌렸습니다.')
   const regen = (element: 'background' | 'text') =>
-    run(() => call('POST', `${base}/regenerate`, { element }), element === 'background' ? '배경을 새로 만들었습니다. 잠긴 요소는 유지됩니다.' : '문구를 새로 만들었습니다.')
+    run(() => call('POST', `${base}/regenerate`, { element }), element === 'background'
+      ? (j: any) => {
+          const sk = (j?.skipped ?? []) as { name: string; reason: string }[]
+          const n = (j?.applied ?? []).length
+          return `배경을 새로 만들어 모든 매체에 적용했습니다. 잠긴 요소는 유지됩니다.${n ? ` 편집 중인 ${n}개 매체도 다시 그렸습니다.` : ''}`
+            + (sk.length ? ` 반영 안 됨: ${sk.map((x) => `${x.name}(${x.reason})`).join(' / ')}` : '')
+        }
+      : '문구를 새로 만들었습니다.')
   const toggleLock = async (e: El) => {
     setBusy(true)
     try { const j = await call('PUT', base, { elements: [{ id: e.id, locked: !e.locked }] }); setEls(j.elements) }
