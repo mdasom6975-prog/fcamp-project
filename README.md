@@ -23,5 +23,7 @@ npm run dev        # http://localhost:5173
 - `brands/kucha/brand.json` · `brands/kucha/QUESTIONS.md`: 쿠챠 브랜드 키트와 가이드 해석 질문. `brands/malkkeum/`: 교차 테스트용 두 번째 브랜드
 - `tools/register_brand.py brands/kucha/brand.json`: 실행 중인 앱에 브랜드 등록(같은 이름이면 새 버전)
 - `tools/hash_logo.py <로고>`: 로고 해시·비율 기록
+- `prompts/*.md`: 모델에 보내는 모든 프롬프트 문장 (코드에는 두지 않음). 형식·변경 규칙은 `prompts/README.md`, 로더는 `backend/app/prompts.py`
 - 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q`
+  - `tests/test_prompts_snapshot.py`: 프롬프트 렌더링 결과를 `tests/fixtures/prompts/*.txt` 와 글자 단위로 비교. 문장을 의도적으로 바꿨을 때만 `UPDATE_PROMPT_SNAPSHOTS=1` 로 갱신
 - 화면 캡처: `docs/wireframes/`

@@ -11,6 +11,7 @@ from xml.sax.saxutils import escape
 
 from PIL import Image
 
+from . import prompts
 from .copywriter import CHAT_MODEL, client
 
 COUNT = 10
@@ -118,16 +119,7 @@ def to_png(svg: str, w: int, h: int) -> bytes:
     return b.getvalue()
 
 
-# ---- 모델 호출 ----
-_SPEC = (
-    '출력은 JSON 객체 하나: {"icons":[{"name":"기능명","concept":"그릴 대상 설명","elements":[{"tag":"path","attrs":{"d":"..."}}]}]}. '
-    "도형은 24x24 좌표계에서 그린다. 허용 태그: path, circle, ellipse, rect, line, polyline, polygon. "
-    "속성은 좌표 관련만(d, cx, cy, r, rx, ry, x, y, width, height, x1, y1, x2, y2, points) 쓰고 "
-    "fill/stroke/style/class/id 등 스타일 속성은 쓰지 않는다 (스타일은 시스템이 일괄 적용한다). "
-    "선으로만 구성된 단순한 외곽선 아이콘으로 그린다. 한 아이콘은 도형 2~6개로 구성한다."
-)
-
-
+# ---- 모델 호출 ---- (문장은 prompts/icons/*.md, 공통 출력 규격은 prompts/icons/_output_spec.md)
 def _ask(system: str, user: str) -> dict:
     r = client().chat.completions.create(
         model=CHAT_MODEL, response_format={"type": "json_object"},
@@ -136,20 +128,19 @@ def _ask(system: str, user: str) -> dict:
 
 
 def propose_and_draw(brand_name: str, brief: dict, style: dict, forbidden: list[str]) -> list[dict]:
-    system = ("너는 서비스 UI 아이콘 디자이너다. 상품 설명에서 사용자가 인식할 핵심 기능 " f"{COUNT}개를 정하고 각 기능의 아이콘 도형을 그린다. "
-              "기능명은 8자 이내 한국어 명사구이고 서로 겹치지 않는다. " + _SPEC)
-    user = (f"브랜드: {brand_name}\n상품/서비스: {brief.get('product_name')}\n설명: {brief.get('description') or '없음'}\n"
-            f"핵심 메시지: {brief.get('key_message') or '없음'}\n타깃: {brief.get('target') or '없음'}\n"
-            f"아이콘 스타일: 선 굵기 {style['stroke_width']}, 모서리 {style['corner']}, {style['fill']}\n"
-            f"금지 표현(기능명에 쓰지 말 것): {', '.join(forbidden) or '없음'}\n정확히 {COUNT}개.")
+    system = prompts.render("icons/propose_system", count=COUNT)
+    user = prompts.render("icons/propose_user", brand_name=brand_name, product_name=brief.get("product_name"),
+                          description=brief.get("description") or "없음", key_message=brief.get("key_message") or "없음",
+                          target=brief.get("target") or "없음", stroke_width=style["stroke_width"], corner=style["corner"],
+                          fill=style["fill"], forbidden=", ".join(forbidden) or "없음", count=COUNT)
     data = _ask(system, user)
     return list(data.get("icons") or [])[:COUNT]
 
 
 def redraw_one(brand_name: str, brief: dict, name: str, concept: str, style: dict) -> list[dict]:
-    system = "너는 서비스 UI 아이콘 디자이너다. 기능 하나의 아이콘 도형을 다시 그린다. " + _SPEC.replace('"icons":[{', '"icons":[{') 
-    user = (f"브랜드: {brand_name}\n상품/서비스: {brief.get('product_name')}\n기능명: {name}\n그릴 대상: {concept}\n"
-            "이전과 다른 구도로 icons 배열에 정확히 1개만 낸다. name 은 그대로 둔다.")
+    system = prompts.render("icons/redraw_system")
+    user = prompts.render("icons/redraw_user", brand_name=brand_name, product_name=brief.get("product_name"),
+                          name=name, concept=concept)
     data = _ask(system, user)
     items = data.get("icons") or []
     return items[0].get("elements", []) if items else []
@@ -157,8 +148,8 @@ def redraw_one(brand_name: str, brief: dict, name: str, concept: str, style: dic
 
 def propose_more(brand_name: str, brief: dict, style: dict, forbidden: list[str], existing: list[str], need: int) -> list[dict]:
     """세트가 목표 개수에 못 미칠 때, 이미 있는 기능과 겹치지 않는 기능을 더 받아 온다."""
-    system = (f"너는 서비스 UI 아이콘 디자이너다. 이미 있는 아이콘과 겹치지 않는 기능 {need}개를 추가로 정하고 도형을 그린다. "
-              "기능명은 8자 이내 한국어 명사구다. " + _SPEC)
-    user = (f"브랜드: {brand_name}\n상품/서비스: {brief.get('product_name')}\n설명: {brief.get('description') or '없음'}\n"
-            f"이미 있는 기능명: {', '.join(existing)}\n금지 표현: {', '.join(forbidden) or '없음'}\n정확히 {need}개를 icons 배열에 낸다.")
+    system = prompts.render("icons/more_system", need=need)
+    user = prompts.render("icons/more_user", brand_name=brand_name, product_name=brief.get("product_name"),
+                          description=brief.get("description") or "없음", existing=", ".join(existing),
+                          forbidden=", ".join(forbidden) or "없음", need=need)
     return list(_ask(system, user).get("icons") or [])[:need]

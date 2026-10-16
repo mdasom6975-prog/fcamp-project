@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from . import prompts
 from .db import BASE_DIR
 from .textcount import METHODS, count_len
 
@@ -86,32 +87,27 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
                if l.get("method") == "전각 2자 계산" else "공백 포함")
         return f"- {label}: {', '.join(rng) or '제한 없음'} ({how}, 매체 필드명 '{l['field']}')"
 
+    # 문장은 prompts/copy/system.md · user.md 에 있다. 여기서는 분기(없음/지정 없음)와 제한 줄만 계산해 넘긴다.
     voice = brand.get("voice", {})
-    system = (
-        "너는 한국어 광고 카피라이터다. 브랜드 규칙과 매체 문구 제한을 지켜 광고 카피를 쓴다. "
-        "반드시 JSON 객체만 출력한다: {\"variants\":[{\"headline\":\"\",\"body\":\"\",\"cta\":\"\"}]}. "
-        f"variants 는 정확히 {VARIANTS}개이며 서로 접근 방식이 달라야 한다. "
-        "과장·결과 보장·근거 없는 최상급·전후 비교 표현은 쓰지 않는다. 제공되지 않은 사실(가격, 수치, 효과)은 만들지 않는다."
+    system = prompts.render("copy/system", variants=VARIANTS)
+    user = prompts.render(
+        "copy/user",
+        brand_name=brand_name,
+        voice=voice.get("description") or "지정 없음",
+        headline_len=str(voice["headline_max_chars"]) + "자 이내" if voice.get("headline_max_chars") else "지정 없음",
+        polite="존댓말로 작성" if voice.get("polite") else "지정 없음",
+        required=", ".join(brand.get("required_phrases", [])) or "없음",
+        forbidden=", ".join(brand.get("forbidden_phrases", [])) or "없음",
+        product_name=brief.get("product_name"),
+        description=brief.get("description") or "없음",
+        key_message=brief.get("key_message") or "없음",
+        target=brief.get("target") or "없음",
+        platform=placement["platform"],
+        placement=placement["name"],
+        limit_headline=rule("headline", "headline(제목)"),
+        limit_body=rule("body", "body(본문)"),
+        limit_cta=rule("cta", "cta(행동 유도)"),
     )
-    user = f"""[브랜드] {brand_name}
-- 어조: {voice.get('description') or '지정 없음'}
-- 헤드라인 권장 길이: {str(voice['headline_max_chars']) + '자 이내' if voice.get('headline_max_chars') else '지정 없음'}
-- 존댓말: {'존댓말로 작성' if voice.get('polite') else '지정 없음'}
-- 반드시 포함할 표현(headline, body, cta 중 어디든): {', '.join(brand.get('required_phrases', [])) or '없음'}
-- 절대 쓰지 말 표현: {', '.join(brand.get('forbidden_phrases', [])) or '없음'}
-
-[상품·메시지]
-- 상품/서비스명: {brief.get('product_name')}
-- 설명: {brief.get('description') or '없음'}
-- 핵심 메시지: {brief.get('key_message') or '없음'}
-- 타깃 고객: {brief.get('target') or '없음'}
-
-[지면] {placement['platform']} · {placement['name']}
-글자 수 제한:
-{rule('headline', 'headline(제목)')}
-{rule('body', 'body(본문)')}
-{rule('cta', 'cta(행동 유도)')}
-제한을 넘지 않도록 글자 수를 직접 세어 확인한 뒤 출력한다."""
     return system, user
 
 

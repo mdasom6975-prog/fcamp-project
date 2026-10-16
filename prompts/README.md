@@ -1,0 +1,43 @@
+# prompts/ — 모델에 보내는 문장은 여기에만 둔다
+
+코드(`backend/app/*.py`)에는 프롬프트 문장을 쓰지 않는다. 문장은 이 폴더의 `.md` 파일에 두고,
+`backend/app/prompts.py` 의 `render("경로", 변수=값, ...)` 로 읽어 쓴다. (2일차 "고정 규칙은 System, 이번 입력은 User" · "프롬프트도 git 으로 버전 관리")
+
+## 파일 구조
+| 경로 | 용도 | 쓰는 곳 |
+|---|---|---|
+| `copy/system.md` · `copy/user.md` | 카피 생성 System(고정) / User(브랜드·브리프·지면 제한) | `copywriter._prompt` |
+| `icons/propose_system.md` · `propose_user.md` | 기능명 10개 제안 + 도형 | `icons.propose_and_draw` |
+| `icons/redraw_system.md` · `redraw_user.md` | 아이콘 하나 다시 그리기 | `icons.redraw_one` |
+| `icons/more_system.md` · `more_user.md` | 부족한 기능 추가 제안 | `icons.propose_more` |
+| `icons/_output_spec.md` | 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
+| `image/background.md` | 배경 이미지 생성 | `imagegen.build_prompt` |
+| `image/composition/{가로형,정사각,세로형}.md` | 템플릿별 구도 | `imagegen.build_prompt` |
+| `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
+
+`_` 로 시작하는 파일은 partial(다른 파일이 include 하는 조각)이다.
+
+## 파일 형식
+```
+---
+version: 1.0            ← 문장을 바꾸면 올린다
+description: 한 줄 설명
+join: space             ← (선택) 본문 줄을 공백 한 칸으로 이어 한 줄로 만든다. 없으면 줄바꿈 유지
+---
+본문. {{변수}} 와 {{include 경로}} 를 쓸 수 있다.
+```
+- `{{변수}}`: `render()` 에 넘긴 값으로 치환. 값이 없으면 KeyError 로 바로 실패한다 (조용히 빈칸이 되지 않게).
+- `{{include icons/_output_spec}}`: 다른 파일을 그 자리에 넣는다. 경로는 `prompts/` 기준, 확장자 없음.
+- 분기 문장('없음', '지정 없음', 글자 수 제한 줄 등)은 Python 쪽에서 계산해 변수로 넘긴다. md 에는 조건문이 없다.
+
+## 바꾸는 규칙 (한 번에 하나만)
+1. 문장을 바꾸면 그 파일의 `version` 을 올린다.
+2. `tests/test_prompts_snapshot.py` 가 실패한다 — 바뀐 내용이 의도한 것인지 diff 로 확인한 뒤
+   `UPDATE_PROMPT_SNAPSHOTS=1 backend/.venv/bin/python -m pytest tests/test_prompts_snapshot.py -q` 로 스냅샷을 갱신하고 함께 커밋한다.
+3. 구조를 옮기는 작업(파일 분리, 로더 수정)에서는 문장을 바꾸지 않는다. 스냅샷이 그대로 통과해야 한다.
+4. 결과(카피·이미지·아이콘)에는 어떤 프롬프트로 만들었는지 `prompts.ref("copy/system")` → `copy/system@1.0#9bb57af1` 형식으로 남긴다 (3단계 결과 JSON 에서 사용).
+
+## 아직 코드에 남아 있는 것 (2단계 정책 JSON 대상)
+- `copywriter.VARIANTS=3`, `MAX_ATTEMPTS=2`, 제목/본문/CTA 필드 연결(`HEADLINE_FIELDS` 등)
+- `icons.COUNT=10`, viewBox 24 / live 20, 허용 태그·속성
+- 이미지 모델·품질·크기·일일 한도(환경변수)

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import httpx
 from PIL import Image
 
+from . import prompts
 from .copywriter import BASE_DIR, client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare
@@ -74,32 +75,17 @@ def _bump(exhausted: bool = False) -> None:
         _save(u)
 
 
-# 한 장을 규격 비율로 잘라(cover_crop) 쓰므로, 잘려도 남는 중앙 영역에 주 피사체를 두게 하고
-# 문구가 올라갈 영역과 로고 자리(상단 모서리)는 비우게 한다.
-_COMPOSITION = {
-    "가로형": "주 피사체는 이미지 오른쪽 절반, 세로 기준 정중앙 40% 띠 안에 두고 위아래 30%는 단순한 배경으로 남긴다. "
-              "왼쪽 40%는 문구가 올라갈 단순하고 비어 있는 차분한 영역으로 둔다.",
-    "정사각": "주 피사체는 이미지 중앙 위쪽(가로 20~80%, 세로 10~60%) 안에 두고, 아래쪽 40%는 문구가 올라갈 "
-              "단순하고 비어 있는 차분한 영역으로 둔다. 가장자리 10%에는 중요한 요소를 두지 않는다.",
-    "세로형": "주 피사체는 가로 기준 중앙 50% 띠 안, 세로 10~55% 구간에 두고, 아래쪽 45%는 문구가 올라갈 "
-              "단순하고 비어 있는 차분한 영역으로 둔다. 좌우 25%에는 중요한 요소를 두지 않는다.",
-}
-_COMMON = ("좌상단·우상단 모서리는 로고가 올라가므로 인물의 얼굴이나 복잡한 디테일을 두지 않는다. "
-           "사람이 나오면 얼굴과 몸이 프레임 가장자리에 걸리거나 잘리지 않게 한다.")
-
-
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str) -> str:
-    """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다."""
-    parts = [
-        "광고용 배경 이미지.",
-        f"상품/서비스: {brief.get('product_name')}. {brief.get('description') or ''}",
-        f"전달할 분위기: {brief.get('key_message') or '지정 없음'}. 타깃: {brief.get('target') or '지정 없음'}.",
-        f"이미지 톤: {tone.get('description') or '지정 없음'}.",
-        f"구도: {_COMPOSITION[template]} {_COMMON}",
-        "깨끗한 상업 광고 사진 또는 일러스트, 과장 없는 자연스러운 표현.",
-        "이미지 안에 글자, 숫자, 로고, 워터마크, 간판 문구, 어떤 언어의 문자도 절대 넣지 않는다.",
-    ]
-    return " ".join(p for p in parts if p.strip())
+    """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
+
+    문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md.
+    한 장을 규격 비율로 잘라(cover_crop) 쓰므로 구도 규칙은 잘려도 남는 중앙 영역에 주 피사체를 두게 한다.
+    """
+    composition = prompts.render(f"image/composition/{template}")
+    return prompts.render("image/background", product_name=brief.get("product_name"),
+                          description=brief.get("description") or "",
+                          key_message=brief.get("key_message") or "지정 없음", target=brief.get("target") or "지정 없음",
+                          tone=tone.get("description") or "지정 없음", composition=composition)
 
 
 def _generate_openai(prompt: str) -> Image.Image:
