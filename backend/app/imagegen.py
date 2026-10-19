@@ -14,8 +14,9 @@ from . import prompts
 from .copywriter import BASE_DIR, client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare
-# OpenAI 기본값은 비용을 낮춘 조합: mini 모델 + medium 품질 + 정사각(지면 비율은 cover_crop 이 맞춘다)
-OPENAI_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1-mini")
+# OpenAI 기본값: gpt-image-1.5 + medium 품질(비교 테스트 결과 반영, 장당 약 60원)
+# 정사각 1024 로 만들고 지면 비율은 cover_crop 이 맞춘다
+OPENAI_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1.5")
 OPENAI_QUALITY = os.getenv("IMAGE_QUALITY", "medium")                 # low | medium | high | auto
 OPENAI_SIZE = os.getenv("IMAGE_SIZE", "1024x1024")
 CF_MODEL = os.getenv("CLOUDFLARE_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")

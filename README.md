@@ -26,4 +26,5 @@ npm run dev        # http://localhost:5173
 - `prompts/*.md`: 모델에 보내는 모든 프롬프트 문장 (코드에는 두지 않음). 형식·변경 규칙은 `prompts/README.md`, 로더는 `backend/app/prompts.py`
 - 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q`
   - `tests/test_prompts_snapshot.py`: 프롬프트 렌더링 결과를 `tests/fixtures/prompts/*.txt` 와 글자 단위로 비교. 문장을 의도적으로 바꿨을 때만 `UPDATE_PROMPT_SNAPSHOTS=1` 로 갱신
+- 이미지 생성 비교(실제 과금, DB 의 시안 1개 필요): `backend/scripts/compare_models.py` 모델별 1장 → `backend/storage/compare/index.html` · `backend/scripts/compare_prompts.py` 프롬프트 변형별 1장 → `backend/storage/compare/prompts/index.html`
 - 화면 캡처: `docs/wireframes/`
