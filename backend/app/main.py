@@ -28,6 +28,11 @@ async def lifespan(app: FastAPI):
     if "description" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE brands ADD COLUMN description VARCHAR(300) NOT NULL DEFAULT ''"))
+    icon_cols = {c["name"] for c in inspect(engine).get_columns("icon_assets")}
+    for col, ddl in (("prompt", "TEXT"), ("source_path", "VARCHAR(500)")):   # 3D 아이콘 전환으로 추가된 컬럼
+        if col not in icon_cols:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE icon_assets ADD COLUMN {col} {ddl}"))
     with SessionLocal() as db:
         seed(db)
         deactivate_excluded(db)

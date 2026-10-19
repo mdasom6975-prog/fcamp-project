@@ -191,6 +191,8 @@ erDiagram
         int width
         int height
         json violations
+        text prompt
+        string source_path
         datetime created_at
     }
 ```

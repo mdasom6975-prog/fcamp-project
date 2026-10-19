@@ -56,19 +56,19 @@ def _save(u: dict) -> None:
     USAGE_FILE.write_text(json.dumps(u))
 
 
-def usage() -> dict:
+def usage(provider: str = PROVIDER) -> dict:
     with _lock:
         u = _load()
-    p = u["providers"].get(PROVIDER, {})
+    p = u["providers"].get(provider, {})
     used = p.get("count", 0)
-    return {"date": u["date"], "provider": PROVIDER, "used": used, "limit": DAILY_LIMIT,
+    return {"date": u["date"], "provider": provider, "used": used, "limit": DAILY_LIMIT,
             "remaining": max(0, DAILY_LIMIT - used), "exhausted": bool(p.get("exhausted")) or used >= DAILY_LIMIT}
 
 
-def _bump(exhausted: bool = False) -> None:
+def _bump(exhausted: bool = False, provider: str = PROVIDER) -> None:
     with _lock:
         u = _load()
-        p = u["providers"].setdefault(PROVIDER, {"count": 0, "exhausted": False})
+        p = u["providers"].setdefault(provider, {"count": 0, "exhausted": False})
         if exhausted:
             p["exhausted"] = True
         else:
@@ -89,19 +89,34 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str) -> str
                           tone=tone.get("description") or "지정 없음", composition=composition)
 
 
-def _generate_openai(prompt: str) -> Image.Image:
+def _openai_png(prompt: str, model: str, quality: str, **extra) -> bytes:
+    """OpenAI 이미지 1장을 PNG 바이트로. extra 는 background·output_format 등 추가 인자."""
     import openai
     try:
         r = client().with_options(timeout=240.0, max_retries=0).images.generate(
-            model=OPENAI_MODEL, prompt=prompt, size=OPENAI_SIZE, quality=OPENAI_QUALITY, n=1)
+            model=model, prompt=prompt, size=OPENAI_SIZE, quality=quality, n=1, **extra)
     except openai.RateLimitError as e:   # 분당 제한이거나 크레딧 부족. 하루 소진으로 기록하지 않는다
         code = getattr(e, "code", None) or ""
         if "quota" in str(code) or "billing" in str(e).lower():
             raise QuotaExceeded("OpenAI 크레딧(결제 한도)이 부족합니다. OpenAI 결제 설정을 확인해 주세요")
         raise QuotaExceeded("OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요")
-    _bump()
-    data = base64.b64decode(r.data[0].b64_json)
-    return Image.open(io.BytesIO(data)).convert("RGB")
+    _bump(provider="openai")
+    return base64.b64decode(r.data[0].b64_json)
+
+
+def _generate_openai(prompt: str) -> Image.Image:
+    return Image.open(io.BytesIO(_openai_png(prompt, OPENAI_MODEL, OPENAI_QUALITY))).convert("RGB")
+
+
+def generate_transparent(prompt: str, model: str | None = None, quality: str | None = None) -> Image.Image:
+    """투명 배경(알파) PNG 1장 — 3D 아이콘용. 공급자는 OpenAI 고정(FLUX 는 투명 출력이 없다).
+    일일 한도·크레딧 처리는 배경 생성과 같고, 카운터는 openai 로 기록한다."""
+    if usage("openai")["exhausted"]:
+        raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
+                            "한도를 올리려면 IMAGE_DAILY_LIMIT 을 조정하세요")
+    data = _openai_png(prompt, model or OPENAI_MODEL, quality or OPENAI_QUALITY,
+                       background="transparent", output_format="png")
+    return Image.open(io.BytesIO(data)).convert("RGBA")
 
 
 def _generate_cloudflare(prompt: str) -> Image.Image:

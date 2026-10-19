@@ -203,6 +203,7 @@ ul.plain { padding-left: 18px; margin: 4px 0; font-size: 14px; }
   background: repeating-conic-gradient(#f2f3f7 0 25%, #fff 0 50%) 0 0 / 12px 12px;
 }
 .iconcell figcaption { margin: 6px 0; font-weight: 600; }
+.iconcell .icon-concept { font-size: 12px; margin: -2px 0 6px; line-height: 1.35; }
 .iconcell .row { justify-content: center; margin-bottom: 4px; }
 
 /* 편집 */

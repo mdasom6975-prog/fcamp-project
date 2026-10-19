@@ -196,7 +196,10 @@ class GeneratedImage(Base):
 
 
 class IconAsset(Base):
-    """아이콘 세트의 개별 아이콘. 도형(elements)은 모델이 만들고, 선 굵기·모서리·색·여백은 코드가 강제한다."""
+    """아이콘 세트의 개별 아이콘.
+    - 3d (기본): 이미지 모델이 투명 PNG 를 렌더. prompt·source_path(1024 원본) 를 남기고 elements=[] svg="" 이다.
+    - svg: 도형(elements)은 모델이 만들고, 선 굵기·모서리·색·여백은 코드가 강제한다.
+    어느 방식인지는 style.render ("3d" | "svg") 로 구분한다."""
     __tablename__ = "icon_assets"
     id: Mapped[int] = mapped_column(primary_key=True)
     design_id: Mapped[int] = mapped_column(ForeignKey("designs.id"))
@@ -212,6 +215,8 @@ class IconAsset(Base):
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
     violations: Mapped[list] = mapped_column(JSON, default=list)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)              # 3d: 렌더에 쓴 이미지 프롬프트
+    source_path: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 3d: 1024 원본 PNG
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 

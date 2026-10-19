@@ -380,8 +380,9 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, designId, onEdited }: 
 }
 
 type IconItem = {
-  id: number; position: number; name: string; width: number; height: number
-  style: { stroke_width: number; corner: string; fill: string; color: string; bbox?: number[] }
+  id: number; position: number; name: string; concept?: string; width: number; height: number
+  render: '3d' | 'svg'; has_svg: boolean; has_source: boolean
+  style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[] }
   violations: { detail: string }[]
 }
 
@@ -446,13 +447,14 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
           {vLabel}의 아이콘 세트도 함께 만들기
         </label>
         <p className="muted">
-          선 굵기·모서리·색·여백은 브랜드 규칙 값으로 모든 아이콘에 동일하게 적용되며, 기능명 10개는 상품 설명을 바탕으로 AI가 정합니다.
-          이 규칙 버전의 아이콘 세트는 한 번만 만들 수 있고, 이후에는 개별 아이콘만 다시 그릴 수 있습니다. 생성에는 비용이 발생합니다.
+          브랜드에 어울리는 3D 아이콘 세트입니다. 기능명 10개는 상품 설명을 바탕으로 AI가 정하고, 아이콘마다 투명 배경 PNG 를 렌더합니다.
+          재질·광원은 브랜드 이미지 톤, 색은 주조·보조·강조색, 모서리는 아이콘 스타일 값으로 모든 아이콘에 동일하게 적용됩니다.
+          이 규칙 버전의 아이콘 세트는 한 번만 만들 수 있고, 이후에는 개별 아이콘만 다시 그릴 수 있습니다. 아이콘 1개당 이미지 1장 비용이 발생합니다.
         </p>
         {want && (
           <div className="row">
             <button className="primary" disabled={busy} onClick={generate}>아이콘 세트 생성</button>
-            {busy && <span className="muted">기능을 정하고 아이콘을 그리는 중… 1~2분 걸릴 수 있습니다.</span>}
+            {busy && <span className="muted">기능을 정하고 아이콘 10개를 렌더하는 중… 2~3분 걸릴 수 있습니다.</span>}
           </div>
         )}
         {err && <div className="notice err">{err}</div>}
@@ -469,7 +471,11 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       </p>
       {err && <div className="notice err">{err}</div>}
       {note && <div className="notice err">{note}</div>}
-      {st && (
+      {st && items[0].render === '3d' ? (
+        <p className="muted">
+          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px (원본 1024)
+        </p>
+      ) : st && (
         <p className="muted">
           적용 스타일 — 선 굵기 {st.stroke_width} · 모서리 {st.corner} · {st.fill} · 색 {st.color} · 크기 {items[0].width}×{items[0].height}px
         </p>
@@ -477,13 +483,18 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       <div className="icongrid">
         {items.map((a) => (
           <figure key={a.id} className="iconcell">
-            <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} />
+            <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} title={a.concept || a.name} />
             <figcaption>{a.position}. {a.name}</figcaption>
+            {a.concept && <div className="muted icon-concept">{a.concept}</div>}
             {a.violations.map((v, i) => <span key={i} className="badge b-need">{v.detail}</span>)}
             <div className="row">
               <button disabled={one === a.id} onClick={() => redraw(a.id)}>{one === a.id ? '그리는 중…' : '다시 그리기'}</button>
             </div>
-            <div className="muted"><a href={`/api/icons/${a.id}/svg`} target="_blank" rel="noreferrer">SVG</a> · <a href={`/api/icons/${a.id}/png`} target="_blank" rel="noreferrer">PNG</a></div>
+            <div className="muted">
+              {a.has_svg && <><a href={`/api/icons/${a.id}/svg`} target="_blank" rel="noreferrer">SVG</a> · </>}
+              <a href={`/api/icons/${a.id}/png`} target="_blank" rel="noreferrer">PNG</a>
+              {a.has_source && <> · <a href={`/api/icons/${a.id}/source`} target="_blank" rel="noreferrer">원본</a></>}
+            </div>
           </figure>
         ))}
       </div>

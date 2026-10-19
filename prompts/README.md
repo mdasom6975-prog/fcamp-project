@@ -7,10 +7,15 @@
 | 경로 | 용도 | 쓰는 곳 |
 |---|---|---|
 | `copy/system.md` · `copy/user.md` | 카피 생성 System(고정) / User(브랜드·브리프·지면 제한) | `copywriter._prompt` |
-| `icons/propose_system.md` · `propose_user.md` | 기능명 10개 제안 + 도형 | `icons.propose_and_draw` |
-| `icons/redraw_system.md` · `redraw_user.md` | 아이콘 하나 다시 그리기 | `icons.redraw_one` |
-| `icons/more_system.md` · `more_user.md` | 부족한 기능 추가 제안 | `icons.propose_more` |
-| `icons/_output_spec.md` | 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
+| `icons/propose3d_system.md` · `propose3d_user.md` | **3D(기본)** 기능명 10개 + 렌더할 오브젝트 묘사 | `icons.propose3d` |
+| `icons/more3d_system.md` · `more3d_user.md` | 3D 부족한 기능 추가 제안 | `icons.propose3d_more` |
+| `icons/render3d.md` | 3D 아이콘 1개 이미지 프롬프트(투명 PNG). 다시 그리기도 같은 문장 | `icons.render_prompt` |
+| `icons/_3d_style.md` | 3D 공통 스타일 블록 (partial, render3d 가 include) — 카메라·광원·모서리·색·재질 | — |
+| `icons/_3d_output_spec.md` | 3D 제안 출력 JSON 규격 (partial, propose3d·more3d System 이 include) | — |
+| `icons/propose_system.md` · `propose_user.md` | (svg 방식, `ICON_RENDER=svg`) 기능명 10개 제안 + 도형 | `icons.propose_and_draw` |
+| `icons/redraw_system.md` · `redraw_user.md` | (svg) 아이콘 하나 다시 그리기 | `icons.redraw_one` |
+| `icons/more_system.md` · `more_user.md` | (svg) 부족한 기능 추가 제안 | `icons.propose_more` |
+| `icons/_output_spec.md` | (svg) 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
 | `image/background.md` | 배경 이미지 생성 | `imagegen.build_prompt` |
 | `image/composition/{가로형,정사각,세로형}.md` | 템플릿별 구도 | `imagegen.build_prompt` |
 | `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
@@ -39,5 +44,6 @@ join: space             ← (선택) 본문 줄을 공백 한 칸으로 이어 �
 
 ## 아직 코드에 남아 있는 것 (2단계 정책 JSON 대상)
 - `copywriter.VARIANTS=3`, `MAX_ATTEMPTS=2`, 제목/본문/CTA 필드 연결(`HEADLINE_FIELDS` 등)
-- `icons.COUNT=10`, viewBox 24 / live 20, 허용 태그·속성
+- `icons.COUNT=10`, viewBox 24 / live 20, 허용 태그·속성, 3D 동시 렌더 수 `WORKERS_3D=3`
+- 3D 아이콘 렌더 방식·모델·품질(환경변수 `ICON_RENDER`, `ICON_IMAGE_MODEL`, `ICON_IMAGE_QUALITY`)
 - 이미지 모델·품질·크기·일일 한도(환경변수)

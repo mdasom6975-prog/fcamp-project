@@ -109,6 +109,41 @@ def test_icon_more_prompt(capture_ask):
     _assert_snapshot("icons__more", _dump(capture_ask))
 
 
+# ---- 3D 아이콘 (icons, ICON_RENDER=3d): 제안은 _ask 가로채기, 렌더 문장은 순수 함수 ----
+PALETTE = [c for c in BRAND["colors"] if c["role"] in ("주조색", "보조색", "강조색")]
+
+
+def test_icon3d_propose_prompt(capture_ask):
+    from app import icons
+    icons.propose3d("쿠챠", BRIEF, BRAND["forbidden_phrases"])
+    _assert_snapshot("icons3d__propose", _dump(capture_ask))
+
+
+def test_icon3d_propose_prompt_minimal_brief(capture_ask):
+    from app import icons
+    icons.propose3d("쿠챠", BRIEF_MIN, [])
+    _assert_snapshot("icons3d__propose_minimal", _dump(capture_ask))
+
+
+def test_icon3d_more_prompt(capture_ask):
+    from app import icons
+    icons.propose3d_more("쿠챠", BRIEF, BRAND["forbidden_phrases"], ["보관함", "배송 조회"], 3)
+    _assert_snapshot("icons3d__more", _dump(capture_ask))
+
+
+def test_icon3d_render_prompt():
+    from app import icons
+    vars = icons.style_vars(STYLE, PALETTE, BRAND["image_tone"])
+    _assert_snapshot("icons3d__render", icons.render_prompt("보관함", "뚜껑이 살짝 열린 둥근 상자", vars) + "\n")
+
+
+def test_icon3d_render_prompt_minimal():
+    """브랜드 색 역할·톤 설명이 없을 때의 분기(아이콘 색 하나, '지정 없음')."""
+    from app import icons
+    vars = icons.style_vars(STYLE, [], {})
+    _assert_snapshot("icons3d__render_minimal", icons.render_prompt("보관함", "", vars) + "\n")
+
+
 # ---- 배경 이미지 (imagegen) ----
 @pytest.mark.parametrize("template", ["가로형", "정사각", "세로형"])
 def test_background_prompt(template):

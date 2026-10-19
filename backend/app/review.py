@@ -290,21 +290,50 @@ def review_icons(icons: list, brand: dict) -> list[dict]:
         out.append(item("시안", "기능 수", "수정 필요", f"{len(icons)}개 / 최소 10개", "강제", True))
     st_brand = brand["icon_style"] or {}
     palette = {c["hex"].upper() for c in brand["colors"] if c.get("hex")}
-    bad_style = [a.name for a in icons if
-                 (st_brand.get("stroke_width") and abs(float(a.style.get("stroke_width", 0)) - float(st_brand["stroke_width"])) > 0.01)
-                 or (st_brand.get("corner") and a.style.get("corner") != st_brand["corner"])
-                 or (st_brand.get("fill") and a.style.get("fill") != st_brand["fill"])]
-    if bad_style:
-        st, bl = _brand_fail(lv.get("icon_style"))
-        out.append(item("브랜드", "아이콘 스타일", st, f"브랜드 스타일과 다른 아이콘: {', '.join(bad_style)}", lv.get("icon_style"), bl))
+    three_d = [a for a in icons if (a.style or {}).get("render") == "3d"]
+    if three_d:
+        # 3d: 세트 전체가 같은 스타일 블록·모델·품질로 렌더됐는지 (재질·광원·카메라는 프롬프트가 고정한다)
+        keys = {(a.style.get("style_ref"), a.style.get("prompt_ref"), a.style.get("model"), a.style.get("quality"),
+                 a.style.get("corner")) for a in icons}
+        bad_corner = [a.name for a in icons if st_brand.get("corner") and a.style.get("corner") != st_brand["corner"]]
+        if len(keys) > 1 or len(three_d) != len(icons) or bad_corner:
+            st, bl = _brand_fail(lv.get("icon_style"))
+            msg = "세트 안에 다른 스타일(프롬프트·모델·품질)로 만든 아이콘이 섞여 있습니다"
+            if bad_corner:
+                msg = f"브랜드 모서리 설정과 다른 아이콘: {', '.join(bad_corner)}"
+            out.append(item("브랜드", "아이콘 스타일", st, msg, lv.get("icon_style"), bl))
+        else:
+            a0 = three_d[0].style
+            out.append(item("브랜드", "아이콘 스타일", "통과",
+                            f"모든 아이콘이 같은 3D 스타일({a0.get('model')} {a0.get('quality')}, {a0.get('style_ref')})로 렌더됐습니다",
+                            lv.get("icon_style")))
+        # 색: 렌더 이미지의 색은 코드로 단정하기 어려워 사람이 확인한다 (이미지 톤과 같은 처리)
+        used = sorted({c.upper() for a in icons for c in (a.style.get("colors") or [])})
+        out.append(item("브랜드", "아이콘 색", "확인 필요",
+                        f"지정한 색({', '.join(used) or '없음'}) 안에서 렌더됐는지 결과 이미지를 확인해 주세요",
+                        lv.get("colors"), lv.get("colors") == "필수", True))
+        opaque = [a.name for a in icons if a.style.get("transparent") is False]
+        if opaque:
+            out.append(item("시안", "투명 배경", "수정 필요", f"배경이 투명하지 않은 아이콘: {', '.join(opaque)} — 다시 그려 주세요",
+                            "강제", True))
+        else:
+            out.append(item("시안", "투명 배경", "통과", "모든 아이콘의 배경이 투명합니다"))
     else:
-        out.append(item("브랜드", "아이콘 스타일", "통과", "선 굵기·모서리·채움이 브랜드와 같습니다", lv.get("icon_style")))
-    colors = {a.style.get("color", "").upper() for a in icons}
-    if palette and not colors <= palette:
-        st, bl = _brand_fail(lv.get("colors"))
-        out.append(item("브랜드", "아이콘 색", st, f"브랜드 색이 아닌 색: {', '.join(sorted(colors - palette))}", lv.get("colors"), bl))
-    elif palette:
-        out.append(item("브랜드", "아이콘 색", "통과", ", ".join(sorted(colors)), lv.get("colors")))
+        bad_style = [a.name for a in icons if
+                     (st_brand.get("stroke_width") and abs(float(a.style.get("stroke_width", 0)) - float(st_brand["stroke_width"])) > 0.01)
+                     or (st_brand.get("corner") and a.style.get("corner") != st_brand["corner"])
+                     or (st_brand.get("fill") and a.style.get("fill") != st_brand["fill"])]
+        if bad_style:
+            st, bl = _brand_fail(lv.get("icon_style"))
+            out.append(item("브랜드", "아이콘 스타일", st, f"브랜드 스타일과 다른 아이콘: {', '.join(bad_style)}", lv.get("icon_style"), bl))
+        else:
+            out.append(item("브랜드", "아이콘 스타일", "통과", "선 굵기·모서리·채움이 브랜드와 같습니다", lv.get("icon_style")))
+        colors = {a.style.get("color", "").upper() for a in icons}
+        if palette and not colors <= palette:
+            st, bl = _brand_fail(lv.get("colors"))
+            out.append(item("브랜드", "아이콘 색", st, f"브랜드 색이 아닌 색: {', '.join(sorted(colors - palette))}", lv.get("colors"), bl))
+        elif palette:
+            out.append(item("브랜드", "아이콘 색", "통과", ", ".join(sorted(colors)), lv.get("colors")))
     margins = [min(a.style["bbox"][0], a.style["bbox"][1], 24 - a.style["bbox"][2], 24 - a.style["bbox"][3])
                for a in icons if a.style.get("bbox")]
     if margins and min(margins) < 1.9:

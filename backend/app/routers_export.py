@@ -103,10 +103,15 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
             raise HTTPException(409, {"message": "생성된 아이콘이 없습니다", "blockers": []})
         for a in icons:
             base = f"{a.position:02d}_{exporter.safe(a.name, 30)}"
-            pack.add(f"icons/svg/{base}.svg", a.svg.encode("utf-8"), "아이콘 SVG(원본)")
+            if a.svg:   # svg 방식만 원본 SVG 가 있다
+                pack.add(f"icons/svg/{base}.svg", a.svg.encode("utf-8"), "아이콘 SVG(원본)")
             pack.add(f"icons/png/{base}.png", Path(a.png_path).read_bytes(), "아이콘 PNG")
+            if a.source_path and Path(a.source_path).exists():   # 3d 방식: 1024 투명 원본
+                pack.add(f"icons/src/{base}.png", Path(a.source_path).read_bytes(), "아이콘 원본 PNG(1024, 투명)")
         manifest_presets.append({"name": "아이콘 세트", "count": len(icons), "size": [icons[0].width, icons[0].height],
-                                 "style": icons[0].style, "ready": ready})
+                                 "render": (icons[0].style or {}).get("render", "svg"), "style": icons[0].style,
+                                 "prompts": sorted({a.prompt for a in icons if a.prompt}) if icons[0].prompt else None,
+                                 "ready": ready})
 
     pack.add("검수결과.csv", exporter.review_csv(groups), "검수 결과")
     if status != "검수 완료":
