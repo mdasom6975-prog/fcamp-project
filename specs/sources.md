@@ -26,7 +26,7 @@
 | Meta | Instagram 피드 | 최대 용량 | 30MB | 강제 | 확인됨 |  |
 | Meta | Instagram 피드 | 최소 너비 | 500px | 강제 | 확인됨 |  |
 | Meta | Instagram 피드 | 비율 허용 오차 | 1% | 강제 | 확인됨 |  |
-| Meta | Instagram 피드 | 최소/최대 화면 비율 | 400x500 / 191x100 | 강제 | 확인 필요 | 공식 표기가 모호함. Ads Manager 미리보기로 검증 필요 |
+| Meta | Instagram 피드 | 최소/최대 화면 비율 | 400x500 / 191x100 | 강제 | 확인됨 | Meta 표기: 최소 400x500(=4:5) ~ 최대 191x100(=1.91:1). 2026-10-19 공식 페이지 재확인 |
 | Meta | Instagram 피드 | 권장 해상도 | 1440x1800 | 권장 | 확인됨 |  |
 | Meta | Instagram 스토리 | 파일 형식 | JPG, PNG | 강제 | 확인됨 |  |
 | Meta | Instagram 스토리 | 최대 용량 | 30MB | 강제 | 확인됨 |  |
@@ -86,7 +86,6 @@
 
 ## 찾지 못해 '확인 필요'로 둔 값
 
-- Meta · Instagram 피드 · 최소/최대 화면 비율: [확인 필요] 공식 표기가 모호함. Ads Manager 미리보기로 검증 필요
 - Meta · Instagram 피드: 안전영역: 확인 불가
 - Meta · Facebook 피드 · 허용 비율 범위: [충돌] 검색 요약은 1.91:1~4:5 범위로 표기. 본문에는 4:5만 있음. 범위 미확정
 - Meta · Facebook 피드: 안전영역: 확인 불가

@@ -44,8 +44,10 @@ PRESETS = [
              c("파일 형식", "JPG, PNG", "강제"), c("최대 용량", "30MB", "강제"),
              c("최소 너비", "500px", "강제"),
              c("비율 허용 오차", "1%", "강제"),
-             c("최소/최대 화면 비율", "400x500 / 191x100", "강제", "확인 필요",
-               "공식 표기가 모호함. Ads Manager 미리보기로 검증 필요"),
+             # Meta 는 비율을 픽셀 쌍으로 적는다: 400x500 = 4:5(가장 세로로 긴 비율), 191x100 = 1.91:1(가장 가로로 긴 비율).
+             # 공식 페이지 '최소 화면 비율 / 최대 화면 비율' 표기 그대로이며 2026-10-19 재확인. review 가 W/H 가 이 범위 안인지 검사한다
+             c("최소/최대 화면 비율", "400x500 / 191x100", "강제", "확인됨",
+               "Meta 표기: 최소 400x500(=4:5) ~ 최대 191x100(=1.91:1). 2026-10-19 공식 페이지 재확인"),
              c("권장 해상도", "1440x1800", "권장"),
          ],
          texts=[t("기본 문구", 125), t("제목", 40), t("해시태그", 30, note="최대 개수")],
@@ -207,6 +209,29 @@ def seed(db: Session) -> int:
     db.commit()
     return added
 
+
+
+def sync_conditions(db: Session) -> int:
+    """이미 있는 지면의 활성 규격 버전에 시드의 조건·상태·출처를 다시 반영한다 (공식 표기 재확인 등으로 시드가 바뀌었을 때).
+    제작 크기·문구 제한·안전영역은 건드리지 않는다. 반환: 갱신한 지면 수."""
+    changed = 0
+    for p in PRESETS:
+        pl_id = db.scalar(select(Placement.id).join(Platform).where(
+            Platform.name == p["platform"], Placement.name == p["name"]))
+        if not pl_id:
+            continue
+        pv = db.scalar(select(PresetVersion).where(PresetVersion.placement_id == pl_id, PresetVersion.active.is_(True))
+                       .order_by(PresetVersion.version_no.desc()).limit(1))
+        if pv is None:
+            continue
+        new = {"conditions": p["conditions"], "status": p["status"], "note": p["note"], "source_urls": p["urls"],
+               "checked_at": CHECKED if p["urls"] else None}
+        if any(getattr(pv, k) != v for k, v in new.items()):
+            for k, v in new.items():
+                setattr(pv, k, v)
+            changed += 1
+    db.commit()
+    return changed
 
 # 사용자 결정으로 지원 대상에서 제외한 지면. 기존 DB 에 남아 있어도 비활성화한다 (삭제하지 않아 이력은 보존).
 EXCLUDED_PRESETS = [("Meta", "Instagram 릴스"), ("Google Ads", "RDA 가로 1.91:1"), ("Google Ads", "RDA 정사각형 1:1"),

@@ -16,7 +16,7 @@ from .routers_designs import router as designs_router
 from .routers_presets import router as presets_router
 from .routers_spec_update import router as spec_update_router
 from .routers_review import router as review_router
-from .seed import deactivate_excluded, seed
+from .seed import deactivate_excluded, seed, sync_conditions
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
                 conn.execute(text(f"ALTER TABLE icon_assets ADD COLUMN {col} {ddl}"))
     with SessionLocal() as db:
         seed(db)
+        sync_conditions(db)      # 시드의 조건·상태가 바뀌면 기존 지면에도 반영
         deactivate_excluded(db)
     yield
 

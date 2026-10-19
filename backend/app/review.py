@@ -122,6 +122,24 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
             else:
                 st, bl = _spec_fail(lv)
                 out.append(item("규격", name, st, msg, lv, bl))
+        elif name == "최소/최대 화면 비율":
+            # Meta 표기 "400x500 / 191x100": 픽셀 쌍 두 개 = 허용 비율의 양 끝(4:5 ~ 1.91:1). 오차는 '비율 허용 오차' 조건을 따른다
+            try:
+                pairs = [exporting.parse_dim(tok) for tok in str(val).split("/")]
+                ratios = sorted(a / b for a, b in pairs if a and b)
+                lo, hi = ratios[0], ratios[-1]
+                tol_c = next((x for x in conds if x["name"] == "비율 허용 오차" and x.get("value")), None)
+                tol = float(str(tol_c["value"]).replace("%", "")) / 100 if tol_c else 0.01
+                actual = W / H
+                ok = lo * (1 - tol) <= actual <= hi * (1 + tol)
+                msg = f"{W}×{H} = {actual:.3f} (허용 {lo:.3f}~{hi:.3f}, 오차 {tol * 100:g}%)"
+                if ok:
+                    out.append(item("규격", "화면 비율 범위", "통과", msg, lv))
+                else:
+                    st, bl = _spec_fail(lv)
+                    out.append(item("규격", "화면 비율 범위", st, msg, lv, bl))
+            except Exception:
+                out.append(item("규격", name, "확인 필요", f"자동 검사하지 못했습니다: {val}", lv, False, True))
         elif name == "비율 허용 오차" and pv.ratio:
             try:
                 rw, rh = [float(x) for x in pv.ratio.split(":")]
