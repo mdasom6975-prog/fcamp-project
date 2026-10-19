@@ -67,6 +67,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   const [imgErr, setImgErr] = useState<Record<number, string>>({})
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
+  const [iconKey, setIconKey] = useState(0)      // 아이콘 세트를 지운 뒤 패널 다시 불러오기
 
   const loadImgs = useCallback(() =>
     fetch(`/api/designs/${designId}/images`).then((r) => r.json()).then((rows: ImgRow[]) => {
@@ -153,10 +154,12 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   // 이미지 생성 API 테스트용: 생성 결과(배경·합성·편집 내용·검수)만 지우고 브랜드·규격·입력·카피는 유지한다
   const resetGenerated = async () => {
     if (!window.confirm('이 시안의 생성 이미지, 편집 내용, 검수 결과를 모두 지웁니다. (브랜드·규격·입력 내용·카피는 유지)\n계속할까요?')) return
+    const withIcons = window.confirm('아이콘 세트도 함께 지울까요?\n아이콘 세트는 브랜드 규칙 버전에 속해 같은 버전을 쓰는 다른 캠페인에서도 사라집니다.\n(취소 = 아이콘은 유지)')
     setBgBusy(true); setBgMsg(null)
     try {
-      const j = await post(`/api/designs/${designId}/reset-generated`, { include_copy: false })
-      setBgMsg(`생성 이미지 ${j.deleted_images}건을 초기화했습니다.`)
+      const j = await post(`/api/designs/${designId}/reset-generated`, { include_copy: false, include_icons: withIcons })
+      setBgMsg(`생성 이미지 ${j.deleted_images}건을 초기화했습니다.${withIcons ? ` 아이콘 ${j.icons_deleted}개도 지웠습니다.` : ''}`)
+      if (withIcons) setIconKey((k) => k + 1)
       await loadImgs()
     } catch (e) {
       setBgMsg((e as Error).message)
@@ -300,7 +303,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
             })()}
           </div>
 
-          <IconPanel designId={designId} versionNo={versionNo} ask
+          <IconPanel key={iconKey} designId={designId} versionNo={versionNo} ask
             ready={groups.some((g) => imgs[g.preset_id]?.composite)} />
 
           <div className="pick-bar">

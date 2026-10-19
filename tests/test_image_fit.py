@@ -430,3 +430,57 @@ def test_variant_failure_falls_back_to_master(env, monkeypatch):
         land = next(g for g in db.query(env["models"].GeneratedImage).filter_by(kind="background").all()
                     if g.preset_version_id == ids["presets"]["네이티브 2:1"])
         assert land.layout["template"] == "가로형" and "fallback" in land.layout
+
+
+def _select_copy(env, pids):
+    with env["Local"]() as db:
+        for pid in pids:
+            db.add(env["models"].CopyVariant(design_id=env["ids"]["design"], preset_version_id=pid, variant_no=1,
+                                             headline="제목", selected=True, batch_no=1))
+        db.commit()
+
+
+def test_opening_editor_does_not_block_recomposite_but_saving_does(env):
+    """편집 화면을 열기만 하면(기본 요소 생성) 자동 합성이 그대로 되고, 저장한 뒤에는 409 로 막는다."""
+    from app import models
+    c, ids = env["client"], env["ids"]
+    pid = ids["presets"]["피드 4:5"]
+    _select_copy(env, [pid])
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    j = c.get(f"/api/designs/{ids['design']}/presets/{pid}/edit")
+    assert j.status_code == 200 and len(j.json()["elements"]) >= 3, "편집 화면을 열면 기본 요소가 생긴다"
+    r = c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": False})
+    assert r.status_code == 200, r.text
+    with env["Local"]() as db:
+        assert db.query(models.Element).filter_by(design_id=ids["design"], preset_version_id=pid).count() == 0
+    # 편집 화면에서 저장(스냅샷)하면 그때부터 막는다
+    j = c.get(f"/api/designs/{ids['design']}/presets/{pid}/edit").json()
+    text = next(e for e in j["elements"] if e["type"] == "text")
+    r = c.put(f"/api/designs/{ids['design']}/presets/{pid}/edit",
+              json={"elements": [{"id": text["id"], "props": {**text["props"], "text": "바꾼 제목"}}]})
+    assert r.status_code == 200, r.text
+    r = c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": False})
+    assert r.status_code == 409 and "저장한 내용" in r.json()["detail"]
+
+
+def test_reset_generated_can_clear_icon_set(env, tmp_path):
+    """초기화 때 include_icons 를 주면 브랜드 규칙 버전의 아이콘 세트(행·파일)도 지운다."""
+    from app import models
+    c, ids = env["client"], env["ids"]
+    files = []
+    with env["Local"]() as db:
+        for i in range(1, 3):
+            png = tmp_path / "storage" / f"icon_{i}.png"; png.parent.mkdir(exist_ok=True)
+            Image.new("RGBA", (16, 16), (0, 0, 0, 0)).save(png)
+            files.append(png)
+            db.add(models.IconAsset(design_id=ids["design"], brand_version_id=ids["bv"], batch_no=1, position=i,
+                                    name=f"기능{i}", elements=[], style={"render": "3d"}, svg="", png_path=str(png),
+                                    width=16, height=16, violations=[]))
+        db.commit()
+    assert len(c.get(f"/api/designs/{ids['design']}/icons").json()) == 2
+    r = c.post(f"/api/designs/{ids['design']}/reset-generated", json={"include_copy": False, "include_icons": False})
+    assert r.json()["icons_deleted"] == 0 and len(c.get(f"/api/designs/{ids['design']}/icons").json()) == 2
+    r = c.post(f"/api/designs/{ids['design']}/reset-generated", json={"include_copy": False, "include_icons": True})
+    assert r.json()["icons_deleted"] == 2 and c.get(f"/api/designs/{ids['design']}/icons").json() == []
+    assert not any(f.exists() for f in files), "아이콘 파일도 지운다"

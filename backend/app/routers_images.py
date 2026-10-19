@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 from . import compose, imagegen
 from .db import BASE_DIR, STORAGE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
-                     PresetVersion, ReviewResult)
+                     IconAsset, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db
-from .routers_review import invalidate_reviews
+from .routers_review import invalidate_icon_reviews, invalidate_reviews
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("app.images")
@@ -99,6 +99,14 @@ def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
     invalidate_reviews(db, design_id, v.preset_version_id)
     db.commit()
     return {"selected": variant_id, "preset_id": v.preset_version_id}
+
+
+def _edit_saved(db: Session, design_id: int, preset_id: int) -> bool:
+    """이 지면을 편집 화면에서 '저장'한 적이 있는가 (저장 시점마다 DesignSnapshot 이 남는다)."""
+    for snap in db.scalars(select(DesignSnapshot).where(DesignSnapshot.design_id == design_id)).all():
+        if any(e.get("preset_version_id") == preset_id for e in (snap.elements or [])):
+            return True
+    return False
 
 
 def _gen_error(e: Exception) -> str:
@@ -213,14 +221,25 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
 
 
 @router.post("/designs/{design_id}/reset-generated")
-def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True), db: Session = Depends(get_db)):
-    """시안의 생성 결과(배경·합성·편집 요소·검수 결과)만 지운다. 브랜드·규격·입력 내용(brief)·아이콘은 유지하고,
-    카피는 include_copy=True 일 때만 지운다. 이미지 생성 API 호출 테스트를 처음부터 다시 하기 위한 용도."""
+def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True),
+                    include_icons: bool = Body(False, embed=True), db: Session = Depends(get_db)):
+    """시안의 생성 결과(배경·합성·편집 요소·검수 결과)만 지운다. 브랜드·규격·입력 내용(brief)은 유지하고,
+    카피는 include_copy=True, 아이콘 세트는 include_icons=True 일 때만 지운다(세트는 브랜드 규칙 버전 소유라 같은 버전을
+    쓰는 다른 캠페인에서도 사라진다). 이미지 생성 API 호출 테스트를 처음부터 다시 하기 위한 용도."""
     d = _design(db, design_id)
     imgs = db.scalars(select(GeneratedImage).where(GeneratedImage.design_id == design_id)).all()
     paths = {g.file_path for g in imgs}
     for g in imgs:
         db.delete(g)
+    icons_deleted = 0
+    if include_icons:
+        icon_files: set[str] = set()
+        for a in db.scalars(select(IconAsset).where(IconAsset.brand_version_id == d.brand_version_id)).all():
+            icon_files.update(p for p in (a.png_path, a.source_path) if p)
+            db.delete(a)
+            icons_deleted += 1
+        invalidate_icon_reviews(db, d.brand_version_id)
+        paths |= icon_files
     for model in (Element, DesignSnapshot, ReviewResult):
         for r in db.scalars(select(model).where(model.design_id == design_id)).all():
             db.delete(r)
@@ -231,16 +250,19 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
     db.flush()
     # 다른 행이 같은 파일을 쓰지 않을 때만 파일 삭제 (경로는 STORAGE_DIR 하위만)
     still = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
+    still |= {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
     removed = 0
     for p in paths - still:
         fp = Path(p)
         if STORAGE_DIR in fp.parents and fp.exists():
             fp.unlink()
             removed += 1
-        for t in (STORAGE_DIR / "thumbs").glob(f"{fp.stem}_*.jpg"):   # 축소본 캐시도 함께 제거
+    for t in (STORAGE_DIR / "thumbs").glob("*.jpg"):      # 이 시안의 축소본 캐시(파일 이름 기준)도 정리
+        if any(t.name.startswith(Path(p).stem + "_") for p in paths):
             t.unlink()
     db.commit()
-    return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy}
+    return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy,
+            "icons_deleted": icons_deleted}
 
 
 @router.post("/designs/{design_id}/presets/{preset_id}/image")
@@ -253,9 +275,14 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     if not pv or not pv.production_width:
         raise HTTPException(400, "제작 크기가 정해지지 않은 규격입니다")
     w, h = pv.production_width, pv.production_height
-    if db.scalar(select(Element.id).where(Element.design_id == design_id,
-                                          Element.preset_version_id == preset_id).limit(1)) is not None:
-        raise HTTPException(409, "편집한 내용이 있습니다. 편집 화면에서 '처음 상태로 되돌리기' 후 다시 합성해 주세요")
+    els = db.scalars(select(Element).where(Element.design_id == design_id, Element.preset_version_id == preset_id)).all()
+    if els:
+        if _edit_saved(db, design_id, preset_id):
+            raise HTTPException(409, "편집 화면에서 저장한 내용이 있습니다. 편집 화면의 '처음 상태로 되돌리기' 후 다시 합성해 주세요")
+        # 편집 화면을 열기만 하면 기본 요소가 만들어진다. 저장한 적이 없으면 자동 합성으로 되돌려도 잃는 것이 없다
+        for e in els:
+            db.delete(e)
+        db.flush()
     separate = pv.placement.content_kind == "분리 자산형"
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
