@@ -1,3 +1,4 @@
+import logging
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from .routers_assets import FONT_DIR, get_db
 from .routers_review import invalidate_reviews
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger("app.images")
 
 
 def _font_path(bv: BrandVersion, role: str, db: Session) -> str:
@@ -41,7 +43,9 @@ def _img_out(g: GeneratedImage | None) -> dict | None:
     if not g:
         return None
     return {"id": g.id, "kind": g.kind, "width": g.width, "height": g.height,
-            "copy_variant_id": g.copy_variant_id, "layout": g.layout, "created_at": g.created_at.isoformat()}
+            "copy_variant_id": g.copy_variant_id, "layout": g.layout, "created_at": g.created_at.isoformat(),
+            # 캐시 무효화용 파일 토큰: 행 id 는 삭제 후 재사용될 수 있지만 파일 이름(uuid)은 고유하다
+            "file": Path(g.file_path).stem}
 
 
 def _latest(db: Session, design_id: int, pid: int, kind: str) -> GeneratedImage | None:
@@ -97,6 +101,17 @@ def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
     return {"selected": variant_id, "preset_id": v.preset_version_id}
 
 
+def _gen_error(e: Exception) -> str:
+    """이미지 생성 실패 메시지. 서버 로그에 원인을 남기고, 화면에는 공급자 오류 문구(모델·파라미터 안내)만 보여 준다.
+    키 등 민감 정보는 메시지에 넣지 않는다."""
+    log.exception("이미지 생성 실패: %s", type(e).__name__)
+    body = getattr(e, "body", None)
+    msg = (body.get("error") or {}).get("message") if isinstance(body, dict) else None
+    if msg:
+        return f"이미지 생성에 실패했습니다 ({type(e).__name__}): {msg[:300]}"
+    return f"이미지 생성에 실패했습니다 ({type(e).__name__})"
+
+
 def _generate_one(db: Session, d: Design, template: str,
                   reference: GeneratedImage | None = None) -> tuple[Path, Image.Image, str, dict]:
     """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
@@ -118,8 +133,8 @@ def _generate_one(db: Session, d: Design, template: str,
             bg = imagegen.generate_background(prompt, gw, gh)
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
-    except Exception as e:  # 키 등 민감 정보는 메시지에 넣지 않는다
-        raise HTTPException(502, f"이미지 생성에 실패했습니다 ({type(e).__name__})")
+    except Exception as e:
+        raise HTTPException(502, _gen_error(e))
     STORAGE_DIR.mkdir(exist_ok=True)
     path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
     bg.save(path)
@@ -155,7 +170,19 @@ def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage
     rows: dict[int, GeneratedImage] = {}
     master: GeneratedImage | None = None
     for template, pids in groups.items():
-        path, bg, prompt, layout = _generate_one(db, d, template, reference=master)
+        try:
+            path, bg, prompt, layout = _generate_one(db, d, template, reference=master)
+        except HTTPException as e:
+            if master is None:
+                raise
+            # 변형 생성이 실패해도 이미 만든(과금된) 첫 배경을 버리지 않는다: 이 비율군은 첫 배경을 잘라 쓰고 사유를 남긴다
+            log.warning("비율군 %s 변형 실패 → 첫 배경으로 대체: %s", template, e.detail)
+            layout = {**(master.layout or {}), "template": template, "fallback": str(e.detail)}
+            for pid in pids:
+                rows[pid] = _bg_row(d, pid, master.file_path, master.width, master.height, master.prompt, bv.id, layout)
+                db.add(rows[pid])
+            db.flush()
+            continue
         for pid in pids:
             rows[pid] = _bg_row(d, pid, path, bg.width, bg.height, prompt, bv.id, layout)
             db.add(rows[pid])
@@ -179,8 +206,10 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
     rows = create_shared_background(db, d)
     db.commit()
     first = next(iter(rows.values()))
+    fallbacks = sorted({r.layout.get("fallback") for r in rows.values() if r.layout.get("fallback")})
     return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}),
-            "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason")}
+            "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
+            "warnings": [f"일부 비율군은 변형 생성에 실패해 첫 배경을 잘라 썼습니다: {m}" for m in fallbacks]}
 
 
 @router.post("/designs/{design_id}/reset-generated")
@@ -208,6 +237,8 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
         if STORAGE_DIR in fp.parents and fp.exists():
             fp.unlink()
             removed += 1
+        for t in (STORAGE_DIR / "thumbs").glob(f"{fp.stem}_*.jpg"):   # 축소본 캐시도 함께 제거
+            t.unlink()
     db.commit()
     return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy}
 
@@ -313,7 +344,7 @@ def image_thumb(image_id: int, db: Session = Depends(get_db)):
     g = db.get(GeneratedImage, image_id)
     if not g or not Path(g.file_path).exists():
         raise HTTPException(404, "이미지를 찾을 수 없습니다")
-    out = STORAGE_DIR / "thumbs" / f"{g.id}_{THUMB_SIDE}.jpg"
+    out = STORAGE_DIR / "thumbs" / f"{Path(g.file_path).stem}_{THUMB_SIDE}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
         im = Image.open(g.file_path).convert("RGB")

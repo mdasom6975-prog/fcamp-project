@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "fitday",
+  "brand": {
+    "name": "핏데이",
+    "description": "동네 피트니스 센터 예약과 PT 매칭을 한 번에 하는 운동 앱",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#D81B60"
+      },
+      {
+        "role": "보조색",
+        "hex": "#F8BBD0"
+      },
+      {
+        "role": "강조색",
+        "hex": "#00ACC1"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#212121"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2.5,
+      "corner": "둥근",
+      "fill": "채움"
+    },
+    "image_tone": {
+      "description": "밝은 피트니스 센터에서 운동하는 20~30대 인물 사진. 자연스러운 표정, 땀과 움직임이 느껴지는 역동적인 분위기. 과도한 노출·보정 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "에너지 있고 짧은 존댓말. 행동을 권하는 동사형 문장.",
+      "headline_max_chars": 20,
+      "polite": true
+    },
+    "required_phrases": [
+      "핏데이"
+    ],
+    "forbidden_phrases": [
+      "무조건",
+      "살 빠짐",
+      "체중 감량 보장",
+      "다이어트 성공"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "source": "테스트용 더미 데이터 (brand-studio-dummy-data, 2026-10-19 생성). 실제 브랜드가 아니며 가이드 문서 없음",
+    "checked_at": "2026-10-19",
+    "logo": {
+      "file": "logo.png",
+      "width": 1200,
+      "height": 360,
+      "ratio": "3.33:1",
+      "note": "투명 PNG 워드마크. 원본 비율 고정, 재생성 금지 · logo.svg(도형만) 도 있음"
+    },
+    "rule_sources": {
+      "필수 규칙(검수 완료 차단)": "로고 원본·비율 유지, 텍스트·도형·아이콘은 허용 색상만, 필수 표현 포함·금지 표현 미포함",
+      "권장 규칙(경고)": "폰트 Pretendard, 아이콘 스타일, 이미지 톤, 어조",
+      "비고": "피트니스 예약·PT 매칭 앱 (테스트용 가상 브랜드). 이미지 톤에 '인물' 단서 → 배경 형태 자동 선택이 '실사 인물'"
+    }
+  }
+}

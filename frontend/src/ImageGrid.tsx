@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 // 생성 결과(배경·합성) 공통 타입 — 시안(④)·편집·검수 세 화면이 같은 썸네일 그리드를 쓴다
 export type ImgOut = {
   id: number; width: number; height: number
+  file?: string          // 파일 토큰(uuid) — 행 id 가 재사용돼도 캐시가 섞이지 않게 URL 버전으로 쓴다
   layout: {
     warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean
     style?: string; style_reason?: string; logo_placement?: { corner: string }
@@ -13,8 +14,8 @@ export type GridItem = {
   preset_id: number; platform: string; name: string; width: number | null; height: number | null; content_kind?: string
 }
 
-export const thumbUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/thumb?v=${c.id}`
-export const fileUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/file?v=${c.id}`
+export const thumbUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/thumb?v=${c.file ?? c.id}`
+export const fileUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/file?v=${c.file ?? c.id}`
 
 export default function ImageGrid({ items, rows, selected, onSelect, badge, dimmed, emptyText }: {
   items: GridItem[]

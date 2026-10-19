@@ -323,7 +323,9 @@ def test_thumbnail_endpoint_caches_small_jpeg(env):
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     im = Image.open(io.BytesIO(r.content))
     assert max(im.size) == 360 and im.size == (288, 360)
-    assert (routers_images.STORAGE_DIR / "thumbs" / f"{cid}_360.jpg").exists()
+    comp = c.get(f"/api/designs/{ids['design']}/images").json()
+    token = next(r["composite"]["file"] for r in comp if r["preset_id"] == p["피드 4:5"])
+    assert token.startswith("cmp_") and (routers_images.STORAGE_DIR / "thumbs" / f"{token}_360.jpg").exists()
     assert c.get("/api/generated/999999/thumb").status_code == 404
 
 
@@ -374,3 +376,57 @@ def test_text_stays_below_subject_after_tighten_on_story():
     assert text["box"][1] >= sy1, "문구는 피사체 아래"
     assert text["font_size"] >= 80 and "겹칠 수 있습니다" not in " ".join(rep["warnings"])
     assert logo["box"][3] <= text["box"][1] or logo["box"][1] >= text["box"][3], "로고와 문구가 겹치지 않는다"
+
+
+def test_generate_variant_retries_without_input_fidelity(monkeypatch):
+    """gpt-image-2.5 계열처럼 input_fidelity 를 거절하는 모델이면 그 인자만 빼고 다시 보낸다 (이후 호출은 처음부터 안 보냄)."""
+    import httpx
+    import openai
+    from app import imagegen
+    calls: list[dict] = []
+
+    class FakeImages:
+        def edit(self, **kw):
+            calls.append(kw)
+            if "input_fidelity" in kw:
+                raise openai.BadRequestError(
+                    "The model does not support the 'input_fidelity' parameter.",
+                    response=httpx.Response(400, request=httpx.Request("POST", "http://test")),
+                    body={"error": {"message": "The model 'x' does not support the 'input_fidelity' parameter.",
+                                    "param": "input_fidelity", "code": "invalid_input_fidelity_model"}})
+            import base64, io
+            buf = io.BytesIO(); Image.new("RGB", (kw["size"] and 16, 16), "white").save(buf, "PNG")
+            return type("R", (), {"data": [type("D", (), {"b64_json": base64.b64encode(buf.getvalue()).decode()})()]})()
+
+    class FakeClient:
+        images = FakeImages()
+        def with_options(self, **kw): return self
+    monkeypatch.setattr(imagegen, "client", lambda: FakeClient())
+    monkeypatch.setattr(imagegen, "VARIANT_FIDELITY", "high")
+    monkeypatch.setattr(imagegen, "_fidelity_supported", True)
+    monkeypatch.setattr(imagegen, "usage", lambda provider=None: {"exhausted": False})
+    monkeypatch.setattr(imagegen, "_bump", lambda **kw: None)
+    out = imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
+    assert out.size == (16, 16)
+    assert [("input_fidelity" in c) for c in calls] == [True, False]
+    imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
+    assert len(calls) == 3 and "input_fidelity" not in calls[-1], "두 번째 호출부터는 처음부터 보내지 않는다"
+
+
+def test_variant_failure_falls_back_to_master(env, monkeypatch):
+    """두 번째 비율군의 변형 생성이 실패해도(모델 파라미터 거절 등) 첫 배경은 버리지 않고 나머지 비율군이 그 파일을 쓴다."""
+    from fastapi import HTTPException
+    from app import imagegen
+    def boom(prompt, w, h, reference):
+        raise RuntimeError("model rejected")
+    monkeypatch.setattr(imagegen, "generate_variant", boom)
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
+    assert out["generated"] == 1 and len(calls) == 1 and out["warnings"] and "RuntimeError" in out["warnings"][0]
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    files = {r["background"]["file"] for r in rows}
+    assert len(files) == 1, "모든 지면이 첫 배경 파일을 공유"
+    with env["Local"]() as db:
+        land = next(g for g in db.query(env["models"].GeneratedImage).filter_by(kind="background").all()
+                    if g.preset_version_id == ids["presets"]["네이티브 2:1"])
+        assert land.layout["template"] == "가로형" and "fallback" in land.layout

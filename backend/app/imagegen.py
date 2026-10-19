@@ -199,6 +199,15 @@ def can_vary() -> bool:
     return VARIANT and PER_RATIO and PROVIDER == "openai"
 
 
+_fidelity_supported = True   # 모델이 input_fidelity 를 거절하면 False 로 바꿔 이후 호출에서는 보내지 않는다
+
+
+def _is_fidelity_error(e: Exception) -> bool:
+    body = getattr(e, "body", None)
+    err = (body.get("error") or {}) if isinstance(body, dict) else {}
+    return err.get("param") == "input_fidelity" or "input_fidelity" in str(err.get("message") or "")
+
+
 def generate_variant(prompt: str, w: int, h: int, reference: Image.Image) -> Image.Image:
     """참조 이미지와 같은 장면을 (w, h) 크기·다른 구도로 다시 만든다 (OpenAI images.edit). 비용·한도는 생성 1장과 같다."""
     import openai
@@ -209,10 +218,21 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image) -> Ima
     reference.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     buf.name = "reference.png"
-    extra = {"input_fidelity": VARIANT_FIDELITY} if VARIANT_FIDELITY else {}
+    global _fidelity_supported
+    extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and _fidelity_supported) else {}
     try:
-        r = client().with_options(timeout=240.0, max_retries=0).images.edit(
-            model=OPENAI_MODEL, image=buf, prompt=prompt, size=f"{w}x{h}", quality=OPENAI_QUALITY, n=1, **extra)
+        try:
+            r = client().with_options(timeout=240.0, max_retries=0).images.edit(
+                model=OPENAI_MODEL, image=buf, prompt=prompt, size=f"{w}x{h}", quality=OPENAI_QUALITY, n=1, **extra)
+        except openai.BadRequestError as e:
+            # 일부 모델(gpt-image-2.5 계열)은 input_fidelity 를 받지 않는다 → 그 인자만 빼고 한 번 더 (검증 단계 실패라 과금 없음)
+            if extra and _is_fidelity_error(e):
+                _fidelity_supported = False
+                buf.seek(0)
+                r = client().with_options(timeout=240.0, max_retries=0).images.edit(
+                    model=OPENAI_MODEL, image=buf, prompt=prompt, size=f"{w}x{h}", quality=OPENAI_QUALITY, n=1)
+            else:
+                raise
     except openai.RateLimitError as e:
         code = getattr(e, "code", None) or ""
         if "quota" in str(code) or "billing" in str(e).lower():
