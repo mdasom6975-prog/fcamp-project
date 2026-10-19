@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { busy as overlay } from './Busy'
 
 type Font = { label: string; ref: Record<string, unknown> }
 type El = { id: number; type: 'image' | 'shape' | 'logo' | 'text'; role: string; locked: boolean; props: Record<string, any> }
@@ -63,7 +64,10 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
 
   const save = () => run(() => call('PUT', base, { elements: payload(els) }), '저장했습니다. (저장 시점 스냅샷이 남았습니다)')
   const reset = () => run(() => call('POST', `${base}/reset`), '처음 상태(자동 배치)로 되돌렸습니다.')
-  const regen = (element: 'background' | 'text') =>
+  const regen = (element: 'background' | 'text') => overlay.run(
+    element === 'background' ? '배경 새로 만드는 중… 모든 매체에 적용합니다 (1~3분)' : '문구 다시 만드는 중… (수십 초)',
+    () => regenInner(element))
+  const regenInner = (element: 'background' | 'text') =>
     run(() => call('POST', `${base}/regenerate`, { element }), element === 'background'
       ? (j: any) => {
           const sk = (j?.skipped ?? []) as { name: string; reason: string }[]

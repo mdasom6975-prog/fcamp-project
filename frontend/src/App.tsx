@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import BrandPage from './BrandPage'
 import PresetLibrary from './PresetLibrary'
 import DesignPage from './DesignPage'
+import BusyOverlay from './Busy'
 import './App.css'
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
   }, [])
   return (
     <>
+      <BusyOverlay />
       <header className="topbar">
         <div className="brandmark"><span className="logo-mark">B</span>브랜드 스튜디오</div>
         <nav className="tabs">

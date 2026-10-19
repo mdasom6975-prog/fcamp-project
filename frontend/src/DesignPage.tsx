@@ -3,6 +3,7 @@ import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
 import { PhraseBox } from './BrandPage'
 import ImageGrid, { fileUrl, type ImgRow } from './ImageGrid'
+import { busy as overlay } from './Busy'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -100,7 +101,8 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   }
 
   // 배경은 시안당 1회만 생성하고, 아직 합성이 없는 나머지 매체도 같은 배경을 각 규격 크기로 맞춰 이어서 합성한다(추가 생성 비용 없음).
-  const makeImage = async (presetId: number, regenerate: boolean) => {
+  const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate))
+  const makeImageInner = async (presetId: number, regenerate: boolean) => {
     setImgBusy(presetId); setImgErr({})
     try {
       await makeOne(presetId, regenerate)
@@ -123,7 +125,8 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   }
 
   // 배경은 비율군(가로형/정사각/세로형)마다 1장 새로 만들고, 이미 합성된 매체는 새 배경으로 다시 합성한다(합성은 추가 생성 비용 없음).
-  const regenBackground = async () => {
+  const regenBackground = () => overlay.run('배경 새로 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner())
+  const regenBackgroundInner = async () => {
     setBgBusy(true); setBgMsg(null)
     try {
       await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle })
@@ -162,7 +165,8 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
     }
   }
 
-  const generate = async () => {
+  const generate = () => overlay.run('카피 만드는 중… 수십 초 걸립니다', generateInner)
+  const generateInner = async () => {
     setBusy(true); setErr(null)
     try {
       const j = await post(`/api/designs/${designId}/copy`, {})
@@ -392,7 +396,6 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit }: {
   return (
     <div className="imgblock">
       {sep && <p className="muted">분리 자산형: 텍스트 없는 이미지만 만들고, 로고·카피는 내보내기에서 별도 파일로 제공합니다.</p>}
-      <h5 className="img-cur">{g.platform} · {g.name} <span className="muted">{g.width}×{g.height}</span></h5>
       {comp && (
         <div className="preview">
           <img src={fileUrl(comp)} alt={`${g.name} 미리보기`} />
@@ -451,7 +454,7 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
           <ImageGrid
             items={design.presets.map((p) => ({ preset_id: p.id, platform: p.platform, name: p.name, width: p.width, height: p.height }))}
             rows={imgs} selected={cur?.id ?? null} onSelect={onPick}
-            dimmed={(it, row) => !row?.composite ? '합성 이미지 없음' : row.composite.layout.separate_assets ? '분리 자산형 — 문구·로고를 합성하지 않아 편집 대상이 아닙니다' : null}
+            dimmed={(_it, row) => !row?.composite ? '합성 이미지 없음' : row.composite.layout.separate_assets ? '분리 자산형 — 문구·로고를 합성하지 않아 편집 대상이 아닙니다' : null}
             badge={(it, row) => row?.composite && !row.composite.layout.separate_assets
               ? <span className={`badge ${cur?.id === it.preset_id ? 'b-ok' : 'b-warn'}`}>{cur?.id === it.preset_id ? '편집 중' : '편집 가능'}</span>
               : null} />
@@ -487,7 +490,8 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count) }).catch(() => undefined)
   }, [designId])
 
-  const generate = async () => {
+  const generate = () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner)
+  const generateInner = async () => {
     setBusy(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons`, {})
@@ -501,7 +505,8 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   }
 
   // 세트가 목표 개수에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 이어서 만든다. 아이콘 1개당 이미지 1장 비용
-  const fill = async () => {
+  const fill = () => overlay.run('부족한 아이콘 채우는 중… (1개당 10~20초)', () => fillInner())
+  const fillInner = async () => {
     setFilling(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons/fill`, {})
@@ -514,7 +519,8 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     }
   }
 
-  const redraw = async (id: number) => {
+  const redraw = (id: number) => overlay.run('아이콘 다시 그리는 중… (10~20초)', () => redrawInner(id))
+  const redrawInner = async (id: number) => {
     setOne(id); setErr(null)
     try {
       const a = await post(`/api/designs/${designId}/icons/${id}/regenerate`, {})
@@ -764,7 +770,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     }
   }
 
-  const generateCampaign = async () => {
+  const generateCampaign = () => overlay.run('카피 만드는 중… 수십 초 걸립니다', () => generateCampaignInner())
+  const generateCampaignInner = async () => {
     if (!active) return
     setBusy(true); setMsg(null)
     try {
