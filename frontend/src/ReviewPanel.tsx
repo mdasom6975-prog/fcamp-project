@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import ImageGrid, { type GridItem, type ImgRow } from './ImageGrid'
 
 type Item = {
   id: number; category: string; item: string; status: string; raw_status: string; message: string
@@ -36,9 +37,38 @@ export default function ReviewPanel({ designId }: { designId: number }) {
   const [exBusy, setExBusy] = useState(false)
   const [exMsg, setExMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
+  // 썸네일 그리드용: 지면 목록과 최신 합성본
+  const [items, setItems] = useState<GridItem[]>([])
+  const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
+  const [focus, setFocus] = useState<number | null>(null)
+
   const load = useCallback(() => call('GET', `/api/designs/${designId}/review`).then(setRv).catch(() => undefined), [designId])
   const loadExps = useCallback(() => call('GET', `/api/designs/${designId}/exports`).then(setExps).catch(() => undefined), [designId])
-  useEffect(() => { load(); loadExps() }, [load, loadExps])
+  const loadImgs = useCallback(() => Promise.all([
+    call('GET', `/api/designs/${designId}`).then((d: { presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[] }) =>
+      setItems(d.presets.map((p) => ({ preset_id: p.id, platform: p.platform, name: p.name, width: p.width, height: p.height })))),
+    call('GET', `/api/designs/${designId}/images`).then((rows: ImgRow[]) =>
+      setImgs(Object.fromEntries(rows.map((r) => [r.preset_id, r])))),
+  ]).catch(() => undefined), [designId])
+  useEffect(() => { load(); loadExps(); loadImgs() }, [load, loadExps, loadImgs])
+
+  // 카드 배지: 그 지면의 검수 요약(수정 필요·확인 필요·경고·통과) 또는 '검수 필요'
+  const cardBadge = (it: GridItem, row: ImgRow | undefined) => {
+    if (!row?.composite) return <span className="badge b-warn">이미지 없음</span>
+    const g = rv?.groups.find((x) => x.preset_id === it.preset_id)
+    if (!rv?.reviewed || !g || g.items.length === 0) return <span className="badge b-warn">검수 필요</span>
+    return (
+      <>
+        {(['수정 필요', '확인 필요', '경고', '통과'] as const).map((k) => g.summary[k]
+          ? <span key={k} className={`badge ${cls(k)}`}>{k} {g.summary[k]}</span> : null)}
+        {g.export_ready && <span className="badge b-ok">내보내기 가능</span>}
+      </>
+    )
+  }
+  const focusGroup = (pid: number) => {
+    setFocus(pid); setOpen(true)
+    window.setTimeout(() => document.getElementById(`rv-group-${pid}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
 
   const presetGroups = (rv?.groups ?? []).filter((g) => g.preset_id !== null)
   const targetIds = picked ?? presetGroups.map((g) => g.preset_id as number)
@@ -67,6 +97,8 @@ export default function ReviewPanel({ designId }: { designId: number }) {
 
   return (
     <div className="copy">
+      <ImageGrid items={items} rows={imgs} selected={focus} onSelect={focusGroup} badge={cardBadge}
+        emptyText="검수할 지면이 없습니다." />
       <div className="row">
         <button className="primary" disabled={busy} onClick={run}>{rv?.reviewed ? '다시 검수' : '검수 실행'}</button>
         {rv?.reviewed && (
@@ -90,7 +122,8 @@ export default function ReviewPanel({ designId }: { designId: number }) {
         <button className="link" onClick={() => setOpen((v) => !v)}>{open ? '결과 접기' : '결과 펼치기'}</button>
       )}
       {open && rv?.groups.map((g) => (
-        <div key={g.name} className="copy-group">
+        <div key={g.name} className={`copy-group ${g.preset_id !== null && g.preset_id === focus ? 'focus' : ''}`}
+          id={g.preset_id !== null ? `rv-group-${g.preset_id}` : undefined}>
           <h4>
             {g.name}{' '}
             {(['수정 필요', '확인 필요', '경고', '통과'] as const).map((k) => g.summary[k] ? (

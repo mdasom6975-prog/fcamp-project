@@ -302,3 +302,21 @@ def image_file(image_id: int, db: Session = Depends(get_db)):
     if not g or not Path(g.file_path).exists():
         raise HTTPException(404, "이미지를 찾을 수 없습니다")
     return FileResponse(g.file_path, media_type="image/png")
+
+
+THUMB_SIDE = 360
+
+
+@router.get("/generated/{image_id}/thumb")
+def image_thumb(image_id: int, db: Session = Depends(get_db)):
+    """썸네일 그리드용 축소본(긴 변 360px JPEG). 생성 결과는 바뀌지 않으므로 id 기준으로 파일 캐시한다."""
+    g = db.get(GeneratedImage, image_id)
+    if not g or not Path(g.file_path).exists():
+        raise HTTPException(404, "이미지를 찾을 수 없습니다")
+    out = STORAGE_DIR / "thumbs" / f"{g.id}_{THUMB_SIDE}.jpg"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        im = Image.open(g.file_path).convert("RGB")
+        im.thumbnail((THUMB_SIDE, THUMB_SIDE), Image.LANCZOS)
+        im.save(out, "JPEG", quality=82)
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
 import { PhraseBox } from './BrandPage'
+import ImageGrid, { fileUrl, type ImgRow } from './ImageGrid'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -32,11 +33,9 @@ async function post(url: string, body: unknown) {
 
 type Violation = { type: string; field: string; detail: string; severity: string }
 type Variant = { id: number; variant_no: number; headline: string; body: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
-type ImgOut = { id: number; width: number; height: number; layout: { warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean; style?: string; style_reason?: string; logo_placement?: { corner: string } } } | null
 // 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean }
-type ImgRow = { preset_id: number; background: ImgOut; composite: ImgOut }
 type Limit = { field: string; min: number | null; max: number | null; level: string | null } | null
 type CopyGroup = {
   preset_id: number; platform: string; name: string; batch_no: number | null
@@ -274,16 +273,19 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
             {(() => {
               const cur = withCopy.find((x) => x.preset_id === imgTab) ?? withCopy[0]
               if (!cur) return null
+              const made = withCopy.filter((x) => imgs[x.preset_id]?.composite).length
               return (
                 <>
-                  <div className="gen-tabs" role="tablist">
-                    {withCopy.map((x) => (
-                      <button key={x.preset_id} role="tab" aria-selected={x.preset_id === cur.preset_id}
-                        className={x.preset_id === cur.preset_id ? 'on' : ''} onClick={() => setImgTab(x.preset_id)}>
-                        {x.platform} · {x.name}{imgs[x.preset_id]?.composite ? ' ✓' : ''}
-                      </button>
-                    ))}
-                  </div>
+                  <p className="muted">
+                    {made === 0 ? '아직 만든 이미지가 없습니다. 아래에서 "이미지 생성"을 누르면 선택한 지면 전체를 이어서 만듭니다.'
+                      : `합성본 ${made}/${withCopy.length}개. 카드를 누르면 아래에서 크게 보고 다시 합성하거나 편집할 수 있습니다.`}
+                  </p>
+                  <ImageGrid items={withCopy} rows={imgs} selected={cur.preset_id} onSelect={setImgTab}
+                    badge={(it, row) => row?.composite
+                      ? <span className="badge b-ok">합성됨</span>
+                      : it.content_kind === '완성형' && !groups.find((g) => g.preset_id === it.preset_id)?.variants.some((v) => v.selected)
+                        ? <span className="badge b-warn">카피 선택 필요</span>
+                        : <span className="badge b-warn">미생성</span>} />
                   <div key={cur.preset_id} className="copy-group">
                     <ImageBlock g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
                       canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
@@ -390,9 +392,10 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit }: {
   return (
     <div className="imgblock">
       {sep && <p className="muted">분리 자산형: 텍스트 없는 이미지만 만들고, 로고·카피는 내보내기에서 별도 파일로 제공합니다.</p>}
+      <h5 className="img-cur">{g.platform} · {g.name} <span className="muted">{g.width}×{g.height}</span></h5>
       {comp && (
         <div className="preview">
-          <img src={`/api/generated/${comp.id}/file?v=${comp.id}`} alt={`${g.name} 미리보기`} />
+          <img src={fileUrl(comp)} alt={`${g.name} 미리보기`} />
           <div className="muted">
             {comp.width}×{comp.height}px{comp.layout.template ? ` · ${comp.layout.template}` : ''}
             {comp.layout.margin_source ? ` · ${comp.layout.margin_source}` : ''}
@@ -445,14 +448,14 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
         <p className="muted">편집할 합성 이미지가 없습니다. 시안 화면의 ④ 이미지 생성에서 먼저 이미지를 만들어 주세요. (분리 자산형 지면은 문구·로고를 합성하지 않아 편집 대상이 아닙니다)</p>
       ) : (
         <>
-          <div className="gen-tabs" role="tablist">
-            {editable.map((p) => (
-              <button key={p.id} role="tab" aria-selected={cur?.id === p.id} className={cur?.id === p.id ? 'on' : ''} onClick={() => onPick(p.id)}>
-                {p.platform} · {p.name}
-              </button>
-            ))}
-          </div>
-          <p className="muted">잠긴 요소(로고)는 바꿀 수 없습니다. 저장하면 검수 결과가 무효화되어 다시 검수해야 합니다.</p>
+          <ImageGrid
+            items={design.presets.map((p) => ({ preset_id: p.id, platform: p.platform, name: p.name, width: p.width, height: p.height }))}
+            rows={imgs} selected={cur?.id ?? null} onSelect={onPick}
+            dimmed={(it, row) => !row?.composite ? '합성 이미지 없음' : row.composite.layout.separate_assets ? '분리 자산형 — 문구·로고를 합성하지 않아 편집 대상이 아닙니다' : null}
+            badge={(it, row) => row?.composite && !row.composite.layout.separate_assets
+              ? <span className={`badge ${cur?.id === it.preset_id ? 'b-ok' : 'b-warn'}`}>{cur?.id === it.preset_id ? '편집 중' : '편집 가능'}</span>
+              : null} />
+          <p className="muted">카드를 누르면 그 지면을 편집합니다. 잠긴 요소(로고)는 바꿀 수 없고, 저장하면 검수 결과가 무효화되어 다시 검수해야 합니다.</p>
           {cur && <EditPanel key={cur.id} designId={design.id} presetId={cur.id} onClose={onBack} onSaved={load} />}
         </>
       )}

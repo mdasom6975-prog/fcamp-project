@@ -40,8 +40,8 @@ def test_cover_crop_keeps_heads_for_landscape_from_square():
     """정사각 → 2:1 은 세로 절반만 남는다. 중앙 크롭은 얼굴(위 4~20%)을 잘라 냈고, 내용 상자 크롭은 윗변에 맞춘다."""
     from app import compose
     src = _scene()
-    nw, nh, left, top, info = compose.crop_window(src, 1200, 600, focus=True)
-    assert top == 0 and info["mode"] == "내용 상자" and not info["cut"]["top"]
+    nw, nh, left, top, info = compose.crop_window(src, 1200, 600, focus=True, tighten=False)
+    assert top == 0 and info["mode"] == "내용 상자" and not info["cut"]["top"] and info["zoom"] == 1.0
     _, _, _, top_center, info_c = compose.crop_window(src, 1200, 600, focus=False)
     assert top_center == 300 and info_c["mode"] == "중앙"
     out = compose.cover_crop(src, 1200, 600)
@@ -51,13 +51,18 @@ def test_cover_crop_keeps_heads_for_landscape_from_square():
 
 
 def test_crop_window_reports_focus_for_editor():
-    """편집 화면 초기 초점(cx, cy)은 editing.render 의 공식과 같은 뜻이어야 한다."""
+    """편집 화면 초기 초점(zoom, cx, cy)은 editing.render 의 공식과 같은 뜻이어야 한다 — 같은 값으로 렌더하면 같은 창."""
+    from PIL import ImageChops
     from app import compose, editing
     src = _scene()
     nw, nh, left, top, info = compose.crop_window(src, 1200, 600)
     assert info["cx"] == pytest.approx((left + 600) / nw, abs=1e-3) and info["cy"] == pytest.approx((top + 300) / nh, abs=1e-3)
     els = editing.default_elements({"crop": info, "elements": []}, {}, None)
-    assert els[0]["props"]["cy"] == info["cy"]
+    assert els[0]["props"] == {"zoom": info["zoom"], "cx": info["cx"], "cy": info["cy"]}
+    a = compose.cover_crop(src, 1200, 600)
+    b, _ = editing.render(src, 1200, 600, [{"type": "image", "props": els[0]["props"], "z_index": 0}], lambda r: None, lambda a: None)
+    assert ImageChops.difference(a.convert("RGB"), b.convert("RGB")).getbbox() is None or \
+        max(ImageChops.difference(a.convert("RGB"), b.convert("RGB")).getextrema()[0]) <= 8
     assert editing.default_elements({"elements": []}, {}, None)[0]["props"] == {"zoom": 1.0, "cx": 0.5, "cy": 0.5}
 
 
@@ -71,7 +76,7 @@ def test_logo_moves_to_empty_bottom_corner_and_text_stacks_above():
     text = next(e for e in rep["elements"] if e["type"] == "text")
     assert text["box"][3] <= logo["box"][1], "문구는 로고 위에 쌓인다"
     assert "반투명 판" not in " ".join(rep["warnings"])
-    assert rep["crop"]["mode"] == "내용 상자"
+    assert rep["crop"]["mode"].startswith("내용 상자")
 
 
 def test_logo_stays_top_left_when_top_is_empty():
@@ -288,7 +293,7 @@ def test_make_image_reuses_same_ratio_background_without_new_call(env):
     assert len(calls) == 3
     j = r.json()
     assert (j["background"]["width"], j["background"]["height"]) == (1536, 1024)
-    assert j["composite"]["layout"]["crop"]["mode"] == "내용 상자"
+    assert j["composite"]["layout"]["crop"]["mode"].startswith("내용 상자")
     # 다시 만들기: 이 규격의 비율군 크기로 1장만
     r = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": True})
     assert r.status_code == 200 and calls[-1] == (1024, 1536) and len(calls) == 4
@@ -300,3 +305,72 @@ def test_brief_rejects_unknown_style(env):
     assert r.status_code == 422
     r = c.patch(f"/api/designs/{ids['design']}", json={"brief": {"product_name": "x", "image_style": "3D 렌더"}})
     assert r.status_code == 200 and r.json()["brief"]["image_style"] == "3D 렌더"
+
+
+def test_thumbnail_endpoint_caches_small_jpeg(env):
+    """썸네일 그리드용 축소본: 긴 변 360px JPEG, id 기준 파일 캐시."""
+    import io
+    from app import routers_images
+    c, ids = env["client"], env["ids"]
+    p = ids["presets"]
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    with env["Local"]() as db:
+        db.add(env["models"].CopyVariant(design_id=ids["design"], preset_version_id=p["피드 4:5"], variant_no=1,
+                                         headline="제목", selected=True, batch_no=1))
+        db.commit()
+    cid = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False}).json()["composite"]["id"]
+    r = c.get(f"/api/generated/{cid}/thumb")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    im = Image.open(io.BytesIO(r.content))
+    assert max(im.size) == 360 and im.size == (288, 360)
+    assert (routers_images.STORAGE_DIR / "thumbs" / f"{cid}_360.jpg").exists()
+    assert c.get("/api/generated/999999/thumb").status_code == 404
+
+
+def test_tighten_zooms_when_subject_is_small_and_keeps_copy_space():
+    """피사체가 위 45% 에 작게 있고 아래가 비면 확대해 피사체 몫을 키운다(상한 1.3배). 문구 자리(아래)는 남긴다."""
+    from app import compose
+    src = _scene(1024, 1536)
+    nw, nh, left, top, info = compose.crop_window(src, 1440, 1800)
+    assert 1.0 < info["zoom"] <= compose.MAX_TIGHTEN and info["mode"] == "내용 상자+확대"
+    assert not info["cut"]["top"] and not info["cut"]["left"] and not info["cut"]["right"], "피사체는 잘리지 않는다"
+    x0, y0, x1, y1 = info["content_box"]
+    # 확대 후 창 기준으로 피사체 아래에 문구 자리가 남는다 (창 높이의 25% 이상)
+    win_h = 1800 / info["zoom"]
+    assert (top / info["zoom"] + win_h) - y1 >= 0.25 * win_h
+    # 가로형: 피사체를 오른쪽에 두고 왼쪽을 비운다
+    nw, nh, left, top, info = compose.crop_window(_scene(1536, 1024), 1200, 600)
+    assert info["zoom"] > 1.0 and not info["cut"]["right"]
+    x0 = info["content_box"][0]
+    assert x0 / info["zoom"] - left / info["zoom"] >= 0.2 * (1200 / info["zoom"]), "왼쪽에 문구 자리"
+    # 이미 꽉 찬 피사체는 확대하지 않는다
+    full = Image.new("RGB", (1024, 1024), (240, 240, 240))
+    ImageDraw.Draw(full).rectangle((40, 40, 984, 984), fill=(30, 60, 120))
+    assert compose.crop_window(full, 500, 500)[4]["zoom"] == 1.0
+
+
+def test_busyness_does_not_treat_yellow_wall_as_skin():
+    """노란 단색 벽은 로고를 올리기 좋은 자리다 — 피부색으로 오인해 점수를 올리면 안 된다."""
+    from app import compose
+    yellow = Image.new("RGB", (200, 120), (250, 205, 80))
+    skin = Image.new("RGB", (200, 120), (225, 170, 140))
+    assert compose._busyness(yellow) < 0.3 < compose._busyness(skin)
+
+
+def test_text_stays_below_subject_after_tighten_on_story():
+    """스토리(안전영역 위 14%·아래 35%)에서 피사체를 확대해도 문구는 피사체 아래 띠에 들어가고 겹치지 않는다."""
+    from app import compose
+    im = Image.new("RGB", (1024, 1536), (250, 205, 80))
+    d = ImageDraw.Draw(im)
+    d.rectangle((0, 900, 1024, 1536), fill=(245, 245, 240))            # 바닥
+    for x in range(200, 820, 14):
+        d.rectangle((x, 560, x + 7, 900), fill=(60, 80, 120))            # 피사체(가운데)
+    _, rep = compose.compose(im, 1440, 2560, "금주의 특가왕, 리빙 창고 대방출", FONT, _logo(),
+                             {"top_pct": 14, "bottom_pct": 35, "left_pct": 6, "right_pct": 6}, 30, "#000000", "#FFFFFF")
+    assert rep["crop"]["zoom"] > 1.0
+    text = next(e for e in rep["elements"] if e["type"] == "text")
+    logo = next(e for e in rep["elements"] if e["type"] == "logo")
+    sx0, sy0, sx1, sy1 = rep["crop"]["content_box_canvas"]
+    assert text["box"][1] >= sy1, "문구는 피사체 아래"
+    assert text["font_size"] >= 80 and "겹칠 수 있습니다" not in " ".join(rep["warnings"])
+    assert logo["box"][3] <= text["box"][1] or logo["box"][1] >= text["box"][3], "로고와 문구가 겹치지 않는다"

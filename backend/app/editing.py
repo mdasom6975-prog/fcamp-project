@@ -11,7 +11,8 @@ def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None) ->
     """6-3 합성 결과(layout)를 편집 가능한 요소 목록으로 바꾼다. 로고는 기본 잠금."""
     crop = layout.get("crop") or {}     # 6-3 합성이 내용 상자 기준으로 자른 초점을 그대로 이어받는다
     els: list[dict] = [{"type": "image", "role": "배경", "locked": False, "z_index": 0,
-                        "props": {"zoom": 1.0, "cx": float(crop.get("cx", 0.5)), "cy": float(crop.get("cy", 0.5))}}]
+                        "props": {"zoom": float(crop.get("zoom", 1.0)), "cx": float(crop.get("cx", 0.5)),
+                                  "cy": float(crop.get("cy", 0.5))}}]
     sc = layout.get("scrim") or {"mode": layout.get("template", "정사각"), "color": "#000000", "opacity": 0.62}
     els.append({"type": "shape", "role": "스크림", "locked": False, "z_index": 1,
                 "props": {"mode": sc["mode"], "color": sc["color"], "opacity": sc["opacity"]}})

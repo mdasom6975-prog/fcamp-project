@@ -18,47 +18,75 @@ def template_for(w: int, h: int) -> str:
 
 
 def content_box(img: Image.Image) -> tuple[int, int, int, int] | None:
-    """이미지에서 '내용이 있는' 영역(피사체·소품)의 상자를 어림한다. 배경색(가장자리 중앙값)과 다른 픽셀 + 경계선이
-    있는 행·열을 찾는다. 단색에 가까운 빈 면(카피 스페이스)은 빠진다. 아무것도 못 찾으면 None."""
+    """이미지에서 '내용이 있는' 영역(피사체·소품)의 상자를 어림한다. 경계선(질감)이 충분히 많은 행·열을 찾는다.
+    단색 면(카피 스페이스)과 벽·바닥 경계 같은 한 줄짜리 선은 빠진다(선은 행 하나에만 많고 열마다는 1~2픽셀뿐이라
+    5% 문턱에 못 미친다). 아무것도 못 찾으면 None. (10/19: 배경색과의 색 차이 기준은 두 색 벽·바닥을 전부 내용으로
+    잡아 뺐다)"""
     W, H = img.size
     side = 96
     sw, sh = (side, max(8, round(side * H / W))) if W >= H else (max(8, round(side * W / H)), side)
     small = img.convert("RGB").resize((sw, sh), Image.BILINEAR)
-    px = small.load()
-    border = [px[x, y] for x in range(sw) for y in (0, sh - 1)] + [px[x, y] for y in range(sh) for x in (0, sw - 1)]
-    bg = tuple(sorted(c[i] for c in border)[len(border) // 2] for i in range(3))
     edge = small.convert("L").filter(ImageFilter.FIND_EDGES).load()
     rows, cols = [0] * sh, [0] * sw
     for y in range(1, sh - 1):
         for x in range(1, sw - 1):
-            r, g, b = px[x, y]
-            if abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2]) > 60 or edge[x, y] > 40:
+            if edge[x, y] > 30:
                 rows[y] += 1
                 cols[x] += 1
-    ys = [y for y, n in enumerate(rows) if n >= max(2, sw * 0.03)]
-    xs = [x for x, n in enumerate(cols) if n >= max(2, sh * 0.03)]
+    ys = [y for y, n in enumerate(rows) if n >= max(3, sw * 0.05)]
+    xs = [x for x, n in enumerate(cols) if n >= max(3, sh * 0.05)]
     if not ys or not xs:
         return None
     fx, fy = W / sw, H / sh
     return (round(xs[0] * fx), round(ys[0] * fy), round((xs[-1] + 1) * fx), round((ys[-1] + 1) * fy))
 
 
-def crop_window(img: Image.Image, w: int, h: int, focus: bool = True) -> tuple[int, int, int, int, dict]:
+MAX_TIGHTEN = 1.3          # 여백을 줄이려 확대하는 상한(원본 1024 기준 화질 유지)
+SUBJECT_SHARE = {VERTICAL: 0.55, SQUARE: 0.6, HORIZONTAL: 0.6}   # 피사체가 차지해야 할 몫(세로형·정사각은 높이, 가로형은 폭)
+
+
+def crop_window(img: Image.Image, w: int, h: int, focus: bool = True,
+                tighten: bool = True) -> tuple[int, int, int, int, dict]:
     """cover 리사이즈 후 잘라 낼 창의 위치. focus 면 content_box 를 담도록 창을 옮긴다(담을 수 없으면 세로는 윗변,
-    가로는 중심에 맞춘다 — 얼굴은 피사체의 위쪽에 있다). 반환: (nw, nh, left, top, 기록용 dict)"""
-    scale = max(w / img.width, h / img.height)
-    nw, nh = max(1, round(img.width * scale)), max(1, round(img.height * scale))
-    left, top = (nw - w) // 2, (nh - h) // 2
+    가로는 중심에 맞춘다 — 얼굴은 피사체의 위쪽에 있다). tighten 이면 피사체가 작아 빈 면이 넓을 때 창을 줄여(확대, 최대
+    MAX_TIGHTEN 배) 피사체가 SUBJECT_SHARE 만큼 차지하게 하고, 문구 자리(세로형·정사각은 아래, 가로형은 왼쪽)는 남긴다.
+    반환: (nw, nh, left, top, 기록용 dict). dict 의 zoom·cx·cy 는 editing.render 와 같은 뜻이다."""
+    scale0 = max(w / img.width, h / img.height)
+    nw0, nh0 = max(1, round(img.width * scale0)), max(1, round(img.height * scale0))
+    left, top = (nw0 - w) // 2, (nh0 - h) // 2
+    zoom = 1.0
     info: dict = {"mode": "중앙"}
     box = content_box(img) if focus else None
     if box:
-        x0, y0, x1, y1 = (round(v * scale) for v in box)
-        left = round((x0 + x1) / 2 - w / 2)                      # 가로: 내용 상자 중심
-        top = round((y0 + y1) / 2 - h / 2) if y1 - y0 <= h else y0   # 세로: 담기면 중심, 넘치면 윗변
-        left, top = min(max(left, 0), nw - w), min(max(top, 0), nh - h)
-        info = {"mode": "내용 상자", "content_box": [x0, y0, x1, y1],
-                "cut": {"top": top > y0, "bottom": y1 > top + h, "left": left > x0, "right": x1 > left + w}}
-    info.update({"cx": round((left + w / 2) / nw, 4), "cy": round((top + h / 2) / nh, 4)})
+        x0, y0, x1, y1 = (round(v * scale0) for v in box)
+        bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+        tpl = template_for(w, h)
+        if tighten:
+            if tpl == HORIZONTAL:
+                zoom = min(MAX_TIGHTEN, w / (bw / SUBJECT_SHARE[tpl]), h / bh if bh > 0 else MAX_TIGHTEN)
+            else:
+                zoom = min(MAX_TIGHTEN, h / (bh / SUBJECT_SHARE[tpl]), w / bw if bw > 0 else MAX_TIGHTEN)
+            zoom = max(1.0, round(zoom, 3))
+            if zoom < 1.03:
+                zoom = 1.0
+        ww, wh = w / zoom, h / zoom           # 확대 전 좌표계에서의 창 크기
+        if tpl == HORIZONTAL and zoom > 1:    # 피사체를 오른쪽에, 왼쪽은 문구 자리
+            left = x1 + 0.05 * ww - ww
+            top = (y0 + y1) / 2 - wh / 2
+        else:                                 # 가로 중심, 세로는 위에 약간의 머리 공간 (아래가 문구 자리)
+            left = (x0 + x1) / 2 - ww / 2
+            top = (y0 - 0.08 * wh) if zoom > 1 else ((y0 + y1) / 2 - wh / 2 if bh <= wh else y0)
+        left, top = min(max(left, 0), nw0 - ww), min(max(top, 0), nh0 - wh)
+        info = {"mode": "내용 상자" if zoom == 1 else "내용 상자+확대", "content_box": [x0, y0, x1, y1],
+                "cut": {"top": top > y0, "bottom": y1 > top + wh, "left": left > x0, "right": x1 > left + ww}}
+    scale = scale0 * zoom
+    nw, nh = max(w, round(img.width * scale)), max(h, round(img.height * scale))
+    left, top = min(max(round(left * zoom), 0), nw - w), min(max(round(top * zoom), 0), nh - h)
+    info.update({"zoom": zoom, "cx": round((left + w / 2) / nw, 4), "cy": round((top + h / 2) / nh, 4)})
+    if box:   # 캔버스 좌표계의 내용 상자 (문구가 피사체를 덮지 않게 compose 가 쓴다)
+        bx0, by0, bx1, by1 = info["content_box"]
+        info["content_box_canvas"] = [round(bx0 * zoom) - left, round(by0 * zoom) - top,
+                                      round(bx1 * zoom) - left, round(by1 * zoom) - top]
     return nw, nh, left, top, info
 
 
@@ -163,8 +191,9 @@ def _busyness(region: Image.Image) -> float:
     std = ImageStat.Stat(gray).stddev[0] / 64
     edge = ImageStat.Stat(gray.filter(ImageFilter.FIND_EDGES).crop((1, 1, 47, 47))).mean[0] / 32   # 테두리 1px 은 필터 아티팩트라 제외
     px = list(small.getdata())
-    skin = sum(1 for r, g, b in px if r > 95 and g > 40 and b > 20 and r > g and r > b
-               and abs(r - g) > 15 and max(r, g, b) - min(r, g, b) > 15) / len(px)
+    # 피부색: 붉은 기가 돌고(R>G>B) R-G 는 15~90, G-B 는 70 미만. 노란 벽(G-B 가 큼)이나 주황 단색은 제외한다 (10/19)
+    skin = sum(1 for r, g, b in px if r > 95 and g > 40 and b > 20 and r > g > b
+               and 15 < r - g < 90 and g - b < 70 and max(r, g, b) - min(r, g, b) > 15) / len(px)
     return std + edge + skin * 1.5
 
 
@@ -231,7 +260,17 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         else:
             cands["좌하단"] = [cl, cb - lh, cl + lw, cb]
             cands["우하단"] = [cr - lw, cb - lh, cr, cb]
-        corner, score, _ = pick_logo_corner(canvas, cands, pad)
+        corner, score, scores = pick_logo_corner(canvas, cands, pad)
+        # 세로형·정사각에서 피사체가 아래 자리를 비워 두면(위 모서리가 피사체와 안 겹치고 단순하면) 위 모서리를 우선한다 —
+        # 아래 띠는 문구 자리라 로고까지 두면 문구가 피사체 위로 밀려 올라간다
+        subj_box = crop.get("content_box_canvas")
+        if tpl != HORIZONTAL and subj_box and corner in ("좌하단", "우하단"):
+            sx0, sy0, sx1, sy1 = subj_box
+            tops = {k: v for k, v in cands.items() if k in ("좌상단", "우상단")
+                    and (v[3] + pad < sy0 or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
+            if tops:
+                corner = min(tops, key=scores.get)
+                score = scores[corner]
         logo_box = cands[corner]
         report["logo_placement"] = {"corner": corner, "busyness": round(score, 2)}
         if score > 0.8:
@@ -252,6 +291,22 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         ty0, ty1 = logo_box[3] + gap, cb
     else:                                   # 로고가 오른쪽이고 문구가 왼쪽 55%인 가로형은 겹치지 않아 위까지 쓴다
         ty0, ty1 = ct, cb
+    # 문구는 피사체(내용 상자)를 덮지 않는다: 세로형·정사각은 피사체 아래에서 시작, 가로형은 피사체 왼쪽까지만.
+    # 남는 자리가 너무 작으면(세로 25%·가로 30% 미만) 무리하지 않고 크기 맞춤·경고에 맡긴다.
+    min_size = max(16, round(min(w, h) * 0.035))
+    subj = crop.get("content_box_canvas")
+    if subj:
+        sx0, sy0, sx1, sy1 = subj
+        if tpl != HORIZONTAL and sy1 + gap > ty0 and sy0 < ty1:
+            if ty1 - (sy1 + gap) >= round(min_size * 1.28):      # 최소 글자 크기 한 줄이라도 들어가면 피사체 아래로
+                ty0 = sy1 + gap
+            else:
+                report["warnings"].append("문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)")
+        elif tpl == HORIZONTAL and sx0 - gap < tx1:
+            if sx0 - gap - tx0 >= 0.3 * (cr - cl):
+                tx1 = sx0 - gap
+            else:
+                report["warnings"].append("문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)")
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
     # 3) 스크림(가독성 보조): 문구 쪽에서 투명해지는 그라디언트
@@ -261,8 +316,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
 
     # 4) 제목 크기 맞춤 (잘라내지 않고 크기를 줄이며, 그래도 넘치면 경고만 남긴다)
     draw = ImageDraw.Draw(canvas)
-    size = max(24, round(min(w, h) * 0.075))
-    min_size = max(16, round(min(w, h) * 0.035))
+    size = max(24, round(min(w, h) * 0.09))      # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
     lines: list[str] = []
     font = ImageFont.truetype(font_path, size)
     while True:
