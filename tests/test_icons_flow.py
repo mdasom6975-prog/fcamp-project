@@ -1,0 +1,164 @@
+"""아이콘 세트가 광고 이미지 캠페인의 검수·내보내기에 들어가는지, 부족분 채우기(icons/fill)가 동작하는지 검사.
+외부 API 는 호출하지 않는다 (기능명 제안·렌더는 가짜 함수로 바꾼다). 임시 sqlite DB 와 임시 storage 를 쓴다."""
+import io
+import json
+import zipfile
+
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+
+def _blob() -> Image.Image:
+    im = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    ImageDraw.Draw(im).ellipse((300, 200, 700, 900), fill=(76, 105, 254, 255))
+    return im
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    from app import models, routers_export, routers_icons
+    from app.db import Base
+    from app.main import app
+    from app.routers_assets import get_db
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Local = sessionmaker(bind=engine, autoflush=False)
+    monkeypatch.setattr(routers_icons, "STORAGE_DIR", tmp_path / "storage")
+    monkeypatch.setattr(routers_export, "EXPORT_DIR", tmp_path / "exports")
+
+    def override():
+        with Local() as db:
+            yield db
+    app.dependency_overrides[get_db] = override
+
+    with Local() as db:
+        brand = models.Brand(name="쿠챠")
+        db.add(brand); db.flush()
+        bv = models.BrandVersion(brand_id=brand.id, version_no=1, levels={"icon_style": "필수", "colors": "권장"},
+                                 colors=[{"name": "주조", "hex": "#4C69FE", "role": "주조색"}],
+                                 icon_style={"corner": "둥근"}, forbidden_phrases=["최저가"])
+        db.add(bv); db.flush()
+        brand.current_version_id = bv.id
+        d = models.Design(brand_id=brand.id, brand_version_id=bv.id, kind="광고 이미지", preset_version_ids=[],
+                          brief={"product_name": "랜덤박스"})
+        db.add(d); db.commit()
+        ids = {"brand": brand.id, "bv": bv.id, "design": d.id}
+
+    def add_icons(n: int):
+        """3d 방식 아이콘 n개를 세트(batch 1)에 넣는다."""
+        with Local() as db:
+            d = db.get(models.Design, ids["design"]); bv = db.get(models.BrandVersion, ids["bv"])
+            style, palette = routers_icons._style(bv), routers_icons._palette(bv)
+            for i in range(1, n + 1):
+                routers_icons._save3d(db, d, bv, 1, i, f"기능{i}", f"오브젝트 {i}", f"prompt {i}", _blob(), style, palette,
+                                      256, 256, bv.forbidden_phrases)
+            db.commit()
+
+    client = TestClient(app)
+    try:
+        yield {"client": client, "ids": ids, "Local": Local, "add_icons": add_icons, "models": models}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_review_without_icon_set_has_no_icon_group(env):
+    c, did = env["client"], env["ids"]["design"]
+    out = c.post(f"/api/designs/{did}/review").json()
+    assert [g["preset_id"] for g in out["groups"]] == []
+    assert c.get(f"/api/designs/{did}/review").json()["groups"] == []
+
+
+def test_review_includes_icon_set_of_ad_campaign(env):
+    c, did = env["client"], env["ids"]["design"]
+    env["add_icons"](8)
+    out = c.post(f"/api/designs/{did}/review").json()
+    icon_groups = [g for g in out["groups"] if g["preset_id"] is None]
+    assert len(icon_groups) == 1 and icon_groups[0]["name"] == "아이콘 세트"
+    items = {i["item"]: i for i in icon_groups[0]["items"]}
+    assert items["기능 수"]["status"] == "수정 필요" and items["기능 수"]["blocking"], "8/10 은 차단"
+    assert items["투명 배경"]["status"] == "통과"
+    assert out["export_ready"] is False
+    assert any(b["preset"] == "아이콘 세트" and b["item"] == "기능 수" for b in out["blockers"])
+    # GET 도 같은 그룹을 돌려준다
+    assert [g["preset_id"] for g in c.get(f"/api/designs/{did}/review").json()["groups"]] == [None]
+
+
+def test_export_draft_includes_icon_files(env):
+    c, did = env["client"], env["ids"]["design"]
+    env["add_icons"](2)
+    c.post(f"/api/designs/{did}/review")
+    r = c.post(f"/api/designs/{did}/export", json={"draft": True})
+    assert r.status_code == 200, r.text
+    e = r.json()
+    names = [f["path"] if isinstance(f, dict) else f for f in e["files"]]
+    joined = " ".join(map(str, names))
+    assert "icons/png/01_" in joined and "icons/src/01_" in joined and "icons/png/02_" in joined
+    assert "icons/svg" not in joined, "3d 방식은 SVG 가 없다"
+    z = zipfile.ZipFile(io.BytesIO(c.get(e["download_url"]).content))
+    manifest = json.loads(z.read("manifest.json"))
+    icon_entry = next(p for p in manifest["presets"] if p["name"] == "아이콘 세트")
+    assert icon_entry["count"] == 2 and icon_entry["render"] == "3d" and icon_entry["ready"] is False
+    assert "검수결과.csv" in z.namelist()
+
+
+def test_export_without_icons_or_presets_is_rejected(env):
+    c, did = env["client"], env["ids"]["design"]
+    r = c.post(f"/api/designs/{did}/export", json={"draft": True})
+    assert r.status_code == 409
+
+
+def test_fill_adds_missing_icons_in_same_batch(env, monkeypatch):
+    from app import icons
+    c, did = env["client"], env["ids"]["design"]
+    env["add_icons"](8)
+    asked = {}
+
+    def fake_more(brand_name, brief, forbidden, existing, need):
+        asked.update(existing=list(existing), need=need)
+        # 기존 이름과 겹치는 제안은 걸러져야 한다
+        return [{"name": "기능1", "concept": "중복"}, {"name": "간편주문", "concept": "주문 버튼"}, {"name": "기대감", "concept": "별"}]
+
+    monkeypatch.setattr(icons, "propose3d_more", fake_more)
+    monkeypatch.setattr(icons, "render_many", lambda plist: [_blob() for _ in plist])
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    r = c.post(f"/api/designs/{did}/icons/fill")
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert asked == {"existing": [f"기능{i}" for i in range(1, 9)], "need": 2}
+    assert j["made"] == 2 and j["complete"] is True and len(j["icons"]) == 10
+    tail = [(a["position"], a["name"], a["batch_no"]) for a in j["icons"][-2:]]
+    assert tail == [(9, "간편주문", 1), (10, "기대감", 1)]
+    # 채운 뒤에는 세트가 가득 차 있으므로 다시 채우기는 409
+    assert c.post(f"/api/designs/{did}/icons/fill").status_code == 409
+    # 아이콘 세트 검수 항목만 무효화되었고, 재검수하면 기능 수가 통과
+    out = c.post(f"/api/designs/{did}/review").json()
+    items = {i["item"]: i for g in out["groups"] if g["preset_id"] is None for i in g["items"]}
+    assert items["기능 수"]["status"] == "통과"
+
+
+def test_fill_without_set_is_rejected(env):
+    c, did = env["client"], env["ids"]["design"]
+    assert c.post(f"/api/designs/{did}/icons/fill").status_code == 409
+
+
+def test_fill_invalidates_only_icon_review_items(env, monkeypatch):
+    from app import icons
+    from sqlalchemy import select
+    c, did, Local, models = env["client"], env["ids"]["design"], env["Local"], env["models"]
+    env["add_icons"](9)
+    c.post(f"/api/designs/{did}/review")
+    with Local() as db:   # 지면 검수 결과가 있다고 가정한 행 (검수 실행 뒤에 넣어야 검수 자체의 무효화를 피한다)
+        db.add(models.ReviewResult(design_id=did, preset_version_id=12345, category="규격", item="가짜", status="통과",
+                                   level=None, message="", blocking=False, needs_human=False))
+        db.commit()
+    monkeypatch.setattr(icons, "propose3d_more", lambda *a, **k: [{"name": "새기능", "concept": "x"}])
+    monkeypatch.setattr(icons, "render_many", lambda plist: [_blob() for _ in plist])
+    assert c.post(f"/api/designs/{did}/icons/fill").status_code == 200
+    with Local() as db:
+        rows = db.scalars(select(models.ReviewResult).where(models.ReviewResult.design_id == did)).all()
+        assert all(not r.valid for r in rows if r.preset_version_id is None)
+        assert all(r.valid for r in rows if r.preset_version_id == 12345), "지면 결과는 유지"

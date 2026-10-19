@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import phrases
 from .models import Asset, Brand, BrandVersion, Design, PresetVersion
 from .routers_assets import get_db
 from .routers_review import invalidate_reviews
@@ -19,6 +20,35 @@ class BriefIn(BaseModel):
     key_message: str = Field(default="", max_length=200)
     target: str = Field(default="", max_length=300)
     product_image_asset_id: int | None = None      # 제품 이미지(선택)
+    image_style: str = "자동"                       # 배경 형태: 자동 | imagegen.STYLES 의 이름
+    # 캠페인 필수·금지 표현. 비어 있으면 브랜드 규칙 값을 쓴다 (phrases.effective)
+    required_phrases: list[str] = Field(default=[], max_length=50)
+    forbidden_phrases: list[str] = Field(default=[], max_length=50)
+
+    @field_validator("required_phrases", "forbidden_phrases")
+    @classmethod
+    def _phr(cls, v: list[str]) -> list[str]:
+        from .phrases import clean
+        out = clean(v)
+        if any(len(s) > 100 for s in out):
+            raise ValueError("표현은 100자 이내")
+        return out
+
+    @model_validator(mode="after")
+    def _no_overlap(self):
+        both = set(self.required_phrases) & set(self.forbidden_phrases)
+        if both:
+            raise ValueError(f"필수 표현과 금지 표현에 같은 문구가 있습니다: {', '.join(sorted(both))}")
+        return self
+
+    @field_validator("image_style")
+    @classmethod
+    def _style(cls, v: str) -> str:
+        from .imagegen import AUTO_STYLE, STYLES
+        v = (v or AUTO_STYLE).strip()
+        if v != AUTO_STYLE and v not in STYLES:
+            raise ValueError(f"배경 형태는 {[AUTO_STYLE, *STYLES]} 중 하나")
+        return v
 
 
 class IconIn(BaseModel):
@@ -91,6 +121,8 @@ def _out(d: Design, db: Session) -> dict:
                             "width": v.production_width, "height": v.production_height, "status": v.status})
     return {
         "id": d.id, "kind": d.kind, "status": d.status, "brief": d.brief, "presets": presets,
+        # 실제 적용되는 필수·금지 표현(캠페인 입력 우선, 비면 브랜드 규칙)과 출처
+        "effective_phrases": phrases.effective(bv, d.brief) if bv else None,
         "brand": {"id": d.brand_id, "name": brand.name if brand else None,
                   "version_no": bv.version_no if bv else None,
                   "current_version_no": cur.version_no if cur else None},

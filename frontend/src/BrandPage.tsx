@@ -53,7 +53,7 @@ function Section({ item, form, set, hideLevel, children }: { item: string; form:
   )
 }
 
-function PhraseBox({ label, hint, tone, items, onChange }:
+export function PhraseBox({ label, hint, tone, items, onChange }:
   { label: string; hint: string; tone: 'req' | 'ban'; items: string[]; onChange: (v: string[]) => void }) {
   const [text, setText] = useState('')
   const add = (e: React.FormEvent) => {

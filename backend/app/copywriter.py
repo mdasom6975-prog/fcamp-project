@@ -44,6 +44,43 @@ def limits_for(text_limits: list[dict]) -> dict:
     return out
 
 
+def _as_chars(l: dict, key: str) -> int | None:
+    """제한값을 '글자 수' 기준으로 환산. 전각 2자 계산은 한글 위주 문장을 가정해 절반(보수적)."""
+    v = l.get(key)
+    if v is None:
+        return None
+    return v // 2 if l.get("method") == "전각 2자 계산" else v
+
+
+def merge_limits(per_placement: list[tuple[str, dict]]) -> dict:
+    """여러 지면의 제한을 '모든 지면에 같은 문장'을 쓰기 위한 가장 엄격한 제한 하나로 합친다.
+    슬롯별 max 는 가장 작은 값, min 은 가장 큰 값. 제한이 있는 지면이 하나도 없는 슬롯은 None.
+    field 에는 어느 지면의 제한이 기준이 됐는지 남긴다 (프롬프트의 '매체 필드명' 자리에 들어간다)."""
+    out: dict = {"headline": None, "body": None, "cta": None, "skipped": []}
+    seen: set[tuple[str, str]] = set()
+    for name, limits in per_placement:
+        for s in limits.get("skipped", []):
+            if (name, s["field"]) not in seen:
+                seen.add((name, s["field"]))
+                out["skipped"].append({"field": f"{name} {s['field']}", "reason": s["reason"]})
+        for slot in ("headline", "body", "cta"):
+            l = limits.get(slot)
+            if not l:
+                continue
+            mx, mn = _as_chars(l, "max"), _as_chars(l, "min")
+            cur = out[slot]
+            if cur is None:
+                out[slot] = {"field": f"모든 지면 공통 · 가장 짧은 제한 {name} '{l['field']}'", "min": mn, "max": mx,
+                             "level": l.get("level"), "method": "글자 수"}
+                continue
+            if mx is not None and (cur["max"] is None or mx < cur["max"]):
+                cur.update({"max": mx, "field": f"모든 지면 공통 · 가장 짧은 제한 {name} '{l['field']}'",
+                            "level": l.get("level")})
+            if mn is not None and (cur["min"] is None or mn > cur["min"]):
+                cur["min"] = mn
+    return out
+
+
 def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
     """생성된 문구를 코드로 검사한다. (글자 수는 공백 포함 문자 수)"""
     v: list[dict] = []

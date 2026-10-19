@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from . import copyfields, exporter
 from .db import STORAGE_DIR
-from .models import Asset, Brand, BrandVersion, Design, Export, IconAsset, PresetVersion
+from .models import Asset, Brand, BrandVersion, Design, Export, PresetVersion
 from .routers_assets import get_db
-from .routers_review import _brand_dict, _collect, gather
+from .routers_review import _brand_dict, _collect, gather, version_icon_set
 
 router = APIRouter(prefix="/api")
 EXPORT_DIR = STORAGE_DIR / "exports"
@@ -46,20 +46,22 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
         raise HTTPException(404, "시안을 찾을 수 없습니다")
     bv = db.get(BrandVersion, d.brand_version_id)
     brand_row = db.get(Brand, d.brand_id)
-    brand = _brand_dict(bv, brand_row.name)
+    brand = _brand_dict(bv, brand_row.name, d.brief)
     review = _collect(db, d)
     by_pid = {g["preset_id"]: g for g in review["groups"]}
 
-    if d.kind == "광고 이미지":
-        targets = preset_ids or list(d.preset_version_ids)
-        bad = [p for p in targets if p not in d.preset_version_ids]
-        if bad:
-            raise HTTPException(400, f"이 시안에 없는 규격입니다: {bad}")
-    else:
-        targets = [None]
+    targets = preset_ids or list(d.preset_version_ids)
+    bad = [p for p in targets if p not in d.preset_version_ids]
+    if bad:
+        raise HTTPException(400, f"이 시안에 없는 규격입니다: {bad}")
+    # 아이콘 세트는 브랜드 규칙 버전에 붙으므로 지면 선택과 무관하게 항상 함께 나간다 (프론트도 같은 규칙)
+    icons = version_icon_set(db, d.brand_version_id)
+    if not targets and not icons:
+        raise HTTPException(409, {"message": "내보낼 지면이나 아이콘 세트가 없습니다", "blockers": []})
+    wanted: list[int | None] = list(targets) + ([None] if icons else [])
 
-    groups = [by_pid[p] for p in targets if p in by_pid]
-    ready = bool(groups) and all(g["export_ready"] for g in groups) and len(groups) == len(targets)
+    groups = [by_pid[p] for p in wanted if p in by_pid]
+    ready = bool(groups) and all(g["export_ready"] for g in groups) and len(groups) == len(wanted)
     unresolved = [{"preset": g["name"], "item": i["item"], "status": i["status"], "message": i["message"]}
                   for g in groups for i in g["items"] if i["blocking"]]
     if not draft and not ready:
@@ -70,7 +72,7 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
 
     pack = exporter.Pack()
     manifest_presets, csv_rows, skipped = [], [], []
-    if d.kind == "광고 이미지":
+    if targets:
         logo_path = None
         if bv.logo_asset_id:
             a = db.get(Asset, bv.logo_asset_id)
@@ -94,13 +96,8 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
             })
         pack.add("copy.csv", exporter.csv_bytes(["지면", "필드", "값", "글자 수", "최대 글자 수", "출처"], csv_rows),
                  "카피(CSV)")
-    else:
-        batch = db.scalar(select(IconAsset.batch_no).where(IconAsset.design_id == d.id)
-                          .order_by(IconAsset.batch_no.desc()).limit(1))
-        icons = db.scalars(select(IconAsset).where(IconAsset.design_id == d.id, IconAsset.batch_no == batch)
-                           .order_by(IconAsset.position)).all() if batch else []
-        if not icons:
-            raise HTTPException(409, {"message": "생성된 아이콘이 없습니다", "blockers": []})
+    if icons:
+        grp = by_pid.get(None)
         for a in icons:
             base = f"{a.position:02d}_{exporter.safe(a.name, 30)}"
             if a.svg:   # svg 방식만 원본 SVG 가 있다
@@ -111,7 +108,7 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
         manifest_presets.append({"name": "아이콘 세트", "count": len(icons), "size": [icons[0].width, icons[0].height],
                                  "render": (icons[0].style or {}).get("render", "svg"), "style": icons[0].style,
                                  "prompts": sorted({a.prompt for a in icons if a.prompt}) if icons[0].prompt else None,
-                                 "ready": ready})
+                                 "review": grp["summary"] if grp else None, "ready": bool(grp and grp["export_ready"])})
 
     pack.add("검수결과.csv", exporter.review_csv(groups), "검수 결과")
     if status != "검수 완료":

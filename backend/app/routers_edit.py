@@ -8,7 +8,7 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import compose, copywriter, editing
+from . import compose, copywriter, editing, phrases
 from .db import STORAGE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
@@ -113,7 +113,7 @@ def _render_rows(db, d, pv, rows, bg_path):
     img, measure = editing.render(bg, W, H, _as_render(rows), lambda ref: _font_path(db, ref), _logo_of(db))
     text_el = next((r for r in rows if r.type == "text"), None)
     brand_hex = {c["hex"].upper() for c in (bv.colors or []) if c.get("hex")}
-    warns = editing.warnings_for(measure, W, H, pv.safe_area, brand_hex, bv.forbidden_phrases or [],
+    warns = editing.warnings_for(measure, W, H, pv.safe_area, brand_hex, phrases.effective(bv, d.brief)["forbidden_phrases"],
                                  text_el.props["text"] if text_el else None, img,
                                  text_el.props["color"] if text_el else None)
     return img, measure, warns
@@ -215,7 +215,7 @@ def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., emb
     txt = next((a for a in applied if a["row"].type == "text"), None)
     warns = editing.warnings_for(measure, W, H, pv.safe_area,
                                  {c["hex"].upper() for c in (bv.colors or []) if c.get("hex")},
-                                 bv.forbidden_phrases or [], txt["props"]["text"] if txt else None, img,
+                                 phrases.effective(bv, d.brief)["forbidden_phrases"], txt["props"]["text"] if txt else None, img,
                                  txt["props"]["color"] if txt else None)
     small = img.copy()
     small.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
@@ -327,8 +327,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         t = next((r for r in rows if r.type == "text"), None)
         if t is None or t.locked:
             raise HTTPException(400, "문구가 없거나 잠겨 있어 재생성할 수 없습니다")
-        rules = {"voice": bv.voice, "required_phrases": bv.required_phrases,
-                 "forbidden_phrases": bv.forbidden_phrases, "levels": bv.levels}
+        rules = phrases.rules(bv, d.brief)
         limits = copywriter.limits_for(pv.text_limits)
         try:
             variants, attempts = copywriter.generate_checked(

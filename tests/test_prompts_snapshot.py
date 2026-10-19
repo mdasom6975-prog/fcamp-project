@@ -154,3 +154,18 @@ def test_background_prompt(template):
 def test_background_prompt_minimal():
     from app import imagegen
     _assert_snapshot("image__minimal", imagegen.build_prompt("쿠챠", {}, BRIEF_MIN, "정사각") + "\n")
+
+
+@pytest.mark.parametrize("style", ["실사 인물", "실사 제품·공간", "플랫 일러스트", "3D 렌더", "그래픽 패턴"])
+def test_background_prompt_styles(style):
+    """배경 형태(image/style/*.md)별 문장. 템플릿은 정사각으로 고정한다."""
+    from app import imagegen
+    _assert_snapshot(f"image__style_{imagegen.STYLES[style]}",
+                     imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "정사각", style) + "\n")
+
+
+def test_background_variant_prompt():
+    """참조 이미지와 함께 보내는 '같은 장면' 변형 프롬프트 (image/same_scene.md + 가로형 배경 프롬프트)."""
+    from app import imagegen
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간")
+    _assert_snapshot("image__variant_가로형", imagegen.build_variant_prompt(base) + "\n")

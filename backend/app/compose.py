@@ -17,13 +17,56 @@ def template_for(w: int, h: int) -> str:
     return HORIZONTAL if r >= 1.25 else VERTICAL if r <= 0.8 else SQUARE
 
 
-def cover_crop(img: Image.Image, w: int, h: int) -> Image.Image:
-    """늘이지 않고 비율을 맞춰 중앙 기준으로 잘라 채운다."""
-    img = img.convert("RGB")
+def content_box(img: Image.Image) -> tuple[int, int, int, int] | None:
+    """이미지에서 '내용이 있는' 영역(피사체·소품)의 상자를 어림한다. 배경색(가장자리 중앙값)과 다른 픽셀 + 경계선이
+    있는 행·열을 찾는다. 단색에 가까운 빈 면(카피 스페이스)은 빠진다. 아무것도 못 찾으면 None."""
+    W, H = img.size
+    side = 96
+    sw, sh = (side, max(8, round(side * H / W))) if W >= H else (max(8, round(side * W / H)), side)
+    small = img.convert("RGB").resize((sw, sh), Image.BILINEAR)
+    px = small.load()
+    border = [px[x, y] for x in range(sw) for y in (0, sh - 1)] + [px[x, y] for y in range(sh) for x in (0, sw - 1)]
+    bg = tuple(sorted(c[i] for c in border)[len(border) // 2] for i in range(3))
+    edge = small.convert("L").filter(ImageFilter.FIND_EDGES).load()
+    rows, cols = [0] * sh, [0] * sw
+    for y in range(1, sh - 1):
+        for x in range(1, sw - 1):
+            r, g, b = px[x, y]
+            if abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2]) > 60 or edge[x, y] > 40:
+                rows[y] += 1
+                cols[x] += 1
+    ys = [y for y, n in enumerate(rows) if n >= max(2, sw * 0.03)]
+    xs = [x for x, n in enumerate(cols) if n >= max(2, sh * 0.03)]
+    if not ys or not xs:
+        return None
+    fx, fy = W / sw, H / sh
+    return (round(xs[0] * fx), round(ys[0] * fy), round((xs[-1] + 1) * fx), round((ys[-1] + 1) * fy))
+
+
+def crop_window(img: Image.Image, w: int, h: int, focus: bool = True) -> tuple[int, int, int, int, dict]:
+    """cover 리사이즈 후 잘라 낼 창의 위치. focus 면 content_box 를 담도록 창을 옮긴다(담을 수 없으면 세로는 윗변,
+    가로는 중심에 맞춘다 — 얼굴은 피사체의 위쪽에 있다). 반환: (nw, nh, left, top, 기록용 dict)"""
     scale = max(w / img.width, h / img.height)
     nw, nh = max(1, round(img.width * scale)), max(1, round(img.height * scale))
+    left, top = (nw - w) // 2, (nh - h) // 2
+    info: dict = {"mode": "중앙"}
+    box = content_box(img) if focus else None
+    if box:
+        x0, y0, x1, y1 = (round(v * scale) for v in box)
+        left = round((x0 + x1) / 2 - w / 2)                      # 가로: 내용 상자 중심
+        top = round((y0 + y1) / 2 - h / 2) if y1 - y0 <= h else y0   # 세로: 담기면 중심, 넘치면 윗변
+        left, top = min(max(left, 0), nw - w), min(max(top, 0), nh - h)
+        info = {"mode": "내용 상자", "content_box": [x0, y0, x1, y1],
+                "cut": {"top": top > y0, "bottom": y1 > top + h, "left": left > x0, "right": x1 > left + w}}
+    info.update({"cx": round((left + w / 2) / nw, 4), "cy": round((top + h / 2) / nh, 4)})
+    return nw, nh, left, top, info
+
+
+def cover_crop(img: Image.Image, w: int, h: int, focus: bool = True) -> Image.Image:
+    """늘이지 않고 비율을 맞춰 잘라 채운다. focus(기본) 면 내용 상자 기준, 아니면 중앙 기준."""
+    img = img.convert("RGB")
+    nw, nh, x, y, _ = crop_window(img, w, h, focus)
     img = img.resize((nw, nh), Image.LANCZOS)
-    x, y = (nw - w) // 2, (nh - h) // 2
     return img.crop((x, y, x + w, y + h))
 
 
@@ -156,12 +199,16 @@ def _logo_plate(canvas: Image.Image, logo: Image.Image, box: list[int]) -> Image
 def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
             scrim_hex: str | None) -> tuple[Image.Image, dict]:
-    canvas = cover_crop(bg, w, h)
+    bg = bg.convert("RGB")
+    nw, nh, x, y, crop = crop_window(bg, w, h)
+    canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
     tpl = template_for(w, h)
     L, T, R, B, safe_src = _margins(w, h, safe)
     cl, ct, cr, cb = L, T, w - R, h - B          # 콘텐츠 영역
     report: dict = {"template": tpl, "canvas": [w, h], "content_box": [cl, ct, cr, cb],
-                    "margin_source": safe_src, "warnings": [], "elements": []}
+                    "margin_source": safe_src, "crop": crop, "warnings": [], "elements": []}
+    if crop.get("cut", {}).get("top") or crop.get("cut", {}).get("bottom"):
+        report["warnings"].append("배경의 피사체가 이 규격 비율에 다 담기지 않아 위/아래가 일부 잘렸습니다")
 
     # 1) 로고 (원본 비율 유지, 확대·변형 없음)
     logo_box = None
@@ -174,11 +221,15 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     pad = round((logo_box[3] - logo_box[1]) * (logo_margin_pct or 0) / 100) if logo_box else 0
 
     # 1-1) 로고 위치 자동 선택: 후보 중 이미지가 가장 단순한 곳(사람·디테일 회피). 후보는 문구 영역과 겹치지 않는 곳만 쓴다.
+    #      세로형·정사각은 피사체가 위쪽에 오는 구도라 아래 모서리도 후보에 넣는다(선택되면 문구를 로고 위에 쌓는다).
     logo_plate = False
     if logo_box:
         lw, lh = logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]
         cands = {"좌상단": [cl, ct, cl + lw, ct + lh], "우상단": [cr - lw, ct, cr, ct + lh]}
         if tpl == HORIZONTAL:   # 가로형은 문구가 왼쪽 55%에 있어 오른쪽 아래도 비어 있다
+            cands["우하단"] = [cr - lw, cb - lh, cr, cb]
+        else:
+            cands["좌하단"] = [cl, cb - lh, cl + lw, cb]
             cands["우하단"] = [cr - lw, cb - lh, cr, cb]
         corner, score, _ = pick_logo_corner(canvas, cands, pad)
         logo_box = cands[corner]
@@ -187,15 +238,20 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             logo_plate = True
             report["warnings"].append("로고 주변 이미지가 복잡해 반투명 판을 깔았습니다")
     left_logo = bool(logo_box) and logo_box[0] <= cl + 1
+    bottom_logo = bool(logo_box) and tpl != HORIZONTAL and logo_box[1] > ct + 1
 
     # 2) 문구 영역
     if tpl == HORIZONTAL:
         tx0, tx1 = cl, cl + round((cr - cl) * 0.55)
     else:
         tx0, tx1 = cl, cr
-    # 문구는 로고 아래에서 시작한다. 로고가 오른쪽이고 문구가 왼쪽 55%인 가로형은 로고와 겹치지 않아 위까지 쓴다.
-    ty0 = (logo_box[3] + pad + round(h * 0.02)) if (logo_box and (left_logo or tpl != HORIZONTAL)) else ct
-    ty1 = cb
+    gap = pad + round(h * 0.02)
+    if bottom_logo:                         # 세로형·정사각에서 로고가 아래 모서리면 문구는 그 위에 쌓는다
+        ty0, ty1 = ct, logo_box[1] - gap
+    elif logo_box and (left_logo or tpl != HORIZONTAL):   # 문구는 로고 아래에서 시작한다
+        ty0, ty1 = logo_box[3] + gap, cb
+    else:                                   # 로고가 오른쪽이고 문구가 왼쪽 55%인 가로형은 겹치지 않아 위까지 쓴다
+        ty0, ty1 = ct, cb
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
     # 3) 스크림(가독성 보조): 문구 쪽에서 투명해지는 그라디언트

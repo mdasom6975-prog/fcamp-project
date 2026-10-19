@@ -4,16 +4,47 @@
     {
       "name": "backend",
       "runtimeExecutable": ".venv/bin/uvicorn",
-      "runtimeArgs": ["app.main:app", "--port", "8000"],
+      "runtimeArgs": [
+        "app.main:app",
+        "--port",
+        "8000"
+      ],
       "cwd": "backend",
       "port": 8000
     },
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "frontend",
       "port": 5173
+    },
+    {
+      "name": "backend-8010",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": [
+        "app.main:app",
+        "--port",
+        "8010"
+      ],
+      "cwd": "backend",
+      "port": 8010
+    },
+    {
+      "name": "frontend-8010",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "API_PORT=8010",
+        "npx",
+        "vite",
+        "--port",
+        "5174"
+      ],
+      "cwd": "frontend",
+      "port": 5174
     }
   ]
 }

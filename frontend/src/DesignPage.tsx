@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
+import { PhraseBox } from './BrandPage'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -11,7 +12,9 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
+  effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string }[]
   brand: { id: number; name: string; version_no: number; current_version_no: number }
   brand_outdated: boolean; created_at: string
@@ -29,7 +32,9 @@ async function post(url: string, body: unknown) {
 
 type Violation = { type: string; field: string; detail: string; severity: string }
 type Variant = { id: number; variant_no: number; headline: string; body: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
-type ImgOut = { id: number; width: number; height: number; layout: { warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean } } | null
+type ImgOut = { id: number; width: number; height: number; layout: { warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean; style?: string; style_reason?: string; logo_placement?: { corner: string } } } | null
+// 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
+const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean }
 type ImgRow = { preset_id: number; background: ImgOut; composite: ImgOut }
 type Limit = { field: string; min: number | null; max: number | null; level: string | null } | null
@@ -42,8 +47,15 @@ type CopyGroup = {
 
 const LETTERS = ['A', 'B', 'C', 'D', 'E']
 
-function CopyPanel({ designId, brandName, versionNo }: { designId: number; brandName: string; versionNo: number | null }) {
+type Screen = 'design' | 'edit' | 'review'
+
+function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange, onEdit, onReview }: {
+  designId: number; brandName: string; versionNo: number | null; imageStyle: string; onDesignChange: () => void
+  onEdit: (presetId: number) => void; onReview: () => void
+}) {
   const [groups, setGroups] = useState<CopyGroup[]>([])
+  const [bgStyle, setBgStyle] = useState(imageStyle)
+  useEffect(() => setBgStyle(imageStyle), [imageStyle])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
@@ -71,20 +83,12 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
     loadImgs()
   }, [designId, loadImgs])
 
-  const choose = async (presetId: number, variantId: number) => {
-    await post(`/api/designs/${designId}/copy/${variantId}/select`, {})
-    setGroups((gs) => gs.map((g) => g.preset_id !== presetId ? g
-      : { ...g, variants: g.variants.map((v) => ({ ...v, selected: v.id === variantId })) }))
-  }
-
-  // 시안 A/B/C 선택: 모든 지면에서 같은 번호의 카피를 고른다
+  // 시안 A/B/C 선택: 카피는 캠페인당 1회 생성해 모든 지면이 같은 문장을 쓰므로, 번호 하나를 모든 지면에 한 번에 적용한다
   const chooseNo = async (no: number) => {
     setPicking(true); setErr(null)
     try {
-      for (const g of groups) {
-        const v = g.variants.find((x) => x.variant_no === no)
-        if (v && !v.selected) await choose(g.preset_id, v.id)
-      }
+      await post(`/api/designs/${designId}/copy/select-variant`, { variant_no: no })
+      setGroups((gs) => gs.map((g) => ({ ...g, variants: g.variants.map((v) => ({ ...v, selected: v.variant_no === no })) })))
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -119,11 +123,12 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
     }
   }
 
-  // 배경은 모든 매체가 공유하므로 한 번만 새로 만들고, 이미 합성된 매체는 새 배경으로 다시 합성한다(추가 생성 비용 없음).
+  // 배경은 비율군(가로형/정사각/세로형)마다 1장 새로 만들고, 이미 합성된 매체는 새 배경으로 다시 합성한다(합성은 추가 생성 비용 없음).
   const regenBackground = async () => {
     setBgBusy(true); setBgMsg(null)
     try {
-      await post(`/api/designs/${designId}/background/regenerate`, {})
+      await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle })
+      onDesignChange()
       const failed: string[] = []
       for (const g of withCopy) {
         if (!imgs[g.preset_id]?.composite) continue
@@ -178,7 +183,14 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
   const count = preview ? preview.variants.length : 0
   const selected = preview?.variants.find((v) => v.selected) ?? null
   const letter = (v: Variant) => LETTERS[v.variant_no - 1] ?? String(v.variant_no)
-  const goEdit = () => document.getElementById('sec-images')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const goImages = () => document.getElementById('sec-images')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const firstComposite = withCopy.find((g) => imgs[g.preset_id]?.composite)?.preset_id ?? null
+  const hasComposite = firstComposite !== null
+  // 같은 번호 시안의 지면별 글자 수 위반(문장은 모든 지면이 같으므로 필수·금지 표현 위반은 한 번만 센다)
+  const lengthIssues = (no: number) => withCopy.flatMap((g) =>
+    (g.variants.find((v) => v.variant_no === no)?.violations ?? [])
+      .filter((x) => x.type === 'length' || x.type === 'min_length')
+      .map((x) => ({ ...x, placement: g.name })))
 
   return (
     <div className="copy gen">
@@ -201,13 +213,16 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
       {has && tab === 'ads' && (
         <>
           <p className="muted gen-note">
-            미리보기는 <strong>{preview.platform} {preview.name}</strong> 기준이며, 고른 시안은 선택한 규격 {withCopy.length}개에 각 지면의 글자 수 제한에 맞춰 적용됩니다.
+            카피는 선택한 규격 {withCopy.length}개의 글자 수 제한 중 가장 엄격한 값으로 한 번에 만들어, 고른 시안의 문장이 <strong>모든 지면에 동일하게</strong> 적용됩니다.
           </p>
           <div className="ad-grid">
             {preview.variants.map((v) => {
               const reqOk = !v.violations.some((x) => x.type === 'required_missing')
               const banOk = !v.violations.some((x) => x.type === 'forbidden')
-              const others = v.violations.filter((x) => x.type !== 'required_missing' && x.type !== 'forbidden')
+              const others = [
+                ...v.violations.filter((x) => !['required_missing', 'forbidden', 'length', 'min_length'].includes(x.type)),
+                ...lengthIssues(v.variant_no).map((x) => ({ ...x, field: `${x.placement} ${x.field}` })),
+              ]
               return (
                 <article key={v.id} className={`ad-card ${v.selected ? 'on' : ''}`}>
                   <h4>시안 {letter(v)}</h4>
@@ -240,12 +255,17 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
               <p className={usage.exhausted ? 'notice err' : 'muted'}>
                 오늘 이미지 생성{usage.provider ? `(${usage.provider})` : ''} {usage.used}/{usage.limit}회 사용 · 남은 횟수 약 {usage.remaining}회
                 {usage.exhausted ? ' · 오늘 설정한 생성 한도를 모두 사용했습니다' : ''}
-                {' '}(호출 횟수 기준, UTC 0시 초기화) · 배경은 시안당 1회 생성 후 매체별 크기로 자동 조정됩니다.
+                {' '}(호출 횟수 기준, UTC 0시 초기화) · 배경은 첫 비율군 1장을 만든 뒤 나머지 비율군(세로형·정사각·가로형)은 같은 장면을 그 비율 구도로 변형해 모든 매체가 한 장면을 씁니다.
               </p>
             )}
             <div className="row">
+              <label className="muted">배경 형태{' '}
+                <select value={bgStyle} disabled={bgBusy} onChange={(e) => setBgStyle(e.target.value)}>
+                  {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
               <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={regenBackground}>
-                배경 새로 생성 (모든 매체에 적용)
+                배경 새로 생성 (비율군마다 1장, 모든 매체에 적용)
               </button>
               <button disabled={bgBusy || imgBusy !== null} onClick={resetGenerated}>시안 이미지 초기화</button>
               {bgBusy && <span className="muted">배경 생성 후 합성된 매체를 다시 합성하는 중… 1~2분 걸릴 수 있습니다.</span>}
@@ -267,7 +287,7 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
                   <div key={cur.preset_id} className="copy-group">
                     <ImageBlock g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
                       canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
-                      designId={designId} onEdited={loadImgs} />
+                      onEdit={onEdit} />
                   </div>
                 </>
               )
@@ -281,38 +301,54 @@ function CopyPanel({ designId, brandName, versionNo }: { designId: number; brand
             <span className="pick-text">
               {selected ? <>선택: <strong>시안 {letter(selected)}</strong> · {selected.headline}</> : <span className="muted">사용할 시안을 선택해 주세요.</span>}
             </span>
-            <button className="primary" disabled={!selected} onClick={goEdit}>편집하러 가기 →</button>
+            <span className="row">
+              {hasComposite
+                ? <button onClick={() => onEdit(firstComposite!)}>편집 화면으로 →</button>
+                : <button className="primary" disabled={!selected} onClick={goImages}>이미지 생성으로 →</button>}
+              <button className="primary" disabled={!hasComposite} onClick={onReview}>검수·내보내기 →</button>
+            </span>
           </div>
         </>
       )}
 
-      {has && tab === 'copy' && withCopy.map((g) => (
-        <div key={g.preset_id} className="copy-group">
-          <h4>{g.platform} · {g.name}</h4>
-          <p className="muted">
-            적용한 글자 수 제한 — 제목: {lim(g.limits.headline)} · 본문: {lim(g.limits.body)} · CTA: {lim(g.limits.cta)}
-            {g.limits.skipped.length > 0 && ` · 이번 단계 제외: ${g.limits.skipped.map((s) => `${s.field}(${s.reason})`).join(', ')}`}
-          </p>
-          {g.variants.map((v) => (
-            <div key={v.id} className={`variant ${v.violations.length ? 'bad' : ''}`}>
-              <div className="muted">
-                <label style={{ display: 'inline-flex', gap: 6, marginRight: 8 }}>
-                  <input type="radio" name={`sel-${g.preset_id}`} checked={v.selected} onChange={() => choose(g.preset_id, v.id)} /> 이 카피 사용
-                </label>
-                시안 {letter(v)}{v.attempts > 1 ? ' · 규칙 위반으로 1회 재생성됨' : ''}
+      {has && tab === 'copy' && (
+        <div className="copy-group">
+          <h4>모든 지면 공통 카피 {count}개</h4>
+          <p className="muted">문장은 모든 지면이 같습니다. 지면별로 적용한 글자 수 제한과, 그 제한을 넘는 시안만 아래에 표시합니다.</p>
+          <ul className="muted">
+            {withCopy.map((g) => (
+              <li key={g.preset_id}>
+                <strong>{g.platform} · {g.name}</strong> — 제목: {lim(g.limits.headline)} · 본문: {lim(g.limits.body)} · CTA: {lim(g.limits.cta)}
+                {g.limits.skipped.length > 0 && ` · 이번 단계 제외: ${g.limits.skipped.map((s) => `${s.field}(${s.reason})`).join(', ')}`}
+              </li>
+            ))}
+          </ul>
+          {preview.variants.map((v) => {
+            const issues = [
+              ...v.violations.filter((x) => x.type !== 'length' && x.type !== 'min_length').map((x) => ({ ...x, placement: '' })),
+              ...lengthIssues(v.variant_no),
+            ]
+            return (
+              <div key={v.id} className={`variant ${issues.length ? 'bad' : ''}`}>
+                <div className="muted">
+                  <label style={{ display: 'inline-flex', gap: 6, marginRight: 8 }}>
+                    <input type="radio" name="sel-all" checked={v.selected} disabled={picking} onChange={() => chooseNo(v.variant_no)} /> 모든 지면에 이 카피 사용
+                  </label>
+                  시안 {letter(v)}{v.attempts > 1 ? ' · 규칙 위반으로 1회 재생성됨' : ''}
+                </div>
+                <div><strong>제목</strong> {v.headline} <span className="muted">({v.headline.length}자)</span></div>
+                <div><strong>본문</strong> {v.body} <span className="muted">({v.body.length}자)</span></div>
+                <div><strong>CTA</strong> {v.cta} <span className="muted">({v.cta.length}자)</span></div>
+                {issues.map((x, i) => (
+                  <span key={i} className={`badge ${x.severity === '필수' || x.severity === '강제' || x.severity === '수정 필요' ? 'b-need' : 'b-warn'}`}>
+                    {x.severity} · {x.placement ? `${x.placement} ` : ''}{x.field}: {x.detail}
+                  </span>
+                ))}
               </div>
-              <div><strong>제목</strong> {v.headline} <span className="muted">({v.headline.length}자)</span></div>
-              <div><strong>본문</strong> {v.body} <span className="muted">({v.body.length}자)</span></div>
-              <div><strong>CTA</strong> {v.cta} <span className="muted">({v.cta.length}자)</span></div>
-              {v.violations.map((x, i) => (
-                <span key={i} className={`badge ${x.severity === '필수' || x.severity === '강제' || x.severity === '수정 필요' ? 'b-need' : 'b-warn'}`}>
-                  {x.severity} · {x.field}: {x.detail}
-                </span>
-              ))}
-            </div>
-          ))}
+            )
+          })}
         </div>
-      ))}
+      )}
     </div>
   )
 }
@@ -345,13 +381,12 @@ function CommonText({ designId, onApplied }: { designId: number; onApplied: () =
   )
 }
 
-function ImageBlock({ g, row, busy, err, canMake, onMake, designId, onEdited }: {
+function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit }: {
   g: CopyGroup; row?: ImgRow; busy: boolean; err?: string; canMake: boolean
-  onMake: (presetId: number, regenerate: boolean) => void; designId: number; onEdited: () => void
+  onMake: (presetId: number, regenerate: boolean) => void; onEdit: (presetId: number) => void
 }) {
   const comp = row?.composite
   const sep = g.content_kind === '분리 자산형'
-  const [editing, setEditing] = useState(false)
   return (
     <div className="imgblock">
       {sep && <p className="muted">분리 자산형: 텍스트 없는 이미지만 만들고, 로고·카피는 내보내기에서 별도 파일로 제공합니다.</p>}
@@ -361,6 +396,8 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, designId, onEdited }: 
           <div className="muted">
             {comp.width}×{comp.height}px{comp.layout.template ? ` · ${comp.layout.template}` : ''}
             {comp.layout.margin_source ? ` · ${comp.layout.margin_source}` : ''}
+            {comp.layout.logo_placement ? ` · 로고 ${comp.layout.logo_placement.corner}` : ''}
+            {row?.background ? ` · 배경 ${row.background.width}×${row.background.height}${row.background.layout.style ? ` · ${row.background.layout.style}` : ''}` : ''}
           </div>
           {(comp.layout.warnings ?? []).map((w, i) => <div key={i} className="badge b-warn">{w}</div>)}
         </div>
@@ -369,13 +406,57 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, designId, onEdited }: 
         <button className="primary" disabled={busy || !canMake} onClick={() => onMake(g.preset_id, false)}>
           {comp ? (sep ? '이미지 다시 만들기(새로 생성)' : '문구 다시 합성(배경 유지)') : '이미지 생성'}
         </button>
-        {comp && !sep && <button onClick={() => setEditing((v) => !v)}>{editing ? '편집 닫기' : '편집'}</button>}
+        {comp && !sep && <button onClick={() => onEdit(g.preset_id)}>편집 화면에서 열기 →</button>}
         {busy && <span className="muted">이미지 생성 중… 1~2분 걸릴 수 있습니다. 비용이 발생합니다.</span>}
         {!canMake && <span className="muted">완성형 지면은 사용할 카피를 먼저 선택해 주세요.</span>}
       </div>
       {err && <div className="notice err">{err}</div>}
-      {editing && <EditPanel designId={designId} presetId={g.preset_id} onClose={() => setEditing(false)} onSaved={onEdited} />}
     </div>
+  )
+}
+
+// ---------- 편집 화면 (시안·검수와 분리) ----------
+function EditScreen({ design, presetId, onPick, onBack, onReview }: {
+  design: Design; presetId: number | null; onPick: (id: number) => void; onBack: () => void; onReview: () => void
+}) {
+  const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
+  const [loaded, setLoaded] = useState(false)
+  const load = useCallback(() =>
+    fetch(`/api/designs/${design.id}/images`).then((r) => r.json()).then((rows: ImgRow[]) => {
+      if (Array.isArray(rows)) setImgs(Object.fromEntries(rows.map((x) => [x.preset_id, x])))
+    }).finally(() => setLoaded(true)), [design.id])
+  useEffect(() => { load() }, [load])
+
+  // 편집은 완성형(로고·문구를 합성한) 지면의 합성 이미지가 있어야 가능하다
+  const editable = design.presets.filter((p) => imgs[p.id]?.composite && !imgs[p.id]?.composite?.layout.separate_assets)
+  const cur = editable.find((p) => p.id === presetId) ?? editable[0] ?? null
+  useEffect(() => { if (cur && cur.id !== presetId) onPick(cur.id) }, [cur, presetId, onPick])
+
+  return (
+    <section className="card step-card" id="sec-edit">
+      <header>
+        <h3><span className="step-no">④</span> 이미지 편집</h3>
+        <div className="row">
+          <button type="button" onClick={onBack}>← 시안으로</button>
+          <button type="button" className="primary" disabled={editable.length === 0} onClick={onReview}>검수·내보내기 →</button>
+        </div>
+      </header>
+      {!loaded ? <p className="muted">불러오는 중…</p> : editable.length === 0 ? (
+        <p className="muted">편집할 합성 이미지가 없습니다. 시안 화면의 ④ 이미지 생성에서 먼저 이미지를 만들어 주세요. (분리 자산형 지면은 문구·로고를 합성하지 않아 편집 대상이 아닙니다)</p>
+      ) : (
+        <>
+          <div className="gen-tabs" role="tablist">
+            {editable.map((p) => (
+              <button key={p.id} role="tab" aria-selected={cur?.id === p.id} className={cur?.id === p.id ? 'on' : ''} onClick={() => onPick(p.id)}>
+                {p.platform} · {p.name}
+              </button>
+            ))}
+          </div>
+          <p className="muted">잠긴 요소(로고)는 바꿀 수 없습니다. 저장하면 검수 결과가 무효화되어 다시 검수해야 합니다.</p>
+          {cur && <EditPanel key={cur.id} designId={design.id} presetId={cur.id} onClose={onBack} onSaved={load} />}
+        </>
+      )}
+    </section>
   )
 }
 
@@ -395,9 +476,12 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   const [err, setErr] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [ver, setVer] = useState(0)   // 이미지 캐시 무효화
+  const [target, setTarget] = useState(10)   // 세트 목표 개수 (서버 설정)
+  const [filling, setFilling] = useState(false)
 
   useEffect(() => {
     fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
+    fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count) }).catch(() => undefined)
   }, [designId])
 
   const generate = async () => {
@@ -405,11 +489,25 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     try {
       const j = await post(`/api/designs/${designId}/icons`, {})
       setItems(j.icons); setVer((v) => v + 1)
-      if (!j.complete) setNote(`목표 ${j.requested}개 중 ${j.made}개만 만들어졌습니다. 부족한 아이콘은 개별로 다시 그릴 수 있습니다.`)
+      if (!j.complete) setNote(`목표 ${j.requested}개 중 ${j.made}개만 만들어졌습니다. 아래 '부족한 아이콘 채우기'로 나머지를 이어서 만들 수 있습니다.`)
     } catch (e) {
       setErr((e as Error).message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  // 세트가 목표 개수에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 이어서 만든다. 아이콘 1개당 이미지 1장 비용
+  const fill = async () => {
+    setFilling(true); setErr(null); setNote(null)
+    try {
+      const j = await post(`/api/designs/${designId}/icons/fill`, {})
+      setItems(j.icons); setVer((v) => v + 1)
+      if (!j.complete) setNote(`${j.made}개를 채웠지만 아직 목표 ${j.requested}개 중 ${j.icons.length}개입니다. 다시 시도할 수 있습니다.`)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setFilling(false)
     }
   }
 
@@ -471,6 +569,15 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       </p>
       {err && <div className="notice err">{err}</div>}
       {note && <div className="notice err">{note}</div>}
+      {items.length < target && (
+        <div className="row">
+          <span className="muted">목표 {target}개 중 {items.length}개 — 세트가 아직 채워지지 않아 검수에서 '기능 수' 항목이 차단됩니다.</span>
+          <button disabled={filling || one !== null} onClick={fill}>
+            {filling ? `부족한 아이콘 ${target - items.length}개를 렌더하는 중…` : `부족한 아이콘 ${target - items.length}개 채우기`}
+          </button>
+          {!filling && <span className="muted">(아이콘 1개당 이미지 1장 비용)</span>}
+        </div>
+      )}
       {st && items[0].render === '3d' ? (
         <p className="muted">
           적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px (원본 1024)
@@ -512,7 +619,11 @@ const campaignState = (d: Design) =>
 const campaignMeta = (d: Design) =>
   `${d.kind === '광고 이미지' ? `지면 ${d.presets.length}개` : '아이콘 세트'} · ${campaignState(d)} · ${fmtDate(d.created_at)}`
 
-type Brief = { product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null }
+type Brief = {
+  product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null; image_style: string
+  required_phrases: string[]; forbidden_phrases: string[]
+}
+const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', required_phrases: [], forbidden_phrases: [] }
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
 
@@ -528,7 +639,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const [newName, setNewName] = useState('')
   // 입력 수정
   const [editing, setEditing] = useState(false)
-  const [brief, setBrief] = useState<Brief>({ product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null })
+  const [brief, setBrief] = useState<Brief>(EMPTY_BRIEF)
   const [picked, setPicked] = useState<number[]>([])
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -536,6 +647,11 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const productInput = useRef<HTMLInputElement>(null)
   const [hasCopy, setHasCopy] = useState<boolean | null>(null)   // 이 캠페인에 생성된 카피가 있는지
   const [copyKey, setCopyKey] = useState(0)                       // 카피 영역 다시 불러오기
+  // 캠페인 화면 분리: 시안(입력·카피·이미지 생성) / 편집(이미지 편집기) / 검수·내보내기
+  const [screen, setScreen] = useState<Screen>('design')
+  const [editPreset, setEditPreset] = useState<number | null>(null)   // 편집 화면에서 열어 둔 지면
+  const goEdit = (presetId: number | null = null) => { setEditPreset(presetId); setScreen('edit'); window.scrollTo(0, 0) }
+  const goScreen = (s: Screen) => { setScreen(s); window.scrollTo(0, 0) }
   const [platTab, setPlatTab] = useState<string | null>(null)
   const [rules, setRules] = useState<{ req: number; ban: number } | null>(null)
   const [moveTo, setMoveTo] = useState<number | ''>('')
@@ -567,9 +683,10 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
 
   const openCampaign = (d: Design) => {
     setActiveId(d.id); setMsg(null)
-    setBrief({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null })
+    setBrief({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
+      required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
     setPicked(d.presets.map((p) => p.id))
-    setEditing(false); setHasCopy(null); setRules(null)
+    setEditing(false); setHasCopy(null); setRules(null); setScreen('design'); setEditPreset(null)
     if (d.kind === '광고 이미지') {
       fetch(`/api/designs/${d.id}/copy`).then((r) => r.json())
         .then((g) => setHasCopy(Array.isArray(g) && g.some((x: { variants: unknown[] }) => x.variants.length > 0)))
@@ -590,7 +707,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     try {
       const d: Design = await post('/api/designs', {
         brand_id: workId, kind: '광고 이미지',
-        brief: { product_name: newName.trim(), description: '', key_message: '', target: '' },
+        brief: { ...EMPTY_BRIEF, product_name: newName.trim() },
         preset_version_ids: [],
       })
       setNewName('')
@@ -676,7 +793,6 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     }
   }
 
-  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   if (brands.length === 0 && loaded)
     return <main className="page"><h1>규격·메시지·시안</h1><p className="muted">먼저 '브랜드' 탭에서 브랜드를 등록해 주세요.</p></main>
@@ -713,15 +829,17 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     </div>
   )
 
+  // 3·4단계는 캠페인에 카피가 있어야 열린다 (편집은 합성 이미지, 검수는 카피·이미지 기준)
+  const stepReady = !!active && active.kind === '광고 이미지' && hasCopy === true
   const Stepper = (
     <nav className="steps" aria-label="진행 단계">
       <button type="button" onClick={onGoBrand}>1. 브랜드 규칙</button>
       <span className="sep">›</span>
-      <button type="button" className="on">2. 규격·메시지·시안</button>
+      <button type="button" className={!active || screen === 'design' ? 'on' : ''} onClick={() => goScreen('design')}>2. 규격·메시지·시안</button>
       <span className="sep">›</span>
-      <button type="button" disabled={!active} onClick={() => scrollTo('sec-copy')}>3. 편집</button>
+      <button type="button" className={active && screen === 'edit' ? 'on' : ''} disabled={!stepReady} onClick={() => goEdit(editPreset)}>3. 편집</button>
       <span className="sep">›</span>
-      <button type="button" disabled={!active} onClick={() => scrollTo('sec-review')}>4. 검수·내보내기</button>
+      <button type="button" className={active && screen === 'review' ? 'on' : ''} disabled={!stepReady} onClick={() => goScreen('review')}>4. 검수·내보내기</button>
     </nav>
   )
 
@@ -846,6 +964,23 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             <input value={brief.key_message} maxLength={200} placeholder="예: 오늘 주문하면 내일 아침 신선하게 도착합니다" onChange={(e) => setBrief({ ...brief, key_message: e.target.value })} />
             <span className="counter">{brief.key_message.length}/200</span>
           </label>
+          <label className="msg-field">배경 형태 <span className="opt">(선택)</span>
+            <select value={brief.image_style} onChange={(e) => setBrief({ ...brief, image_style: e.target.value })}>
+              {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <span className="muted">자동이면 브랜드 이미지 톤·상품 설명의 단서(일러스트, 3D, 패턴, 인물)로 고르고, 단서가 없으면 사람 없는 실사 제품·공간으로 만듭니다.</span>
+          </label>
+          <div className="msg-field">필수 / 금지 표현 <span className="opt">(선택)</span>
+            <span className="muted">이 캠페인의 카피 생성·검수에 씁니다. 비워 두면 브랜드 규칙의 표현(필수 {rules?.req ?? '-'}개 · 금지 {rules?.ban ?? '-'}개)이 적용됩니다.</span>
+            <div className="field-grid">
+              <PhraseBox label={`필수 표현${brief.required_phrases.length ? ' (캠페인 우선)' : ` (브랜드 규칙 ${rules?.req ?? 0}개 적용 중)`}`}
+                hint="카피에 반드시 포함" tone="req" items={brief.required_phrases}
+                onChange={(v) => setBrief({ ...brief, required_phrases: v })} />
+              <PhraseBox label={`금지 표현${brief.forbidden_phrases.length ? ' (캠페인 우선)' : ` (브랜드 규칙 ${rules?.ban ?? 0}개 적용 중)`}`}
+                hint="카피에 포함되면 수정 필요" tone="ban" items={brief.forbidden_phrases}
+                onChange={(v) => setBrief({ ...brief, forbidden_phrases: v })} />
+            </div>
+          </div>
           <div className="msg-field">제품 이미지 <span className="opt">(선택)</span>
             <div className="product-img">
               <div className="product-box">
@@ -958,6 +1093,20 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
           </section>
         ) : hasCopy === null ? (
           <p className="muted">불러오는 중…</p>
+        ) : screen === 'edit' && hasCopy ? (
+          <EditScreen key={d.id} design={d} presetId={editPreset} onPick={setEditPreset}
+            onBack={() => goScreen('design')} onReview={() => goScreen('review')} />
+        ) : screen === 'review' && hasCopy ? (
+          <section className="card step-card" id="sec-review">
+            <header>
+              <h3><span className="step-no">⑤</span> 검수·내보내기</h3>
+              <div className="row">
+                <button type="button" onClick={() => goEdit(editPreset)}>← 편집으로</button>
+                <button type="button" onClick={() => goScreen('design')}>시안으로</button>
+              </div>
+            </header>
+            <ReviewPanel designId={d.id} />
+          </section>
         ) : (
           <>
             {(!hasCopy || editing) ? (
@@ -974,6 +1123,11 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <div className="camp-chips left">
                   <span className="info-chip">서비스 {d.brief.product_name}{d.brief.description ? ` · ${d.brief.description}` : ''}</span>
                   {d.brief.target && <span className="info-chip">타깃 {d.brief.target}</span>}
+                  {d.effective_phrases && (
+                    <span className="info-chip" title={`필수: ${d.effective_phrases.required_phrases.join(', ') || '없음'} / 금지: ${d.effective_phrases.forbidden_phrases.join(', ') || '없음'}`}>
+                      필수 표현 {d.effective_phrases.required_phrases.length}개({d.effective_phrases.required_source}) · 금지 표현 {d.effective_phrases.forbidden_phrases.length}개({d.effective_phrases.forbidden_source})
+                    </span>
+                  )}
                   <span className="info-chip">규격 {d.presets.length}개</span>
                   <span className="info-chip">광고 시안 + 카피</span>
                 </div>
@@ -981,17 +1135,12 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             )}
 
             {hasCopy && (
-              <>
-                <section className="card step-card" id="sec-copy">
-                  <header><h3><span className="step-no">③</span> 카피·시안 선택</h3></header>
-                  <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no} />
-                </section>
-
-                <section className="card step-card" id="sec-review">
-                  <header><h3><span className="step-no">⑤</span> 검수·내보내기</h3></header>
-                  <ReviewPanel designId={d.id} />
-                </section>
-              </>
+              <section className="card step-card" id="sec-copy">
+                <header><h3><span className="step-no">③</span> 카피·시안 선택</h3></header>
+                <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no}
+                  imageStyle={d.brief.image_style ?? '자동'} onDesignChange={() => { loadDesigns() }}
+                  onEdit={goEdit} onReview={() => goScreen('review')} />
+              </section>
             )}
           </>
         )}

@@ -6,11 +6,11 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import icons, imagegen, prompts
+from . import icons, imagegen, phrases, prompts
 from .db import STORAGE_DIR
 from .models import Brand, BrandVersion, Design, GeneratedImage, IconAsset
 from .routers_assets import get_db
-from .routers_review import invalidate_reviews
+from .routers_review import invalidate_icon_reviews, version_icon_set
 
 router = APIRouter(prefix="/api")
 WEB_SIZE = (256, 256)   # 웹용 아이콘 기본 크기 (사용자 결정)
@@ -21,15 +21,6 @@ def _design(db: Session, design_id: int) -> Design:
     if not d:
         raise HTTPException(404, "캠페인을 찾을 수 없습니다")
     return d
-
-
-def _version_set(db: Session, version_id: int) -> list[IconAsset]:
-    """브랜드 규칙 버전 하나에는 아이콘 세트가 한 세트만 있다. (가장 최근 차수의 세트)"""
-    last = db.scalar(select(func.max(IconAsset.batch_no)).where(IconAsset.brand_version_id == version_id))
-    if not last:
-        return []
-    return list(db.scalars(select(IconAsset).where(IconAsset.brand_version_id == version_id, IconAsset.batch_no == last)
-                           .order_by(IconAsset.position)).all())
 
 
 def _size(d: Design) -> tuple[int, int]:
@@ -142,7 +133,7 @@ def _fill(items: list[dict], more) -> list[dict]:
 @router.get("/designs/{design_id}/icons")
 def list_icons(design_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
-    return [_out(a) for a in _version_set(db, d.brand_version_id)]
+    return [_out(a) for a in version_icon_set(db, d.brand_version_id)]
 
 
 @router.get("/icon-settings")
@@ -151,29 +142,34 @@ def icon_settings():
     return {"render": icons.RENDER, "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "count": icons.COUNT}
 
 
+def _draw_save_svg(db, d, bv, brand, items, style, w, h, forbidden, batch=1, start=1) -> tuple[int, list[dict]]:
+    """svg 방식: 제안받은 도형을 position=start 부터 저장한다. 세트 생성과 부족분 채우기가 같이 쓴다."""
+    made, skipped = 0, []
+    for i, it in enumerate(items, start):
+        name = str(it.get("name") or "").strip()
+        try:
+            if not name:
+                raise ValueError("기능명이 없습니다")
+            _save(db, d, bv, batch, i, name, str(it.get("concept") or ""), it.get("elements"), style, w, h, forbidden)
+            made += 1
+        except Exception:
+            # 도형이 잘못된 아이콘은 한 번 다시 그려 본다
+            try:
+                els = icons.redraw_one(brand.name, d.brief, name or f"아이콘 {i}", str(it.get("concept") or ""), style)
+                _save(db, d, bv, batch, i, name or f"아이콘 {i}", str(it.get("concept") or ""), els, style, w, h, forbidden)
+                made += 1
+            except Exception as e2:
+                skipped.append({"position": i, "name": name, "reason": str(e2)[:80]})
+    return made, skipped
+
+
 def _create_svg(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dict]]:
     try:
         items = icons.propose_and_draw(brand.name, d.brief, style, forbidden)
     except Exception as e:
         raise HTTPException(502, f"아이콘 생성에 실패했습니다 ({type(e).__name__})")
     items = _fill(items, lambda names, need: icons.propose_more(brand.name, d.brief, style, forbidden, names, need))
-    made, skipped = 0, []
-    for i, it in enumerate(items, 1):
-        name = str(it.get("name") or "").strip()
-        try:
-            if not name:
-                raise ValueError("기능명이 없습니다")
-            _save(db, d, bv, 1, i, name, str(it.get("concept") or ""), it.get("elements"), style, w, h, forbidden)
-            made += 1
-        except Exception:
-            # 도형이 잘못된 아이콘은 한 번 다시 그려 본다
-            try:
-                els = icons.redraw_one(brand.name, d.brief, name or f"아이콘 {i}", str(it.get("concept") or ""), style)
-                _save(db, d, bv, 1, i, name or f"아이콘 {i}", str(it.get("concept") or ""), els, style, w, h, forbidden)
-                made += 1
-            except Exception as e2:
-                skipped.append({"position": i, "name": name, "reason": str(e2)[:80]})
-    return made, skipped
+    return _draw_save_svg(db, d, bv, brand, items, style, w, h, forbidden)
 
 
 def _create_3d(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dict]]:
@@ -185,30 +181,47 @@ def _create_3d(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dict
     items = [it for it in items if str(it.get("name") or "").strip()]
     if not items:
         raise HTTPException(502, "기능명을 받지 못했습니다")
+    return _render_save_3d(db, d, bv, items, style, w, h, forbidden)
+
+
+def _render_save_3d(db, d, bv, items, style, w, h, forbidden, batch=1, start=1) -> tuple[int, list[dict]]:
+    """3d 방식: 기능명 목록을 렌더해 position=start 부터 저장한다. 세트 생성과 부족분 채우기가 같이 쓴다."""
     palette = _palette(bv)
     sv = icons.style_vars(style, palette, bv.image_tone or {})
     plist = [icons.render_prompt(str(it["name"]).strip(), str(it.get("concept") or ""), sv) for it in items]
     results = icons.render_many(plist)      # 이미지 모델 호출은 동시에, DB 저장은 이 스레드에서
     made, skipped = 0, []
-    for i, (it, pr, res) in enumerate(zip(items, plist, results), 1):
+    for i, (it, pr, res) in enumerate(zip(items, plist, results), start):
         name = str(it["name"]).strip()
         if isinstance(res, Exception):
             reason = str(res) if isinstance(res, imagegen.QuotaExceeded) else f"렌더 실패 ({type(res).__name__})"
             skipped.append({"position": i, "name": name, "reason": reason[:120]})
             continue
         try:
-            _save3d(db, d, bv, 1, i, name, str(it.get("concept") or ""), pr, res, style, palette, w, h, forbidden)
+            _save3d(db, d, bv, batch, i, name, str(it.get("concept") or ""), pr, res, style, palette, w, h, forbidden)
             made += 1
         except Exception as e:
             skipped.append({"position": i, "name": name, "reason": str(e)[:80]})
     return made, skipped
 
 
+def _fail_if_none(made: int, skipped: list[dict]) -> None:
+    """하나도 못 만들었으면 성공 응답 대신 원인을 돌려준다."""
+    if made == 0 and skipped:
+        reason = skipped[0]["reason"]
+        raise HTTPException(429 if "한도" in reason or "크레딧" in reason else 502, f"아이콘 생성에 실패했습니다: {reason}")
+
+
+def _check_daily_limit() -> None:
+    if icons.RENDER == "3d" and imagegen.usage("openai")["exhausted"]:
+        raise HTTPException(429, f"오늘 설정한 이미지 생성 한도({imagegen.DAILY_LIMIT}회)를 모두 사용했습니다")
+
+
 @router.post("/designs/{design_id}/icons")
 def create_icons(design_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
     # 규칙 버전마다 한 세트만: 이미 있으면 새로 만들지 않는다 (개별 아이콘은 다시 그릴 수 있다)
-    if _version_set(db, d.brand_version_id):
+    if version_icon_set(db, d.brand_version_id):
         raise HTTPException(409, "이 브랜드 규칙 버전의 아이콘 세트는 이미 있습니다. 개별 아이콘은 다시 그릴 수 있습니다.")
     if d.kind == "광고 이미지":
         has_image = db.scalar(select(func.count()).select_from(GeneratedImage).where(
@@ -218,18 +231,61 @@ def create_icons(design_id: int, db: Session = Depends(get_db)):
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, (w, h) = _style(bv), _size(d)
-    forbidden = bv.forbidden_phrases or []
-    if icons.RENDER == "3d" and imagegen.usage("openai")["exhausted"]:
-        raise HTTPException(429, f"오늘 설정한 이미지 생성 한도({imagegen.DAILY_LIMIT}회)를 모두 사용했습니다")
+    forbidden = phrases.effective(bv, d.brief)["forbidden_phrases"]
+    _check_daily_limit()
     make = _create_3d if icons.RENDER == "3d" else _create_svg
     made, skipped = make(db, d, bv, brand, style, w, h, forbidden)
-    if made == 0 and skipped:   # 하나도 못 만들었으면 성공 응답 대신 원인을 돌려준다
-        reason = skipped[0]["reason"]
-        raise HTTPException(429 if "한도" in reason or "크레딧" in reason else 502, f"아이콘 생성에 실패했습니다: {reason}")
-    invalidate_reviews(db, d.id)
+    _fail_if_none(made, skipped)
+    invalidate_icon_reviews(db, bv.id)
     db.commit()
-    return {"icons": list_icons(design_id, db), "requested": icons.COUNT, "made": made, "skipped": skipped,
-            "complete": made >= icons.COUNT, "render": icons.RENDER}
+    return _set_result(db, design_id, made, skipped)
+
+
+def _set_result(db, design_id: int, made: int, skipped: list[dict]) -> dict:
+    lst = list_icons(design_id, db)
+    return {"icons": lst, "requested": icons.COUNT, "made": made, "skipped": skipped,
+            "complete": len(lst) >= icons.COUNT, "render": icons.RENDER}
+
+
+@router.post("/designs/{design_id}/icons/fill")
+def fill_icons(design_id: int, db: Session = Depends(get_db)):
+    """세트가 목표 개수(10)에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 채운다.
+    현재 기능명과 겹치지 않는 기능을 제안받아 같은 세트(batch)·같은 스타일로 이어서 렌더한다. 아이콘 1개당 이미지 1장 비용."""
+    d = _design(db, design_id)
+    cur = version_icon_set(db, d.brand_version_id)
+    if not cur:
+        raise HTTPException(409, "이 브랜드 규칙 버전에는 아직 아이콘 세트가 없습니다. 먼저 세트를 만들어 주세요.")
+    need = icons.COUNT - len(cur)
+    if need <= 0:
+        raise HTTPException(409, f"아이콘 세트가 이미 {len(cur)}개로 채워져 있습니다")
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand = db.get(Brand, d.brand_id)
+    src = db.get(Design, cur[0].design_id) or d      # 세트를 만든 캠페인의 설명·크기 기준으로 이어 만든다
+    style, (w, h) = _style(bv), (cur[0].width, cur[0].height)
+    forbidden = phrases.effective(bv, src.brief)["forbidden_phrases"]
+    render = (cur[0].style or {}).get("render", "svg")
+    names = [a.name for a in cur]
+    batch, start = cur[0].batch_no, max(a.position for a in cur) + 1
+    if render == "3d":
+        _check_daily_limit()
+    try:
+        if render == "3d":
+            items = icons.propose3d_more(brand.name, src.brief, forbidden, names, need)
+        else:
+            items = icons.propose_more(brand.name, src.brief, style, forbidden, names, need)
+    except Exception as e:
+        raise HTTPException(502, f"기능명 제안에 실패했습니다 ({type(e).__name__})")
+    items = [it for it in _dedupe(items) if str(it.get("name") or "").strip() not in names][:need]
+    if not items:
+        raise HTTPException(502, "겹치지 않는 기능명을 받지 못했습니다")
+    if render == "3d":
+        made, skipped = _render_save_3d(db, src, bv, items, style, w, h, forbidden, batch, start)
+    else:
+        made, skipped = _draw_save_svg(db, src, bv, brand, items, style, w, h, forbidden, batch, start)
+    _fail_if_none(made, skipped)
+    invalidate_icon_reviews(db, bv.id)
+    db.commit()
+    return _set_result(db, design_id, made, skipped)
 
 
 @router.post("/designs/{design_id}/icons/{icon_id}/regenerate")
@@ -243,7 +299,7 @@ def regenerate_icon(design_id: int, icon_id: int, db: Session = Depends(get_db))
     brand = db.get(Brand, d.brand_id)
     src = db.get(Design, a.design_id) or d      # 세트를 만든 캠페인의 설명 기준으로 다시 그린다
     style, (w, h) = _style(bv), (a.width, a.height)
-    forbidden = bv.forbidden_phrases or []
+    forbidden = phrases.effective(bv, src.brief)["forbidden_phrases"]
     if (a.style or {}).get("render") == "3d":
         palette = _palette(bv)
         pr = icons.render_prompt(a.name, a.concept, icons.style_vars(style, palette, bv.image_tone or {}))
@@ -260,7 +316,7 @@ def regenerate_icon(design_id: int, icon_id: int, db: Session = Depends(get_db))
             _save(db, d, bv, a.batch_no, a.position, a.name, a.concept, els, style, w, h, forbidden, existing=a)
         except Exception as e:
             raise HTTPException(502, f"아이콘 다시 그리기에 실패했습니다 ({type(e).__name__})")
-    invalidate_reviews(db, d.id)
+    invalidate_icon_reviews(db, bv.id)
     db.commit()
     return _out(a)
 

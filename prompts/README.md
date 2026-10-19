@@ -16,8 +16,10 @@
 | `icons/redraw_system.md` · `redraw_user.md` | (svg) 아이콘 하나 다시 그리기 | `icons.redraw_one` |
 | `icons/more_system.md` · `more_user.md` | (svg) 부족한 기능 추가 제안 | `icons.propose_more` |
 | `icons/_output_spec.md` | (svg) 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
-| `image/background.md` | 배경 이미지 생성 | `imagegen.build_prompt` |
-| `image/composition/{가로형,정사각,세로형}.md` | 템플릿별 구도 | `imagegen.build_prompt` |
+| `image/background.md` | 배경 이미지 생성 (표현 방식 `{{style}}` + 구도 `{{composition}}`) | `imagegen.build_prompt` |
+| `image/composition/{가로형,정사각,세로형}.md` | 비율군(템플릿)별 구도. 배경은 비율군마다 1장 생성 | `imagegen.build_prompt` |
+| `image/style/{실사인물,실사제품,플랫일러스트,3D렌더,그래픽패턴}.md` | 배경 형태(표현 방식). 브리프 `image_style` 또는 자동 선택(`imagegen.pick_style`)으로 파일을 고른다 | `imagegen.build_prompt` |
+| `image/same_scene.md` | 비율군 변형 배경. 첫 비율군 배경을 참조 이미지로 붙여 같은 장면을 다른 비율 구도로 (`{{base}}` 는 그 비율군의 background 프롬프트) | `imagegen.build_variant_prompt` |
 | `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
 
 `_` 로 시작하는 파일은 partial(다른 파일이 include 하는 조각)이다.

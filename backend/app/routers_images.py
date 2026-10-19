@@ -50,10 +50,15 @@ def _latest(db: Session, design_id: int, pid: int, kind: str) -> GeneratedImage 
         GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
 
 
-def _latest_design_bg(db: Session, design_id: int) -> GeneratedImage | None:
-    return db.scalar(select(GeneratedImage).where(
+def _latest_design_bg(db: Session, design_id: int, template: str | None = None) -> GeneratedImage | None:
+    """시안의 최신 배경. template 을 주면 그 비율군(생성 크기의 비율 기준)으로 만든 배경만 찾는다."""
+    rows = db.scalars(select(GeneratedImage).where(
         GeneratedImage.design_id == design_id, GeneratedImage.kind == "background"
-    ).order_by(GeneratedImage.id.desc()).limit(1))
+    ).order_by(GeneratedImage.id.desc())).all()
+    for g in rows:
+        if template is None or compose.template_for(g.width, g.height) == template:
+            return g
+    return None
 
 
 def _design(db: Session, design_id: int) -> Design:
@@ -92,18 +97,25 @@ def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
     return {"selected": variant_id, "preset_id": v.preset_version_id}
 
 
-def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage]:
-    """배경을 1회만 생성하고 시안에 포함된 모든 규격에 같은 파일로 연결한다. {preset_id: 배경 행}"""
-    sizes = [(pid, pv.production_width, pv.production_height) for pid in d.preset_version_ids
-             if (pv := db.get(PresetVersion, pid)) and pv.production_width]
-    if not sizes:
-        raise HTTPException(400, "제작 크기가 정해진 규격이 없습니다")
+def _generate_one(db: Session, d: Design, template: str,
+                  reference: GeneratedImage | None = None) -> tuple[Path, Image.Image, str, dict]:
+    """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
+    생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
+    reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다."""
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
-    _, w, h = sizes[0]  # 구도 안내(여백 위치)는 첫 번째 규격 기준
+    style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
+    gw, gh = imagegen.size_for(template)
+    ref_img = None
+    if reference is not None and imagegen.can_vary() and Path(reference.file_path).exists():
+        ref_img = Image.open(reference.file_path)
     try:
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, compose.template_for(w, h))
-        bg = imagegen.generate_background(prompt, w, h)
+        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style)
+        if ref_img is not None:
+            prompt = imagegen.build_variant_prompt(prompt)
+            bg = imagegen.generate_variant(prompt, gw, gh, ref_img)
+        else:
+            bg = imagegen.generate_background(prompt, gw, gh)
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except Exception as e:  # 키 등 민감 정보는 메시지에 넣지 않는다
@@ -111,23 +123,64 @@ def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage
     STORAGE_DIR.mkdir(exist_ok=True)
     path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
     bg.save(path)
+    layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
+              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None)}
+    if ref_img is not None:
+        layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
+                               "template": (reference.layout or {}).get("template")}
+    return path, bg, prompt, layout
+
+
+def _bg_row(d: Design, pid: int, path: Path | str, bg_w: int, bg_h: int, prompt: str | None, bv_id: int,
+            layout: dict) -> GeneratedImage:
+    return GeneratedImage(design_id=d.id, preset_version_id=pid, kind="background", file_path=str(path),
+                          width=bg_w, height=bg_h, prompt=prompt, brand_version_id=bv_id, layout=dict(layout))
+
+
+def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage]:
+    """배경을 비율군(가로형/정사각/세로형)마다 1장씩 만들고, 같은 비율군의 규격은 같은 파일로 연결한다. {preset_id: 배경 행}.
+    첫 비율군(시안의 첫 규격 기준)은 프롬프트로 생성하고, 나머지 비율군은 그 이미지를 참조로 붙여 **같은 장면**을
+    각 비율의 구도로 다시 만든다(images.edit, IMAGE_BG_VARIANT=0 이면 독립 생성). 비용은 비율군 수(1~3장)만큼 든다.
+    IMAGE_BG_PER_RATIO=0 이면 정사각 1장을 모두가 공유."""
+    sizes = [(pid, pv.production_width, pv.production_height) for pid in d.preset_version_ids
+             if (pv := db.get(PresetVersion, pid)) and pv.production_width]
+    if not sizes:
+        raise HTTPException(400, "제작 크기가 정해진 규격이 없습니다")
+    bv = db.get(BrandVersion, d.brand_version_id)
+    groups: dict[str, list[int]] = {}
+    for pid, w, h in sizes:
+        groups.setdefault(compose.template_for(w, h), []).append(pid)
+    if not imagegen.PER_RATIO:   # 예전 방식: 첫 번째 규격의 구도로 1장
+        groups = {compose.template_for(sizes[0][1], sizes[0][2]): [pid for pid, _, _ in sizes]}
     rows: dict[int, GeneratedImage] = {}
-    for pid, _w, _h in sizes:
-        rows[pid] = GeneratedImage(design_id=d.id, preset_version_id=pid, kind="background",
-                                   file_path=str(path), width=bg.width, height=bg.height, prompt=prompt,
-                                   brand_version_id=bv.id, layout={})
-        db.add(rows[pid])
-    db.flush()
+    master: GeneratedImage | None = None
+    for template, pids in groups.items():
+        path, bg, prompt, layout = _generate_one(db, d, template, reference=master)
+        for pid in pids:
+            rows[pid] = _bg_row(d, pid, path, bg.width, bg.height, prompt, bv.id, layout)
+            db.add(rows[pid])
+        db.flush()
+        if master is None:
+            master = rows[pids[0]]
     return rows
 
 
 @router.post("/designs/{design_id}/background/regenerate")
-def regenerate_background(design_id: int, db: Session = Depends(get_db)):
-    """시안 전체의 배경을 1회만 새로 생성하고, 모든 매체가 같은 원본을 공유하도록 연결한다."""
+def regenerate_background(design_id: int, style: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
+    """시안 전체의 배경을 비율군마다 새로 생성하고, 같은 비율군 매체가 같은 원본을 공유하도록 연결한다.
+    style 을 주면 브리프의 배경 형태(image_style)를 그 값으로 바꾼 뒤 생성한다."""
     d = _design(db, design_id)
+    if style is not None:
+        style = style.strip() or imagegen.AUTO_STYLE
+        if style != imagegen.AUTO_STYLE and style not in imagegen.STYLES:
+            raise HTTPException(400, f"배경 형태는 {[imagegen.AUTO_STYLE, *imagegen.STYLES]} 중 하나")
+        d.brief = {**(d.brief or {}), "image_style": style}
+        db.flush()
     rows = create_shared_background(db, d)
     db.commit()
-    return {"preset_ids": list(rows)}
+    first = next(iter(rows.values()))
+    return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}),
+            "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason")}
 
 
 @router.post("/designs/{design_id}/reset-generated")
@@ -184,42 +237,35 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
         if not sel:
             raise HTTPException(400, "합성에 사용할 카피를 먼저 선택해 주세요")
 
-    # 배경은 시안당 한 번만 생성하고, 매체별로는 같은 원본을 각 규격 크기에 맞춰 리사이즈(cover_crop)한다.
-    # 다시 만들기를 요청했거나 이 시안에 배경이 하나도 없을 때만 새로 생성한다.
-    src = _latest_design_bg(db, design_id)
+    # 배경은 비율군(템플릿)마다 1장 생성하고, 같은 비율군 매체는 같은 원본을 각 규격 크기에 맞춰 자른다(cover_crop).
+    # 다시 만들기를 요청했거나 이 시안에 배경이 하나도 없을 때만 새로 생성한다. 같은 비율군 배경이 없으면
+    # (예: 예전에 정사각 1장만 만든 시안) 추가 생성 없이 시안의 최신 배경을 그대로 자른다.
+    tpl = compose.template_for(w, h)
     bg_row = None
-    if not regenerate_background and src is not None and Path(src.file_path).exists():
-        bg_row = _latest(db, design_id, preset_id, "background")
-        if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
-            bg_row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="background",
-                                    file_path=src.file_path, width=src.width, height=src.height,
-                                    prompt=src.prompt, brand_version_id=src.brand_version_id, layout={})
-            db.add(bg_row)
-            db.flush()
+    if not regenerate_background:
+        src = _latest_design_bg(db, design_id, tpl) or _latest_design_bg(db, design_id)
+        if src is not None and Path(src.file_path).exists():
+            bg_row = _latest(db, design_id, preset_id, "background")
+            if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
+                bg_row = _bg_row(d, preset_id, src.file_path, src.width, src.height, src.prompt,
+                                 src.brand_version_id, src.layout or {})
+                db.add(bg_row)
+                db.flush()
     if bg_row is None:
-        tpl = compose.template_for(w, h)
-        try:
-            prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, tpl)
-            bg = imagegen.generate_background(prompt, w, h)
-        except imagegen.QuotaExceeded as e:
-            raise HTTPException(429, str(e))
-        except Exception as e:  # 키 등 민감 정보는 메시지에 넣지 않는다
-            raise HTTPException(502, f"이미지 생성에 실패했습니다 ({type(e).__name__})")
-        STORAGE_DIR.mkdir(exist_ok=True)
-        path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
-        bg.save(path)
-        bg_row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="background",
-                                file_path=str(path), width=bg.width, height=bg.height, prompt=prompt,
-                                brand_version_id=bv.id, layout={})
+        # 이 규격만 새로 만들 때도 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다
+        ref = _latest_design_bg(db, design_id)
+        path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None)
+        bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
         db.add(bg_row)
         db.flush()
     bg_img = Image.open(bg_row.file_path)
 
     if separate:
         # 분리 자산형: 텍스트 없는 이미지만. 로고·카피는 내보내기에서 별도 파일로 제공한다.
-        out_img = compose.cover_crop(bg_img, w, h)
+        nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h)
+        out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
-                  "warnings": [], "elements": []}
+                  "crop": crop, "warnings": [], "elements": []}
         kind_path = STORAGE_DIR / f"sep_{uuid.uuid4().hex[:10]}.png"
         out_img.save(kind_path)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",

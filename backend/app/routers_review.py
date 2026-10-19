@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import review
+from . import phrases, review
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, IconAsset,
                      PresetVersion, ReviewResult)
 from .routers_assets import get_db
@@ -18,15 +18,34 @@ def invalidate_reviews(db: Session, design_id: int, preset_id: int | None = None
     db.execute(q.values(valid=False))
 
 
+def invalidate_icon_reviews(db: Session, version_id: int) -> None:
+    """아이콘 세트는 브랜드 규칙 버전에 붙으므로, 그 버전을 쓰는 모든 캠페인의 아이콘 항목(지면 없음)만 무효화한다."""
+    design_ids = select(Design.id).where(Design.brand_version_id == version_id)
+    db.execute(update(ReviewResult).where(ReviewResult.design_id.in_(design_ids),
+                                          ReviewResult.preset_version_id.is_(None)).values(valid=False))
+
+
+def version_icon_set(db: Session, version_id: int) -> list[IconAsset]:
+    """브랜드 규칙 버전 하나에는 아이콘 세트가 한 세트만 있다. (가장 최근 차수의 세트, position 순)
+    세트는 광고 이미지 캠페인에서 만들지만 버전에 속하므로 검수·내보내기·아이콘 라우터가 모두 이 함수로 찾는다."""
+    last = db.scalar(select(func.max(IconAsset.batch_no)).where(IconAsset.brand_version_id == version_id))
+    if not last:
+        return []
+    return list(db.scalars(select(IconAsset).where(IconAsset.brand_version_id == version_id, IconAsset.batch_no == last)
+                           .order_by(IconAsset.position)).all())
+
+
 def _latest(db, did, pid, kind):
     return db.scalar(select(GeneratedImage).where(
         GeneratedImage.design_id == did, GeneratedImage.preset_version_id == pid,
         GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
 
 
-def _brand_dict(bv: BrandVersion, name: str = "") -> dict:
-    return {"name": name, "levels": bv.levels or {}, "forbidden_phrases": bv.forbidden_phrases or [],
-            "required_phrases": bv.required_phrases or [], "colors": bv.colors or [], "fonts": bv.fonts or [],
+def _brand_dict(bv: BrandVersion, name: str = "", brief: dict | None = None) -> dict:
+    """검수용 브랜드 규칙. 필수·금지 표현은 캠페인 입력(brief)이 우선, 비면 브랜드 규칙."""
+    eff = phrases.effective(bv, brief)
+    return {"name": name, "levels": bv.levels or {}, "forbidden_phrases": eff["forbidden_phrases"],
+            "required_phrases": eff["required_phrases"], "colors": bv.colors or [], "fonts": bv.fonts or [],
             "logo_asset_id": bv.logo_asset_id, "icon_style": bv.icon_style or {}}
 
 
@@ -82,16 +101,21 @@ def _collect(db: Session, d: Design) -> dict:
     for r in rows:
         groups.setdefault(r.preset_version_id, []).append(_out(r))
     out_groups, blockers = [], []
-    for pid in (d.preset_version_ids if d.kind == "광고 이미지" else [None]):
+    pids: list[int | None] = list(d.preset_version_ids)
+    # 아이콘 세트는 지면이 아니라 브랜드 규칙 버전에 붙는다: 세트가 있거나(검수 전) 아이콘 결과가 있으면 지면 없는 그룹으로 넣는다
+    if None in groups or version_icon_set(db, d.brand_version_id):
+        pids.append(None)
+    for pid in pids:
         items = groups.get(pid, [])
         name = None
         if pid is not None:
             pv = db.get(PresetVersion, pid)
             name = f"{pv.placement.platform.name} · {pv.placement.name}" if pv else str(pid)
+        name = name or "아이콘 세트"
         bl = [i for i in items if i["blocking"]]
         for b in bl:
             blockers.append({"preset": name, "item": b["item"], "status": b["status"], "message": b["message"]})
-        out_groups.append({"preset_id": pid, "name": name or "아이콘 세트", "items": items,
+        out_groups.append({"preset_id": pid, "name": name, "items": items,
                            "summary": _summary(items), "export_ready": bool(items) and not bl})
     reviewed = bool(rows)
     return {"reviewed": reviewed, "stale": not reviewed, "groups": out_groups, "blockers": blockers,
@@ -113,7 +137,7 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "시안을 찾을 수 없습니다")
     bv = db.get(BrandVersion, d.brand_version_id)
     cur = db.get(Brand, d.brand_id)
-    brand = _brand_dict(bv, cur.name if cur else "")
+    brand = _brand_dict(bv, cur.name if cur else "", d.brief)
     if bv.logo_asset_id:
         la = db.get(Asset, bv.logo_asset_id)
         if la and la.width and la.height:
@@ -127,28 +151,26 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
     else:
         meta_items.append(review.item("시안", "브랜드 버전", "통과", f"브랜드 버전 {bv.version_no} 기준"))
 
-    if d.kind == "아이콘 세트":
-        batch = db.scalar(select(IconAsset.batch_no).where(IconAsset.design_id == d.id)
-                          .order_by(IconAsset.batch_no.desc()).limit(1))
-        icons = db.scalars(select(IconAsset).where(IconAsset.design_id == d.id, IconAsset.batch_no == batch)).all() if batch else []
-        for it in meta_items + review.review_icons(icons, brand):
-            results.append((None, it))
-    else:
-        for pid in d.preset_version_ids:
-            pv = db.get(PresetVersion, pid)
-            items = list(meta_items)
-            if pv.status == "확인 필요":
-                items.append(review.item("규격", "규격 출처", "확인 필요", "공식 규격이 확인되지 않아 검수할 수 없습니다", "강제", True))
-                results += [(pid, it) for it in items]
-                continue
-            g = gather(db, d, pv, brand)
-            sep, comp, sel, text_el, logo_el, scrim = g["sep"], g["comp"], g["sel"], g["text_el"], g["logo_el"], g["scrim"]
-            font_ref, texts, logo_aspect = g["font_ref"], g["texts"], g["logo_aspect"]
-            if sel is None:
-                items.append(review.item("문구", "사용할 카피", "수정 필요", "내보낼 카피가 선택되지 않았습니다", "강제", True))
-            items += review.review_preset(pv, comp, texts, text_el, logo_el["box"] if logo_el else None,
-                                          scrim, font_ref, brand, logo_aspect, sep)
+    for pid in d.preset_version_ids:
+        pv = db.get(PresetVersion, pid)
+        items = list(meta_items)
+        if pv.status == "확인 필요":
+            items.append(review.item("규격", "규격 출처", "확인 필요", "공식 규격이 확인되지 않아 검수할 수 없습니다", "강제", True))
             results += [(pid, it) for it in items]
+            continue
+        g = gather(db, d, pv, brand)
+        sep, comp, sel, text_el, logo_el, scrim = g["sep"], g["comp"], g["sel"], g["text_el"], g["logo_el"], g["scrim"]
+        font_ref, texts, logo_aspect = g["font_ref"], g["texts"], g["logo_aspect"]
+        if sel is None:
+            items.append(review.item("문구", "사용할 카피", "수정 필요", "내보낼 카피가 선택되지 않았습니다", "강제", True))
+        items += review.review_preset(pv, comp, texts, text_el, logo_el["box"] if logo_el else None,
+                                      scrim, font_ref, brand, logo_aspect, sep)
+        results += [(pid, it) for it in items]
+    # 이 캠페인의 브랜드 규칙 버전에 아이콘 세트가 있으면 지면 없는 항목(preset_version_id=None)으로 함께 검수한다
+    icons = version_icon_set(db, d.brand_version_id)
+    if icons:
+        extra = meta_items if not d.preset_version_ids else []   # 지면이 있으면 브랜드 버전 항목은 지면 쪽에 이미 있다
+        results += [(None, it) for it in extra + review.review_icons(icons, brand)]
 
     invalidate_reviews(db, d.id)
     for pid, it in results:
