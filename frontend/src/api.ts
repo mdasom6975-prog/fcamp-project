@@ -13,7 +13,7 @@ export type BrandForm = {
   logo_margin_percent: number | null
   colors: ColorRow[]
   fonts: FontRow[]
-  icon_style: { stroke_width: number; corner: '각진' | '둥근'; fill: '윤곽' | '채움' }
+  icon_style: { stroke_width: number; corner: '각진' | '둥근'; fill: '윤곽' | '채움'; material?: string }
   image_tone: { description: string; reference_asset_ids: number[] }
   voice: { description: string; headline_max_chars: number | null; polite: boolean }
   required_phrases: string[]

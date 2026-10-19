@@ -312,13 +312,17 @@ def review_icons(icons: list, brand: dict) -> list[dict]:
     if three_d:
         # 3d: 세트 전체가 같은 스타일 블록·모델·품질로 렌더됐는지 (재질·광원·카메라는 프롬프트가 고정한다)
         keys = {(a.style.get("style_ref"), a.style.get("prompt_ref"), a.style.get("model"), a.style.get("quality"),
-                 a.style.get("corner")) for a in icons}
+                 a.style.get("corner"), a.style.get("material") or "자동") for a in icons}
         bad_corner = [a.name for a in icons if st_brand.get("corner") and a.style.get("corner") != st_brand["corner"]]
-        if len(keys) > 1 or len(three_d) != len(icons) or bad_corner:
+        want_m = st_brand.get("material") or "자동"
+        bad_material = [a.name for a in icons if (a.style.get("material") or "자동") != want_m]
+        if len(keys) > 1 or len(three_d) != len(icons) or bad_corner or bad_material:
             st, bl = _brand_fail(lv.get("icon_style"))
-            msg = "세트 안에 다른 스타일(프롬프트·모델·품질)로 만든 아이콘이 섞여 있습니다"
+            msg = "세트 안에 다른 스타일(프롬프트·모델·품질·재질)로 만든 아이콘이 섞여 있습니다"
             if bad_corner:
                 msg = f"브랜드 모서리 설정과 다른 아이콘: {', '.join(bad_corner)}"
+            elif bad_material:
+                msg = f"브랜드 재질 설정({want_m})과 다른 아이콘: {', '.join(bad_material)} — 다시 그리면 현재 설정으로 렌더됩니다"
             out.append(item("브랜드", "아이콘 스타일", st, msg, lv.get("icon_style"), bl))
         else:
             a0 = three_d[0].style

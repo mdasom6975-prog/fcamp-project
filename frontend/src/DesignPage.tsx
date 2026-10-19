@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type React from 'react'
 import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
 import { PhraseBox } from './BrandPage'
@@ -68,6 +69,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
   const [iconKey, setIconKey] = useState(0)      // 아이콘 세트를 지운 뒤 패널 다시 불러오기
+  const [lightbox, setLightbox] = useState(false)   // 카드를 누르면 크게 보기(스크롤 없이)
 
   const loadImgs = useCallback(() =>
     fetch(`/api/designs/${designId}/images`).then((r) => r.json()).then((rows: ImgRow[]) => {
@@ -280,24 +282,40 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
             {(() => {
               const cur = withCopy.find((x) => x.preset_id === imgTab) ?? withCopy[0]
               if (!cur) return null
+              const idx = withCopy.findIndex((x) => x.preset_id === cur.preset_id)
               const made = withCopy.filter((x) => imgs[x.preset_id]?.composite).length
+              // 첫 '이미지 생성'은 카피를 고른 완성형(또는 분리 자산형) 지면 하나에서 시작하면 나머지를 이어서 만든다
+              const firstEligible = withCopy.find((x) => x.content_kind !== '완성형' || x.variants.some((v) => v.selected))?.preset_id ?? null
               return (
                 <>
-                  <p className="muted">
-                    {made === 0 ? '아직 만든 이미지가 없습니다. 아래에서 "이미지 생성"을 누르면 선택한 지면 전체를 이어서 만듭니다.'
-                      : `합성본 ${made}/${withCopy.length}개. 카드를 누르면 아래에서 크게 보고 다시 합성하거나 편집할 수 있습니다.`}
-                  </p>
-                  <ImageGrid items={withCopy} rows={imgs} selected={cur.preset_id} onSelect={setImgTab}
+                  <div className="row">
+                    <p className="muted" style={{ margin: 0 }}>
+                      {made === 0 ? '아직 만든 이미지가 없습니다. "모든 지면 이미지 생성"을 누르면 선택한 지면 전체를 이어서 만듭니다.'
+                        : `합성본 ${made}/${withCopy.length}개. 카드를 누르면 크게 보고 다시 합성하거나 편집할 수 있습니다.`}
+                    </p>
+                    {made === 0 && firstEligible !== null && (
+                      <button className="primary" disabled={imgBusy !== null || bgBusy} onClick={() => makeImage(firstEligible, false)}>
+                        모든 지면 이미지 생성
+                      </button>
+                    )}
+                  </div>
+                  <ImageGrid items={withCopy} rows={imgs} selected={cur.preset_id} onSelect={(id) => { setImgTab(id); setLightbox(true) }}
                     badge={(it, row) => row?.composite
                       ? <span className="badge b-ok">합성됨</span>
                       : it.content_kind === '완성형' && !groups.find((g) => g.preset_id === it.preset_id)?.variants.some((v) => v.selected)
                         ? <span className="badge b-warn">카피 선택 필요</span>
                         : <span className="badge b-warn">미생성</span>} />
-                  <div key={cur.preset_id} className="copy-group">
-                    <ImageBlock g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
-                      canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
-                      onEdit={onEdit} />
-                  </div>
+                  {lightbox && (
+                    <Lightbox title={`${cur.platform} · ${cur.name}`} subtitle={`${cur.width}×${cur.height}`}
+                      onClose={() => setLightbox(false)}
+                      onPrev={idx > 0 ? () => setImgTab(withCopy[idx - 1].preset_id) : undefined}
+                      onNext={idx < withCopy.length - 1 ? () => setImgTab(withCopy[idx + 1].preset_id) : undefined}
+                      position={`${idx + 1} / ${withCopy.length}`}>
+                      <ImageBlock key={cur.preset_id} g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
+                        canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
+                        onEdit={(id) => { setLightbox(false); onEdit(id) }} />
+                    </Lightbox>
+                  )}
                 </>
               )
             })()}
@@ -386,6 +404,40 @@ function CommonText({ designId, onApplied }: { designId: number; onApplied: () =
           {res.skipped.map((s, i) => <div key={i}>건너뜀 · {s.name}: {s.reason}</div>)}
         </div>
       )}
+    </div>
+  )
+}
+
+// 카드 클릭 시 스크롤 없이 크게 보는 창. Esc·배경 클릭으로 닫고, ←/→ 로 다른 지면으로 옮긴다
+function Lightbox({ title, subtitle, position, onClose, onPrev, onNext, children }: {
+  title: string; subtitle?: string; position?: string; onClose: () => void
+  onPrev?: () => void; onNext?: () => void; children: React.ReactNode
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft' && onPrev) onPrev()
+      else if (e.key === 'ArrowRight' && onNext) onNext()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, onPrev, onNext])
+  return (
+    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
+      <div className="lightbox-box" onClick={(e) => e.stopPropagation()}>
+        <div className="lightbox-head">
+          <div>
+            <strong>{title}</strong> {subtitle && <span className="muted">{subtitle}</span>}
+            {position && <span className="muted"> · {position}</span>}
+          </div>
+          <div className="row">
+            <button type="button" disabled={!onPrev} onClick={onPrev} aria-label="이전 지면">←</button>
+            <button type="button" disabled={!onNext} onClick={onNext} aria-label="다음 지면">→</button>
+            <button type="button" onClick={onClose} aria-label="닫기">닫기 (Esc)</button>
+          </div>
+        </div>
+        {children}
+      </div>
     </div>
   )
 }

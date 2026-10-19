@@ -144,7 +144,7 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
 
               {e.type === 'image' && (
                 <div className="ctl">
-                  <label>확대 {e.props.zoom.toFixed(2)}배 <input type="range" min={1} max={3} step={0.05} disabled={e.locked}
+                  <label>확대/축소 {e.props.zoom.toFixed(2)}배 <input type="range" min={0.5} max={3} step={0.05} disabled={e.locked}
                     value={e.props.zoom} onChange={(x) => patch(e.id, { zoom: Number(x.target.value) })} /></label>
                   <label>가로 초점 <input type="range" min={0} max={1} step={0.02} disabled={e.locked}
                     value={e.props.cx} onChange={(x) => patch(e.id, { cx: Number(x.target.value) })} /></label>

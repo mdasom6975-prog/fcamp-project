@@ -113,8 +113,7 @@ def _gen_error(e: Exception) -> str:
     """이미지 생성 실패 메시지. 서버 로그에 원인을 남기고, 화면에는 공급자 오류 문구(모델·파라미터 안내)만 보여 준다.
     키 등 민감 정보는 메시지에 넣지 않는다."""
     log.exception("이미지 생성 실패: %s", type(e).__name__)
-    body = getattr(e, "body", None)
-    msg = (body.get("error") or {}).get("message") if isinstance(body, dict) else None
+    msg = imagegen.error_info(e).get("message")
     if msg:
         return f"이미지 생성에 실패했습니다 ({type(e).__name__}): {msg[:300]}"
     return f"이미지 생성에 실패했습니다 ({type(e).__name__})"
@@ -301,7 +300,10 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     tpl = compose.template_for(w, h)
     bg_row = None
     if not regenerate_background:
-        src = _latest_design_bg(db, design_id, tpl) or _latest_design_bg(db, design_id)
+        same = _latest_design_bg(db, design_id, tpl)
+        # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
+        # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
+        src = same or (None if imagegen.can_vary() else _latest_design_bg(db, design_id))
         if src is not None and Path(src.file_path).exists():
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
@@ -310,10 +312,17 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
                 db.add(bg_row)
                 db.flush()
     if bg_row is None:
-        # 이 규격만 새로 만들 때도 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다
+        # 새로 만들 때 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다. 변형이 실패하면 그 배경을 잘라 쓴다(폴백)
         ref = _latest_design_bg(db, design_id)
-        path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None)
-        bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
+        try:
+            path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None)
+            bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
+        except HTTPException as e:
+            if ref is None or regenerate_background or not Path(ref.file_path).exists():
+                raise
+            log.warning("비율군 %s 변형 실패 → 기존 배경으로 대체: %s", tpl, e.detail)
+            bg_row = _bg_row(d, preset_id, ref.file_path, ref.width, ref.height, ref.prompt, ref.brand_version_id,
+                             {**(ref.layout or {}), "template": tpl, "fallback": str(e.detail)})
         db.add(bg_row)
         db.flush()
     bg_img = Image.open(bg_row.file_path)

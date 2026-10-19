@@ -172,8 +172,11 @@ def style_vars(style: dict, palette: list[dict], tone: dict) -> dict:
     """_3d_style 블록의 변수. 색은 브랜드 주조·보조·강조색(없으면 아이콘 색 하나), 모서리는 icon_style.corner,
     재질·광원은 image_tone 설명. 분기('지정 없음')는 여기서 계산해 md 에는 조건문을 두지 않는다."""
     cols = [f"{c['hex']}({c['role']})" for role in PALETTE_ROLES for c in palette if c.get("role") == role and c.get("hex")]
+    material = (style.get("material") or "자동").strip()
     return {"corner": style.get("corner") or "둥근",
             "colors": ", ".join(cols) or f"{style.get('color', '#000000')}(주조색)",
+            # 재질 프리셋이 있으면 그 재질을 세트 전체에 고정, '자동'이면 톤 설명의 재질 묘사를 따른다(분기는 여기서 계산)
+            "material": "아래 브랜드 톤 설명의 재질·광택 묘사를 따른다" if material == "자동" else f"{material} 재질로 통일한다",
             "tone": (tone or {}).get("description") or "지정 없음"}
 
 

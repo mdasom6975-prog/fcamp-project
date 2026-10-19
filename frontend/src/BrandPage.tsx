@@ -16,7 +16,7 @@ const emptyForm = (roles: string[], levels: Record<string, Level>): BrandForm =>
     { role: '제목', source: 'provided', name: 'Pretendard-Bold' },
     { role: '본문', source: 'provided', name: 'Pretendard-Regular' },
   ],
-  icon_style: { stroke_width: 2, corner: '둥근', fill: '윤곽' },
+  icon_style: { stroke_width: 2, corner: '둥근', fill: '윤곽', material: '자동' },
   image_tone: { description: '', reference_asset_ids: [] },
   voice: { description: '', headline_max_chars: null, polite: false },
   required_phrases: [],
@@ -25,6 +25,8 @@ const emptyForm = (roles: string[], levels: Record<string, Level>): BrandForm =>
 })
 
 const DEFAULT_ICON = { stroke_width: 2, corner: '둥근', fill: '윤곽' } as const
+// 3D 아이콘 재질 프리셋 (서버 schemas.ICON_MATERIALS 와 같은 값). '자동'은 이미지 톤 설명의 재질 묘사를 따른다
+const ICON_MATERIALS = ['자동', '무광 플라스틱', '클레이', '소프트 고무', '유리·반투명', '금속']
 
 const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
 const ratioText = (w: number, h: number) => {
@@ -97,6 +99,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const [baseline, setBaseline] = useState('')      // 불러온/저장한 시점의 폼 (변경 여부 비교용)
   const [oldView, setOldView] = useState(false)       // 현재 버전이 아닌 이전 버전을 보는 중
   const [savedId, setSavedId] = useState<number | null>(null)   // 이번에 저장한 브랜드 (시안으로 이동 가능)
+  const [iconRender, setIconRender] = useState<'3d' | 'svg'>('3d')   // 아이콘 렌더 방식(서버 설정): 3d 면 선 굵기·채움은 쓰지 않는다
   const logoInput = useRef<HTMLInputElement>(null)
 
   const loadBrands = useCallback(() => api.brands().then(setBrands), [])
@@ -109,6 +112,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
       setForm(f0); setBaseline(JSON.stringify(f0))
     })
     loadBrands()
+    fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.render === 'svg' || j?.render === '3d') setIconRender(j.render) }).catch(() => undefined)
   }, [loadBrands])
 
   if (!defaults || !form) return <main className="page"><p>불러오는 중…</p></main>
@@ -330,16 +334,28 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
 
         <Section item="icon_style" form={form} set={set} hideLevel>
           <div className="row">
-            <label>선 굵기 <input type="number" min={0.5} max={12} step={0.5} placeholder="2" value={form.icon_style.stroke_width || ''}
-              onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, stroke_width: e.target.value === '' ? 0 : Number(e.target.value) } })} /></label>
             <label>모서리 <select value={form.icon_style.corner}
               onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, corner: e.target.value as '각진' | '둥근' } })}>
               <option>각진</option><option>둥근</option></select></label>
-            <label>채움 <select value={form.icon_style.fill}
-              onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, fill: e.target.value as '윤곽' | '채움' } })}>
-              <option>윤곽</option><option>채움</option></select></label>
+            {iconRender === '3d' && (
+              <label>재질 <select value={form.icon_style.material ?? '자동'}
+                onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, material: e.target.value } })}>
+                {ICON_MATERIALS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select></label>
+            )}
+            {iconRender === 'svg' && (
+              <>
+                <label>선 굵기 <input type="number" min={0.5} max={12} step={0.5} placeholder="2" value={form.icon_style.stroke_width || ''}
+                  onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, stroke_width: e.target.value === '' ? 0 : Number(e.target.value) } })} /></label>
+                <label>채움 <select value={form.icon_style.fill}
+                  onChange={(e) => set({ ...form, icon_style: { ...form.icon_style, fill: e.target.value as '윤곽' | '채움' } })}>
+                  <option>윤곽</option><option>채움</option></select></label>
+              </>
+            )}
           </div>
-        <p className="muted">권장 기본값: 선 굵기 {DEFAULT_ICON.stroke_width}px · {DEFAULT_ICON.corner} 모서리 · {DEFAULT_ICON.fill} (비워 두면 이 값이 적용됩니다)</p>
+          {iconRender === 'svg'
+            ? <p className="muted">권장 기본값: 선 굵기 {DEFAULT_ICON.stroke_width}px · {DEFAULT_ICON.corner} 모서리 · {DEFAULT_ICON.fill} (비워 두면 이 값이 적용됩니다)</p>
+            : <p className="muted">3D 아이콘은 여기서 정한 <strong>모서리·재질</strong>과 함께, 색은 <strong>허용 색상</strong>의 주조·보조·강조색, 조명(재질이 '자동'이면 재질·광택도)은 아래 <strong>이미지 톤</strong> 설명을 따릅니다. 재질을 고르면 10개가 같은 재질로 나옵니다. 선 굵기·채움은 2D(SVG) 방식에서만 씁니다.</p>}
         </Section>
 
         <section className="card">

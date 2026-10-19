@@ -34,7 +34,7 @@ def _style(bv: BrandVersion) -> dict:
     st = bv.icon_style or {}
     color = next((c["hex"] for c in (bv.colors or []) if c.get("role") == "주조색"), "#000000")
     return {"stroke_width": float(st.get("stroke_width") or 2), "corner": st.get("corner") or "둥근",
-            "fill": st.get("fill") or "윤곽", "color": color}
+            "fill": st.get("fill") or "윤곽", "color": color, "material": st.get("material") or "자동"}
 
 
 def _palette(bv: BrandVersion) -> list[dict]:
@@ -95,7 +95,8 @@ def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w,
         viol.append({"type": "background", "detail": "배경이 투명하지 않습니다. 다시 그려 주세요"})
     st = {"render": "3d", "model": icons.MODEL_3D, "quality": icons.QUALITY_3D,
           "prompt_ref": prompts.ref("icons/render3d"), "style_ref": prompts.ref("icons/_3d_style"),
-          "corner": style["corner"], "colors": [c["hex"] for c in palette] or [style["color"]],
+          "corner": style["corner"], "material": style.get("material") or "자동",
+          "colors": [c["hex"] for c in palette] or [style["color"]],
           "bbox": info["bbox"], "scale": info["scale"], "transparent": info["transparent"],
           "viewBox": icons.VIEW, "live_area": icons.LIVE}
     fields = dict(name=name[:60], concept=(concept or "")[:200], elements=[], style=st, svg="",

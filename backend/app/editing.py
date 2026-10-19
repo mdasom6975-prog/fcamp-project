@@ -47,7 +47,7 @@ def validate_props(el_type: str, p: dict, canvas: tuple[int, int]) -> dict:
             raise ValueError(f"{k} 는 {lo}~{hi} 범위여야 합니다")
         return v
     if el_type == "image":
-        return {"zoom": num("zoom", 1.0, 4.0), "cx": num("cx", 0.0, 1.0), "cy": num("cy", 0.0, 1.0)}
+        return {"zoom": num("zoom", 0.5, 4.0), "cx": num("cx", 0.0, 1.0), "cy": num("cy", 0.0, 1.0)}   # 0.5~1 은 축소(여백은 가장자리 색으로 채움)
     if el_type == "shape":
         if not _hexok(p.get("color")):
             raise ValueError("color 는 #RRGGBB 형식이어야 합니다")
@@ -77,20 +77,34 @@ def validate_props(el_type: str, p: dict, canvas: tuple[int, int]) -> dict:
     raise ValueError("알 수 없는 요소 종류")
 
 
+def edge_color(img: Image.Image) -> tuple[int, int, int]:
+    """이미지 가장자리의 중앙값 색 — 축소했을 때 남는 자리를 채우는 데 쓴다(단색 벽·바닥 배경에서 자연스럽다)."""
+    small = img.convert("RGB").resize((48, 48), Image.BILINEAR)
+    px = small.load()
+    border = [px[x, y] for x in range(48) for y in (0, 47)] + [px[x, y] for y in range(48) for x in (0, 47)]
+    return tuple(sorted(c[i] for c in border)[len(border) // 2] for i in range(3))  # type: ignore[return-value]
+
+
 def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, logo_of) -> tuple[Image.Image, dict]:
     """elements 를 z 순서대로 그린다. 반환: (이미지, 측정값)"""
     els = sorted(elements, key=lambda e: e.get("z_index", 0))
     img_el = next((e for e in els if e["type"] == "image"), None)
     zp = img_el["props"] if img_el else {"zoom": 1.0, "cx": 0.5, "cy": 0.5}
 
-    # 배경: 늘이지 않고 확대(zoom) + 초점(cx, cy)으로 자른다
+    # 배경: 늘이지 않고 확대/축소(zoom) + 초점(cx, cy). zoom<1 이면 이미지가 캔버스보다 작아져 남는 자리는 가장자리 색으로 채운다
     base = bg.convert("RGB")
     scale = max(W / base.width, H / base.height) * zp["zoom"]
-    nw, nh = max(W, round(base.width * scale)), max(H, round(base.height * scale))
+    nw, nh = max(1, round(base.width * scale)), max(1, round(base.height * scale))
     big = base.resize((nw, nh), Image.LANCZOS)
-    left = min(max(round(zp["cx"] * nw - W / 2), 0), nw - W)
-    top = min(max(round(zp["cy"] * nh - H / 2), 0), nh - H)
-    canvas = big.crop((left, top, left + W, top + H))
+    left = round(zp["cx"] * nw - W / 2)
+    top = round(zp["cy"] * nh - H / 2)
+    left = min(max(left, 0), nw - W) if nw >= W else left        # 캔버스보다 크면 안쪽으로 고정, 작으면 어디든
+    top = min(max(top, 0), nh - H) if nh >= H else top
+    if nw >= W and nh >= H:
+        canvas = big.crop((left, top, left + W, top + H))
+    else:
+        canvas = Image.new("RGB", (W, H), edge_color(big))
+        canvas.paste(big, (-left, -top))
 
     measure: dict = {}
     for e in els:

@@ -41,10 +41,23 @@ class FontIn(BaseModel):
         return v
 
 
+# 3D 아이콘 재질 프리셋. '자동'이면 이미지 톤 설명의 재질 묘사를 따른다
+ICON_MATERIALS = ("자동", "무광 플라스틱", "클레이", "소프트 고무", "유리·반투명", "금속")
+
+
 class IconStyleIn(BaseModel):
     stroke_width: float = Field(ge=0.5, le=12)
     corner: str          # 각진 | 둥근
     fill: str            # 윤곽 | 채움
+    material: str = "자동"   # 3D 전용: ICON_MATERIALS 중 하나
+
+    @field_validator("material")
+    @classmethod
+    def _m(cls, v: str) -> str:
+        v = (v or "자동").strip()
+        if v not in ICON_MATERIALS:
+            raise ValueError(f"재질은 {ICON_MATERIALS} 중 하나")
+        return v
 
     @field_validator("corner")
     @classmethod

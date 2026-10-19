@@ -389,11 +389,13 @@ def test_generate_variant_retries_without_input_fidelity(monkeypatch):
         def edit(self, **kw):
             calls.append(kw)
             if "input_fidelity" in kw:
+                # SDK 는 응답 error 안쪽 dict 를 body 로 준다(래퍼 없음) — 실제 모양 그대로
                 raise openai.BadRequestError(
                     "The model does not support the 'input_fidelity' parameter.",
                     response=httpx.Response(400, request=httpx.Request("POST", "http://test")),
-                    body={"error": {"message": "The model 'x' does not support the 'input_fidelity' parameter.",
-                                    "param": "input_fidelity", "code": "invalid_input_fidelity_model"}})
+                    body={"message": "The model 'x' does not support the 'input_fidelity' parameter.",
+                          "type": "image_generation_user_error", "param": "input_fidelity",
+                          "code": "invalid_input_fidelity_model"})
             import base64, io
             buf = io.BytesIO(); Image.new("RGB", (kw["size"] and 16, 16), "white").save(buf, "PNG")
             return type("R", (), {"data": [type("D", (), {"b64_json": base64.b64encode(buf.getvalue()).decode()})()]})()
@@ -484,3 +486,56 @@ def test_reset_generated_can_clear_icon_set(env, tmp_path):
     r = c.post(f"/api/designs/{ids['design']}/reset-generated", json={"include_copy": False, "include_icons": True})
     assert r.json()["icons_deleted"] == 2 and c.get(f"/api/designs/{ids['design']}/icons").json() == []
     assert not any(f.exists() for f in files), "아이콘 파일도 지운다"
+
+
+def test_editor_zoom_below_one_letterboxes_with_edge_color():
+    """편집에서 zoom<1(축소)이면 이미지가 캔버스 안에 작게 놓이고 남는 자리는 가장자리 색으로 채워진다."""
+    from app import editing
+    bg = Image.new("RGB", (1024, 1024), (250, 205, 80))
+    ImageDraw.Draw(bg).rectangle((300, 300, 724, 724), fill=(30, 60, 120))
+    out, _ = editing.render(bg, 1440, 1800, [{"type": "image", "props": {"zoom": 0.6, "cx": 0.5, "cy": 0.5}, "z_index": 0}],
+                            lambda r: None, lambda a: None)
+    assert out.size == (1440, 1800)
+    assert out.getpixel((5, 5)) == (250, 205, 80), "여백은 가장자리 색"
+    assert out.getpixel((720, 900)) == (30, 60, 120), "가운데는 축소된 피사체"
+    assert editing.validate_props("image", {"zoom": 0.5, "cx": 0.5, "cy": 0.5}, (1440, 1800))["zoom"] == 0.5
+    with pytest.raises(ValueError):
+        editing.validate_props("image", {"zoom": 0.4, "cx": 0.5, "cy": 0.5}, (1440, 1800))
+
+
+def test_error_info_accepts_both_body_shapes():
+    import httpx
+    import openai
+    from app import imagegen
+    mk = lambda body: openai.BadRequestError("m", response=httpx.Response(400, request=httpx.Request("POST", "http://t")), body=body)
+    assert imagegen.error_info(mk({"message": "a", "param": "size"}))["param"] == "size"
+    assert imagegen.error_info(mk({"error": {"message": "b", "param": "quality"}}))["param"] == "quality"
+    assert imagegen.error_info(mk(None)) == {}
+
+
+def test_make_image_creates_variant_for_missing_ratio_group(env):
+    """'이미지 생성' 흐름(make_image 연쇄)에서도 비율군마다 1장: 세로형만 있으면 가로형 지면은 그 장면을 참조한 변형을 만든다."""
+    c, ids, calls, variants = env["client"], env["ids"], env["calls"], env["variants"]
+    p = ids["presets"]
+    _select_copy(env, p.values())
+    r = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and calls == [(1024, 1536)] and variants == []
+    r = c.post(f"/api/designs/{ids['design']}/presets/{p['네이티브 2:1']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and len(variants) == 1 and variants[0]["size"] == (1536, 1024)
+    assert (r.json()["background"]["width"], r.json()["background"]["height"]) == (1536, 1024)
+    # 같은 비율군(스토리)은 추가 생성 없이 세로형 배경을 공유
+    r = c.post(f"/api/designs/{ids['design']}/presets/{p['스토리 9:16']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and len(calls) == 2
+
+
+def test_make_image_falls_back_to_crop_when_variant_fails(env, monkeypatch):
+    from app import imagegen
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    p = ids["presets"]
+    _select_copy(env, p.values())
+    c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False})
+    monkeypatch.setattr(imagegen, "generate_variant", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rejected")))
+    r = c.post(f"/api/designs/{ids['design']}/presets/{p['네이티브 2:1']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200, r.text
+    bg = r.json()["background"]
+    assert (bg["width"], bg["height"]) == (1024, 1536) and "fallback" in bg["layout"] and bg["layout"]["template"] == "가로형"

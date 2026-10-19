@@ -202,9 +202,17 @@ def can_vary() -> bool:
 _fidelity_supported = True   # 모델이 input_fidelity 를 거절하면 False 로 바꿔 이후 호출에서는 보내지 않는다
 
 
-def _is_fidelity_error(e: Exception) -> bool:
+def error_info(e: Exception) -> dict:
+    """OpenAI 오류의 {message, param, code}. SDK 는 응답의 error 안쪽 dict 를 e.body 로 주지만(래퍼 없음), 래퍼가 있는 경우도 받는다."""
     body = getattr(e, "body", None)
-    err = (body.get("error") or {}) if isinstance(body, dict) else {}
+    if not isinstance(body, dict):
+        return {}
+    inner = body.get("error")
+    return inner if isinstance(inner, dict) else body
+
+
+def _is_fidelity_error(e: Exception) -> bool:
+    err = error_info(e)
     return err.get("param") == "input_fidelity" or "input_fidelity" in str(err.get("message") or "")
 
 

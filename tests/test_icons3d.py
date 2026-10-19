@@ -39,3 +39,29 @@ def test_fit_alpha_empty_image_fails():
     from app import icons
     with pytest.raises(ValueError):
         icons.fit_alpha(Image.new("RGBA", (64, 64), (0, 0, 0, 0)), 256, 256)
+
+
+def test_style_vars_material_preset_or_auto():
+    from app import icons
+    auto = icons.style_vars({"corner": "둥근"}, [], {"description": "무광 레진"})
+    assert auto["material"].startswith("아래 브랜드 톤")
+    fixed = icons.style_vars({"corner": "둥근", "material": "클레이"}, [], {})
+    assert fixed["material"] == "클레이 재질로 통일한다"
+    from app import prompts
+    text = prompts.render("icons/_3d_style", **fixed)
+    assert "재질: 클레이 재질로 통일한다." in text
+
+
+def test_review_flags_icons_with_other_material():
+    from types import SimpleNamespace
+    from app import review
+    base = {"render": "3d", "style_ref": "s", "prompt_ref": "p", "model": "m", "quality": "low", "corner": "둥근", "colors": []}
+    icons_ = [SimpleNamespace(name=f"기능{i}", style={**base, "material": "클레이"}, violations=[], width=256, height=256,
+                              png_path="", source_path=None) for i in range(10)]
+    brand = {"levels": {"icon_style": "권장"}, "icon_style": {"corner": "둥근", "material": "클레이"}, "colors": [],
+             "forbidden_phrases": [], "required_phrases": []}
+    items = {i["item"]: i for i in review.review_icons(icons_, brand)}
+    assert items["아이콘 스타일"]["status"] == "통과"
+    icons_[3].style = {**base, "material": "금속"}
+    items = {i["item"]: i for i in review.review_icons(icons_, brand)}
+    assert items["아이콘 스타일"]["status"] != "통과" and "기능3" in items["아이콘 스타일"]["message"]
