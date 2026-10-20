@@ -156,3 +156,30 @@ def test_parse_icons_and_generate_checked_returns_candidates(monkeypatch):
     monkeypatch.setattr(copywriter, "generate", fake_generate)
     variants, attempts, icons = copywriter.generate_checked("b", {}, {}, {}, copywriter.limits_for([]))
     assert attempts == 1 and icons == [{"name": "기능", "concept": "c"}] and variants[0]["violations"] == []
+
+
+def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monkeypatch):
+    """기본 1회 호출. COPY_AUTO_RETRY(MAX_ATTEMPTS=2)여도 통과 변형이 하나라도 있으면 1회, 전부 위반일 때만 2회."""
+    from app import copywriter
+    limits = copywriter.limits_for([{"field": "제목", "max_chars": 5, "count_method": "글자 수", "level": "필수"}])
+    calls: list[int] = []
+
+    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None):
+        calls.append(1)
+        return [{"headline": "너무너무긴제목입니다", "body": "", "cta": ""}, {"headline": "짧다", "body": "", "cta": ""}]
+    monkeypatch.setattr(copywriter, "generate", fake_generate)
+    monkeypatch.setattr(copywriter, "MAX_ATTEMPTS", 2)
+    variants, attempts, _ = copywriter.generate_checked("b", {}, {}, {}, limits)
+    assert attempts == 1 and len(calls) == 1 and [bool(v["violations"]) for v in variants] == [True, False]
+
+    def all_bad(brand_name, brand, brief, placement, limits, icons_out=None):
+        calls.append(1)
+        return [{"headline": "너무너무긴제목입니다", "body": "", "cta": ""}]
+    monkeypatch.setattr(copywriter, "generate", all_bad)
+    calls.clear()
+    _, attempts, _ = copywriter.generate_checked("b", {}, {}, {}, limits)
+    assert attempts == 2 and len(calls) == 2
+    monkeypatch.setattr(copywriter, "MAX_ATTEMPTS", 1)
+    calls.clear()
+    _, attempts, _ = copywriter.generate_checked("b", {}, {}, {}, limits)
+    assert attempts == 1 and len(calls) == 1, "기본(자동 재시도 끔)은 전부 위반이어도 1회"

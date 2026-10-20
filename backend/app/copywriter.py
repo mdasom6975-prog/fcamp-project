@@ -12,7 +12,9 @@ from .textcount import METHODS, count_len
 load_dotenv(BASE_DIR / ".env")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-5.4-mini")
 VARIANTS = 3
-MAX_ATTEMPTS = 2  # 최초 1회 + 위반 시 자동 재생성 1회
+# 글자 수 위반 시 자동 재생성: 기본 끔(COPY_AUTO_RETRY=1 이면 켬). 두 번째 호출도 위반이 남는 경우가 많아 호출만 늘렸다.
+# 대신 프롬프트에 제한의 90% 이내로 쓰라는 여유분 지시를 두고, 위반이 남으면 사용자가 '카피 다시 생성'을 누른다.
+MAX_ATTEMPTS = 2 if os.getenv("COPY_AUTO_RETRY", "0") == "1" else 1
 ICON_COUNT = 10            # 아이콘 세트 크기
 ICON_CANDIDATES = 15       # 카피 호출에서 함께 받는 기능명 후보 수 (여유분 5개 → 중복·금지 표현 제외 뒤에도 추가 요청이 거의 없다)
 
@@ -183,8 +185,9 @@ def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits:
 
 
 def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int, list[dict]]:
-    """생성 → 코드 검사 → 위반이 있으면 1회 재생성 → 위반이 적은 쪽을 채택. 반환: (변형, 시도 수, 아이콘 기능명 후보).
-    아이콘 후보는 마지막 응답의 것을 쓴다(아이콘 세트 생성 때 기능명 제안 호출을 대신한다)."""
+    """생성 → 코드 검사. 반환: (변형, 시도 수, 아이콘 기능명 후보). 기본은 1회 호출.
+    COPY_AUTO_RETRY=1 이면 통과한 변형이 하나도 없을 때만 1회 더 생성해 위반이 적은 쪽을 채택한다(사용자는 변형 하나를
+    고르므로 깨끗한 변형이 하나면 충분하다). 아이콘 후보는 마지막 응답의 것을 쓴다."""
     best, best_bad, attempts, icons = None, 10**9, 0, []
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
@@ -196,6 +199,6 @@ def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[
         bad = sum(1 for v in variants if v["violations"])
         if variants and bad < best_bad:
             best, best_bad = variants, bad
-        if best is not None and best_bad == 0:
+        if best is not None and any(not v["violations"] for v in best):
             break
     return best or [], attempts, icons
