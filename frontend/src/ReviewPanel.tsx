@@ -43,6 +43,17 @@ export default function ReviewPanel({ designId }: { designId: number }) {
   const [focus, setFocus] = useState<number | null>(null)
 
   const load = useCallback(() => call('GET', `/api/designs/${designId}/review`).then(setRv).catch(() => undefined), [designId])
+  // 글자 수를 넘는 지면: 그 지면의 선택 카피만 Claude 1회로 제한에 맞게 고친다. 고치면 그 지면 검수가 무효화되어 다시 검수해야 한다
+  const [fitting, setFitting] = useState<number | null>(null)
+  const [fitMsg, setFitMsg] = useState<string | null>(null)
+  const fit = async (presetId: number) => {
+    setFitting(presetId); setFitMsg(null)
+    try {
+      const j = await call('POST', `/api/designs/${designId}/presets/${presetId}/copy/fit`)
+      setFitMsg(j.fits ? `문구를 줄였습니다 (${(j.changed as string[]).join(', ')}). '다시 검수'를 눌러 확인하세요.` : j.note)
+      await load()
+    } catch (e) { setFitMsg((e as Error).message) } finally { setFitting(null) }
+  }
   const loadExps = useCallback(() => call('GET', `/api/designs/${designId}/exports`).then(setExps).catch(() => undefined), [designId])
   const loadImgs = useCallback(() => Promise.all([
     call('GET', `/api/designs/${designId}`).then((d: { presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[] }) =>
@@ -97,8 +108,7 @@ export default function ReviewPanel({ designId }: { designId: number }) {
 
   return (
     <div className="copy">
-      <ImageGrid items={items} rows={imgs} selected={focus} onSelect={focusGroup} badge={cardBadge}
-        emptyText="검수할 지면이 없습니다." />
+      {/* 검수 실행·상태는 맨 위에: 지면 카드가 많으면 버튼이 화면 아래로 밀려 찾기 어렵다 */}
       <div className="row">
         <button className="primary" disabled={busy} onClick={run}>{rv?.reviewed ? '다시 검수' : '검수 실행'}</button>
         {rv?.reviewed && (
@@ -107,9 +117,12 @@ export default function ReviewPanel({ designId }: { designId: number }) {
           </span>
         )}
         {rv && !rv.reviewed && <span className="muted">검수 결과가 없습니다. 시안이 바뀌면 다시 검수해야 합니다.</span>}
+        {fitMsg && <span className="notice ok">{fitMsg}</span>}
+        <span className="muted">실제로 내려받을 파일(인코딩 결과)과 편집 원본을 기준으로 검사합니다. 광고 심사 통과를 보장하지 않습니다.</span>
       </div>
-      <p className="muted">실제로 내려받을 파일(인코딩 결과)과 편집 원본을 기준으로 검사합니다. 광고 심사 통과를 보장하지 않습니다.</p>
       {err && <div className="notice err">{err}</div>}
+      <ImageGrid items={items} rows={imgs} selected={focus} onSelect={focusGroup} badge={cardBadge}
+        emptyText="검수할 지면이 없습니다." />
 
       {rv?.reviewed && rv.blockers.length > 0 && (
         <div className="notice err">
@@ -140,6 +153,11 @@ export default function ReviewPanel({ designId }: { designId: number }) {
                   <td>{it.item}{it.blocking && <span className="badge b-need" style={{ marginLeft: 4 }}>차단</span>}</td>
                   <td className="muted">{it.message}</td>
                   <td>
+                    {it.category === '문구' && it.item.includes('글자 수') && it.status === '수정 필요' && g.preset_id !== null && (
+                      <button type="button" disabled={fitting !== null || busy} onClick={() => fit(g.preset_id as number)}>
+                        {fitting === g.preset_id ? '줄이는 중…' : '지면에 맞게 줄이기 (채팅 1회)'}
+                      </button>
+                    )}
                     {it.needs_human && it.raw_status === '확인 필요' && (
                       <label style={{ display: 'inline-flex', gap: 4, whiteSpace: 'nowrap' }}>
                         <input type="checkbox" checked={it.confirmed} onChange={(e) => confirm(it.id, e.target.checked)} /> 확인함

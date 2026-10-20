@@ -18,7 +18,7 @@ export type ApiCalls = {
 }
 
 export const KIND_LABEL: Record<string, string> = {
-  background: '배경 생성', variant: '배경 변형', icon: '아이콘 렌더', copy: '카피', icon_names: '아이콘 기능명', icon_redraw: '아이콘 재작성',
+  background: '배경 생성', variant: '배경 변형', icon: '아이콘 렌더', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '아이콘 기능명', icon_redraw: '아이콘 재작성',
 }
 const API_LABEL: Record<string, string> = { 'images.generate': 'generate', 'images.edit': 'edit', chat: 'chat' }
 
