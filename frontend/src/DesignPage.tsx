@@ -616,6 +616,56 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   const [ver, setVer] = useState(0)   // 이미지 캐시 무효화
   const [target, setTarget] = useState(10)   // 세트 목표 개수 (서버 설정)
   const [filling, setFilling] = useState(false)
+  // 기능명 후보(렌더 전, 비용 없음): 카피 호출에서 받은 15개. 사용자가 고른 것만 렌더한다(쓰지 않을 아이콘은 만들지 않음)
+  type Cand = { name: string; concept: string; rendered: boolean }
+  const [cands, setCands] = useState<Cand[] | null>(null)
+  const [candErr, setCandErr] = useState<string | null>(null)
+  const [picked, setPicked] = useState<string[]>([])
+  const loadCands = async (preselect: number) => {
+    setCandErr(null)
+    try {
+      const r = await fetch(`/api/designs/${designId}/icons/candidates`)
+      const j = await r.json()
+      if (!r.ok) throw new Error(j?.detail || '후보를 불러오지 못했습니다')
+      const list: Cand[] = j.candidates ?? []
+      setCands(list)
+      setPicked(list.filter((c) => !c.rendered).slice(0, Math.max(0, preselect)).map((c) => c.name))
+    } catch (e) { setCandErr((e as Error).message) }
+  }
+  const togglePick = (name: string) => setPicked((p) => (p.includes(name) ? p.filter((x) => x !== name) : [...p, name]))
+  const renderPicked = () => overlay.run(`고른 아이콘 ${picked.length}개 렌더하는 중… (1개당 10~20초)`, renderPickedInner)
+  const renderPickedInner = async () => {
+    setBusy(true); setErr(null); setNote(null)
+    try {
+      const j = await post(`/api/designs/${designId}/icons`, { names: picked })
+      setItems(j.icons); setVer((v) => v + 1)
+      setCands((l) => l && l.map((c) => ({ ...c, rendered: c.rendered || j.icons.some((a: IconItem) => a.name === c.name) })))
+      setPicked([])
+      if (!j.complete) setNote(`${j.made}개를 렌더했습니다. 세트는 ${j.icons.length}/${j.requested}개 — 검수·내보내기에는 ${j.requested}개가 필요합니다.`)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const candidatePicker = (room: number) => cands && (
+    <div className="icon-cands">
+      <p className="muted">기능명 후보 {cands.length}개 — 쓸 것만 골라 렌더합니다 (1개당 이미지 1장). 남은 자리 {room}개.</p>
+      <div className="icon-cand-grid">
+        {cands.map((c) => (
+          <label key={c.name} className={`icon-cand ${c.rendered ? 'done' : ''}`} title={c.concept}>
+            <input type="checkbox" disabled={c.rendered || busy || (!picked.includes(c.name) && picked.length >= room)}
+              checked={c.rendered || picked.includes(c.name)} onChange={() => togglePick(c.name)} />
+            <span>{c.name}</span>{c.rendered && <span className="muted"> (완료)</span>}
+            {c.concept && <span className="muted icon-cand-concept">{c.concept}</span>}
+          </label>
+        ))}
+      </div>
+      <div className="row">
+        <button className="primary" disabled={busy || picked.length === 0} onClick={renderPicked}>선택한 {picked.length}개 렌더 (이미지 {picked.length}장)</button>
+      </div>
+    </div>
+  )
 
   useEffect(() => {
     fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
@@ -693,10 +743,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
         </p>
         {want && (
           <div className="row">
-            <button className="primary" disabled={busy} onClick={generate}>아이콘 세트 생성</button>
+            <button className="primary" disabled={busy} onClick={generate}>아이콘 세트 생성 (후보에서 {target}개 자동, 이미지 {target}장)</button>
+            {!cands && <button disabled={busy} onClick={() => loadCands(target)}>후보를 보고 고르기 (비용 없음)</button>}
             {busy && <span className="muted">기능을 정하고 아이콘 10개를 렌더하는 중… 2~3분 걸릴 수 있습니다.</span>}
           </div>
         )}
+        {want && candErr && <div className="notice err">{candErr}</div>}
+        {want && candidatePicker(target)}
         {err && <div className="notice err">{err}</div>}
       </div>
     )
@@ -719,8 +772,11 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
             {filling ? `부족한 아이콘 ${target - items.length}개를 렌더하는 중…` : `부족한 아이콘 ${target - items.length}개 채우기`}
           </button>
           {!filling && <span className="muted">(아이콘 1개당 이미지 1장 비용)</span>}
+          {!cands && <button disabled={busy || filling} onClick={() => loadCands(target - items.length)}>후보를 보고 고르기 (비용 없음)</button>}
         </div>
       )}
+      {items.length < target && candErr && <div className="notice err">{candErr}</div>}
+      {items.length < target && candidatePicker(target - items.length)}
       {st && items[0].render === '3d' ? (
         <p className="muted">
           적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px (원본 1024)

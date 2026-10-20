@@ -481,3 +481,10 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .lightbox .imgblock { margin-top: 0; background: transparent; border: none; padding: 0; }
 .lightbox .preview { display: flex; flex-direction: column; align-items: center; }
 .lightbox .preview img { max-width: 100%; width: auto; max-height: 68vh; }
+
+/* 아이콘 기능명 후보 선택 */
+.icon-cands { margin: 8px 0; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: var(--radius-sm); background: #fff; }
+.icon-cand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 12px; margin: 6px 0; }
+.icon-cand { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 13px; cursor: pointer; }
+.icon-cand.done { opacity: .55; }
+.icon-cand-concept { flex-basis: 100%; font-size: 11px; margin-left: 20px; }

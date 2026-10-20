@@ -193,3 +193,62 @@ def test_icon_set_falls_back_to_proposal_when_candidates_short(env, monkeypatch)
     monkeypatch.setattr(icons, "RENDER", "3d")
     out = c.post(f"/api/designs/{did}/icons").json()
     assert called == [1] and out["made"] == 10 and out["icons"][0]["name"] == "제안0"
+
+
+def _icon_set_design(env):
+    """아이콘 세트 캠페인(합성본 없이 생성 가능)으로 바꾸고 후보 15개를 둔다."""
+    from app import models
+    did, Local = env["ids"]["design"], env["Local"]
+    cands = [{"name": f"후보{i}", "concept": f"오브젝트 {i}"} for i in range(1, 16)]
+    with Local() as db:
+        d = db.get(models.Design, did); d.kind = "아이콘 세트"; d.brief = {**d.brief, "icon_candidates": cands}; db.commit()
+    return did
+
+
+def test_candidates_endpoint_lists_without_call_and_marks_rendered(env, monkeypatch):
+    from app import icons
+    c = env["client"]
+    did = _icon_set_design(env)
+    monkeypatch.setattr(icons, "propose3d", lambda *a, **k: (_ for _ in ()).throw(AssertionError("후보가 있으면 제안 호출 없음")))
+    j = c.get(f"/api/designs/{did}/icons/candidates").json()
+    assert j["source"] == "copy" and len(j["candidates"]) == 15 and not any(x["rendered"] for x in j["candidates"])
+    env["add_icons"](2)       # 기능1, 기능2 (후보 밖 이름)
+    j = c.get(f"/api/designs/{did}/icons/candidates").json()
+    assert j["rendered"] == 2 and not any(x["rendered"] for x in j["candidates"])
+
+
+def test_candidates_endpoint_proposes_once_when_missing(env, monkeypatch):
+    from app import icons, models
+    c, did, Local = env["client"], env["ids"]["design"], env["Local"]
+    with Local() as db:
+        d = db.get(models.Design, did); d.kind = "아이콘 세트"; db.commit()
+    calls: list[int] = []
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    monkeypatch.setattr(icons, "propose3d", lambda *a, **k: (calls.append(1), [{"name": f"제안{i}", "concept": "o"} for i in range(15)])[1])
+    j = c.get(f"/api/designs/{did}/icons/candidates").json()
+    assert j["source"] == "proposal" and len(j["candidates"]) == 15 and calls == [1]
+    c.get(f"/api/designs/{did}/icons/candidates")
+    assert calls == [1], "두 번째부터는 브리프에 저장된 후보를 쓴다"
+
+
+def test_render_only_picked_names_then_append_more(env, monkeypatch):
+    """고른 이름만 렌더(이미지 N장)하고, 세트가 생긴 뒤에도 고른 이름을 이어 붙인다. 후보 밖 이름·초과 선택은 거절."""
+    from app import icons
+    c = env["client"]
+    did = _icon_set_design(env)
+    rendered: list[str] = []
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    monkeypatch.setattr(icons, "render_many", lambda plist: (rendered.extend(plist), [_blob() for _ in plist])[1])
+    monkeypatch.setattr(icons, "propose3d", lambda *a, **k: (_ for _ in ()).throw(AssertionError("제안 호출 없음")))
+    j = c.post(f"/api/designs/{did}/icons", json={"names": ["후보3", "후보1", "후보3"]}).json()
+    assert j["made"] == 2 and len(rendered) == 2 and [a["name"] for a in j["icons"]] == ["후보3", "후보1"] and not j["complete"]
+    assert [a["position"] for a in j["icons"]] == [1, 2]
+    assert c.post(f"/api/designs/{did}/icons", json={"names": ["없는이름"]}).status_code == 400
+    assert c.post(f"/api/designs/{did}/icons", json={"names": ["후보1"]}).status_code == 409, "이미 있는 이름만 고르면 409"
+    assert c.post(f"/api/designs/{did}/icons", json={}).status_code == 409, "세트가 있으면 자동 생성은 막힌다"
+    j = c.post(f"/api/designs/{did}/icons", json={"names": [f"후보{i}" for i in range(4, 12)]}).json()
+    assert j["made"] == 8 and j["complete"] and len(j["icons"]) == 10 and j["icons"][-1]["position"] == 10
+    r = c.post(f"/api/designs/{did}/icons", json={"names": ["후보12"]})
+    assert r.status_code == 400 and "넘칩니다" in r.json()["detail"]
+    cj = c.get(f"/api/designs/{did}/icons/candidates").json()
+    assert cj["rendered"] == 10 and sum(x["rendered"] for x in cj["candidates"]) == 10
