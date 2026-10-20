@@ -21,6 +21,8 @@ class BriefIn(BaseModel):
     target: str = Field(default="", max_length=300)
     product_image_asset_id: int | None = None      # 제품 이미지(선택)
     image_style: str = "자동"                       # 배경 형태: 자동 | imagegen.STYLES 의 이름
+    image_model: str | None = None                  # 생성 설정: 이미지 모델(imagegen.MODELS). None 이면 기존 값 유지/기본
+    bg_mode: str | None = None                      # 생성 설정: 배경 방식 per_ratio | single. None 이면 기존 값 유지/기본
     # 캠페인 필수·금지 표현. 비어 있으면 브랜드 규칙 값을 쓴다 (phrases.effective)
     required_phrases: list[str] = Field(default=[], max_length=50)
     forbidden_phrases: list[str] = Field(default=[], max_length=50)
@@ -40,6 +42,22 @@ class BriefIn(BaseModel):
         if both:
             raise ValueError(f"필수 표현과 금지 표현에 같은 문구가 있습니다: {', '.join(sorted(both))}")
         return self
+
+    @field_validator("image_model")
+    @classmethod
+    def _model(cls, v: str | None) -> str | None:
+        from .imagegen import MODELS
+        if v is not None and v not in MODELS:
+            raise ValueError(f"이미지 모델은 {MODELS} 중 하나")
+        return v
+
+    @field_validator("bg_mode")
+    @classmethod
+    def _mode(cls, v: str | None) -> str | None:
+        from .imagegen import BG_MODES
+        if v is not None and v not in BG_MODES:
+            raise ValueError(f"배경 방식은 {list(BG_MODES)} 중 하나")
+        return v
 
     @field_validator("image_style")
     @classmethod
@@ -184,7 +202,11 @@ def update_design(design_id: int, body: DesignPatch, db: Session = Depends(get_d
         raise HTTPException(404, "시안을 찾을 수 없습니다")
     if body.brief is not None:
         _check_product_image(body.brief.product_image_asset_id, db)
-        d.brief = {**(d.brief or {}), **body.brief.model_dump()}      # icon 같은 기존 키는 보존
+        dump = body.brief.model_dump()
+        for k in ("image_model", "bg_mode"):           # 입력 폼이 보내지 않는 생성 설정은 기존 값을 지우지 않는다
+            if dump.get(k) is None:
+                dump.pop(k, None)
+        d.brief = {**(d.brief or {}), **dump}      # icon 같은 기존 키는 보존
     if body.brand_id is not None:
         # 같은 브랜드면 최신 규칙 버전 적용, 다른 브랜드면 브랜드 변경
         brand = db.get(Brand, body.brand_id)

@@ -16,7 +16,7 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; image_model?: string | null; bg_mode?: string | null; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string }[]
@@ -42,6 +42,12 @@ type ImgUsage = { date: string; provider?: string; used: number; limit: number; 
   calls?: { total: number; images: number; chats: number; by_kind: Record<string, { count: number }> }
   quality?: { draft: string; final: string } }
 const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', icon: '아이콘', copy: '카피', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
+type ImgSettings = {
+  models: { model: string; default: boolean; draft_usd: number | null; final_usd: number | null; estimated: boolean; input_fidelity: boolean }[]
+  modes: string[]; default_mode: string; quality: { draft: string; final: string }; provider: string; usd_krw: number
+}
+const MODE_LABEL: Record<string, string> = { per_ratio: '비율군마다 1장 (1~3회, 변형은 images.edit)', single: '1장을 모든 지면이 잘라 씀 (1회, edit 없음)' }
+const usdKrw = (v: number | null | undefined, rate: number) => (v == null ? '요율 없음' : `$${v.toFixed(3)} (약 ${Math.round(v * rate).toLocaleString()}원)`)
 type Limit = { field: string; min: number | null; max: number | null; level: string | null } | null
 type CopyGroup = {
   preset_id: number; platform: string; name: string; batch_no: number | null
@@ -54,13 +60,30 @@ const LETTERS = ['A', 'B', 'C', 'D', 'E']
 
 type Screen = 'design' | 'edit' | 'review'
 
-function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange, onEdit, onReview }: {
-  designId: number; brandName: string; versionNo: number | null; imageStyle: string; onDesignChange: () => void
+function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, onDesignChange, onEdit, onReview }: {
+  designId: number; brandName: string; versionNo: number | null; imageStyle: string
+  genSettings: { image_model?: string | null; bg_mode?: string | null }    // 브리프에 저장된 생성 설정(없으면 서버 기본)
+  onDesignChange: () => void
   onEdit: (presetId: number) => void; onReview: () => void
 }) {
   const [groups, setGroups] = useState<CopyGroup[]>([])
   const [bgStyle, setBgStyle] = useState(imageStyle)
   useEffect(() => setBgStyle(imageStyle), [imageStyle])
+  // 생성 설정(이미지 모델·배경 방식): 서버 목록을 받아 고르고, 바꾸면 브리프에 저장한다. 다음 배경 생성부터 적용.
+  const [imgSettings, setImgSettings] = useState<ImgSettings | null>(null)
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null)
+  useEffect(() => { fetch('/api/image-settings').then((r) => r.json()).then((j: ImgSettings) => j?.models && setImgSettings(j)).catch(() => undefined) }, [])
+  const curModel = genSettings.image_model ?? imgSettings?.models.find((m) => m.default)?.model ?? ''
+  const curMode = genSettings.bg_mode ?? imgSettings?.default_mode ?? 'per_ratio'
+  const saveSettings = async (patch: { image_model?: string; bg_mode?: string }) => {
+    setSettingsMsg(null)
+    try {
+      await fetch(`/api/designs/${designId}/image-settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
+        .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '저장 실패') })
+      onDesignChange()
+      setSettingsMsg('저장했습니다. 다음 배경 생성·재생성부터 적용됩니다 (기존 배경은 그대로).')
+    } catch (e) { setSettingsMsg((e as Error).message) }
+  }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
@@ -287,9 +310,29 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
                 {usage.calls && usage.calls.total > 0 && (
                   <> · 오늘 호출 내역: {Object.entries(usage.calls.by_kind).map(([k, n]) => `${CALL_KIND[k] ?? k} ${n.count}`).join(', ')} (이미지 {usage.calls.images}, 채팅 {usage.calls.chats})</>
                 )}
-                {' '}(호출 횟수 기준, UTC 0시 초기화) · 배경은 첫 비율군 1장을 만든 뒤 나머지 비율군(세로형·정사각·가로형)은 같은 장면을 그 비율 구도로 변형해 모든 매체가 한 장면을 씁니다.
+                {' '}(호출 횟수 기준, UTC 0시 초기화) · {curMode === 'single'
+                  ? '배경은 가장 적게 잘리는 비율의 1장을 공용 구도로 만들고 모든 매체가 그 한 장을 잘라 씁니다 (변형 호출 없음).'
+                  : '배경은 첫 비율군 1장을 만든 뒤 나머지 비율군(세로형·정사각·가로형)은 같은 장면을 그 비율 구도로 변형해 모든 매체가 한 장면을 씁니다.'}
               </p>
             )}
+            {imgSettings && (
+              <div className="row">
+                <label className="muted">이미지 모델{' '}
+                  <select value={curModel} disabled={bgBusy} onChange={(e) => saveSettings({ image_model: e.target.value })}>
+                    {imgSettings.models.map((m) => <option key={m.model} value={m.model}>{m.model}{m.default ? ' (기본)' : ''}</option>)}
+                  </select>
+                </label>
+                {(() => { const m = imgSettings.models.find((x) => x.model === curModel); return m ? (
+                  <span className="muted">정사각 1장 초안 {usdKrw(m.draft_usd, imgSettings.usd_krw)} · 확정 {usdKrw(m.final_usd, imgSettings.usd_krw)}{m.estimated ? ' · 요금표에 없어 추정' : ''}{m.input_fidelity ? '' : ' · input_fidelity 미지원'}</span>
+                ) : null })()}
+                <label className="muted">배경 방식{' '}
+                  <select value={curMode} disabled={bgBusy} onChange={(e) => saveSettings({ bg_mode: e.target.value })}>
+                    {imgSettings.modes.map((m) => <option key={m} value={m}>{MODE_LABEL[m] ?? m}</option>)}
+                  </select>
+                </label>
+              </div>
+            )}
+            {settingsMsg && <p className="muted">{settingsMsg}</p>}
             <div className="row">
               <label className="muted">배경 형태{' '}
                 <select value={bgStyle} disabled={bgBusy} onChange={(e) => setBgStyle(e.target.value)}>
@@ -298,7 +341,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
               </label>
               <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={() => regenBackground(false)}
                 title="형태·구도를 고르는 동안은 초안 품질로 만듭니다 (비용 약 1/4)">
-                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}합성한 비율군마다 1장, 모든 매체에 적용)
+                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}{curMode === 'single' ? '1장, 모든 매체가 잘라 씀' : '합성한 비율군마다 1장, 모든 매체에 적용'})
               </button>
               {qualitySplit && <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background) || !hasDraftBg} onClick={() => regenBackground(true)}
                 title="지금 초안의 장면·구도를 참조해 한 번만 확정 품질로 다시 그립니다. 내보내기 전에 실행하세요">
@@ -1239,7 +1282,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
               <section className="card step-card" id="sec-copy">
                 <header><h3><span className="step-no">③</span> 카피·시안 선택</h3></header>
                 <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no}
-                  imageStyle={d.brief.image_style ?? '자동'} onDesignChange={() => { loadDesigns() }}
+                  imageStyle={d.brief.image_style ?? '자동'} genSettings={{ image_model: d.brief.image_model, bg_mode: d.brief.bg_mode }}
+                  onDesignChange={() => { loadDesigns() }}
                   onEdit={goEdit} onReview={() => goScreen('review')} />
               </section>
             )}

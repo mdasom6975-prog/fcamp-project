@@ -163,17 +163,20 @@ def env(tmp_path, monkeypatch):
     calls: list[tuple[int, int]] = []
     variants: list[dict] = []     # 참조 이미지로 만든 변형 호출 기록
     qualities: list[str] = []     # 호출마다 넘어온 품질(초안 low / 확정 medium)
+    used: list[str | None] = []    # 호출마다 넘어온 모델
+    prompts: list[str] = []        # 호출마다 넘어온 프롬프트
 
-    def fake_generate(prompt, w, h, quality="medium"):
-        calls.append((w, h)); qualities.append(quality)
+    def fake_generate(prompt, w, h, quality="medium", model=None):
+        calls.append((w, h)); qualities.append(quality); used.append(model); prompts.append(prompt)
         return _scene(w, h)
 
-    def fake_variant(prompt, w, h, reference, quality="medium"):
-        calls.append((w, h)); qualities.append(quality)
+    def fake_variant(prompt, w, h, reference, quality="medium", model=None):
+        calls.append((w, h)); qualities.append(quality); used.append(model); prompts.append(prompt)
         variants.append({"size": (w, h), "ref_size": reference.size, "prompt": prompt})
         return _scene(w, h)
     monkeypatch.setattr(imagegen, "generate_background", fake_generate)
     monkeypatch.setattr(imagegen, "generate_variant", fake_variant)
+    monkeypatch.setattr(imagegen, "MODELS", [imagegen.OPENAI_MODEL, "gpt-image-1", "test-model-x"])
 
     def override():
         with Local() as db:
@@ -206,7 +209,7 @@ def env(tmp_path, monkeypatch):
     client = TestClient(app)
     try:
         yield {"client": client, "ids": ids, "Local": Local, "calls": calls, "variants": variants, "models": models,
-               "qualities": qualities}
+               "qualities": qualities, "used_models": used, "prompts": prompts}
     finally:
         app.dependency_overrides.clear()
 
@@ -474,7 +477,7 @@ def test_variant_failure_falls_back_to_master(env, monkeypatch):
     """두 번째 비율군의 변형 생성이 실패해도(모델 파라미터 거절 등) 첫 배경은 버리지 않고 나머지 비율군이 그 파일을 쓴다."""
     from fastapi import HTTPException
     from app import imagegen
-    def boom(prompt, w, h, reference, quality=None):
+    def boom(*a, **k):
         raise RuntimeError("model rejected")
     monkeypatch.setattr(imagegen, "generate_variant", boom)
     c, ids, calls = env["client"], env["ids"], env["calls"]
@@ -691,3 +694,74 @@ def test_regenerate_rerenders_presets_with_saved_edits(env):
     assert next(e for e in j["elements"] if e["type"] == "text")["props"]["text"] == "바꾼 제목"
     # 자동 합성은 여전히 저장된 편집을 보호한다
     assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 409
+
+
+
+@pytest.mark.parametrize("sizes, expected", [
+    ([(1440, 1800), (1440, 2560)], "세로형"),
+    ([(1200, 600), (1200, 628)], "가로형"),
+    ([(1440, 1800), (1440, 2560), (1200, 600), (500, 500)], "정사각"),
+    ([(1440, 1800), (500, 500)], "정사각"),      # 세로형으로 만들면 정사각 지면이 33% 잘리지만, 정사각으로 만들면 4:5 는 20%만 잘린다
+    ([(1200, 600), (500, 500)], "가로형"),
+    ([], "정사각"),
+])
+def test_best_single_template(sizes, expected):
+    from app import imagegen
+    assert imagegen.best_single_template(sizes) == expected
+
+
+def test_single_mode_makes_one_background_all_presets_crop(env):
+    """배경 방식 single: 가장 적게 잘리는 비율군 1장을 공용 구도로 만들고, 모든 지면이 추가 호출 없이 잘라 쓴다."""
+    c, ids, calls, variants, prompts = env["client"], env["ids"], env["calls"], env["variants"], env["prompts"]
+    did, p = ids["design"], ids["presets"]
+    r = c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
+    assert r.status_code == 200 and r.json()["settings"]["bg_mode"] == "single"
+    assert c.get(f"/api/designs/{did}").json()["brief"]["bg_mode"] == "single"
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
+    assert out["generated"] == 1 and out["deferred"] == [] and calls == [(1024, 1024)] and variants == []
+    assert "모두 잘라 쓴다" in prompts[0] and "[표현 방식]" in prompts[0]
+    rows = c.get(f"/api/designs/{did}/images").json()
+    assert len({r["background"]["file"] for r in rows}) == 1
+    lay = rows[0]["background"]["layout"]
+    assert lay["mode"] == "single" and lay["template"] == "정사각" and any(x.startswith("image/composition/크롭공용@") for x in lay["prompts"])
+    _select_copy(env, p.values())
+    for name in p:
+        assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
+    assert len(calls) == 1, "잘라 쓰므로 합성에 추가 호출이 없다"
+    # 배경 없이 합성부터 시작해도 1장(공용 구도)만 만들고 나머지는 잘라 쓴다
+    c.post(f"/api/designs/{did}/reset-generated", json={})
+    calls.clear(); prompts.clear()
+    for name in ("네이티브 2:1", "피드 4:5"):
+        assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
+    assert calls == [(1024, 1024)] and "모두 잘라 쓴다" in prompts[0]
+
+
+def test_single_mode_final_upgrades_from_draft(env):
+    c, ids, variants, q = env["client"], env["ids"], env["variants"], env["qualities"]
+    did = ids["design"]
+    c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
+    c.post(f"/api/designs/{did}/background/regenerate", json={})
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
+    assert out["upgraded"] is True and out["generated"] == 1 and len(variants) == 1 and q[-1] == "medium"
+
+
+def test_model_choice_is_saved_and_used(env):
+    """시안마다 이미지 모델을 고르면 그 모델로 호출하고 배경 layout 에 남는다. 목록 밖 모델은 거절."""
+    c, ids, used = env["client"], env["ids"], env["used_models"]
+    did = ids["design"]
+    j = c.get("/api/image-settings").json()
+    assert [m["model"] for m in j["models"]][1:] == ["gpt-image-1", "test-model-x"] and j["models"][0]["default"]
+    gi1 = next(m for m in j["models"] if m["model"] == "gpt-image-1")
+    assert gi1["draft_usd"] == 0.011 and gi1["final_usd"] == 0.042 and gi1["estimated"] is False
+    assert c.put(f"/api/designs/{did}/image-settings", json={"image_model": "nope"}).status_code == 400
+    assert c.put(f"/api/designs/{did}/image-settings", json={"image_model": "gpt-image-1"}).status_code == 200
+    c.post(f"/api/designs/{did}/background/regenerate", json={})
+    assert set(used) == {"gpt-image-1"}
+    rows = c.get(f"/api/designs/{did}/images").json()
+    assert all(r["background"]["layout"]["model"] == "gpt-image-1" for r in rows)
+    # 입력 폼(브리프 PATCH)이 생성 설정을 보내지 않아도 저장된 값은 유지된다
+    d = c.get(f"/api/designs/{did}").json()
+    r = c.patch(f"/api/designs/{did}", json={"brief": {"product_name": d["brief"]["product_name"], "key_message": "바꾼 메시지"}})
+    assert r.status_code == 200, r.text
+    b = c.get(f"/api/designs/{did}").json()["brief"]
+    assert b["image_model"] == "gpt-image-1" and b["key_message"] == "바꾼 메시지"

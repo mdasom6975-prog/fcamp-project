@@ -103,6 +103,33 @@ def image_usage():
             "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}}
 
 
+@router.get("/image-settings")
+def image_settings():
+    """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 초안/확정 추정 비용)과 배경 방식, 기본값."""
+    return {"models": imagegen.model_options(), "modes": list(imagegen.BG_MODES), "default_mode": imagegen.default_bg_mode(),
+            "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}, "provider": imagegen.PROVIDER,
+            "usd_krw": imagegen.pricing_rate()}
+
+
+@router.put("/designs/{design_id}/image-settings")
+def set_image_settings(design_id: int, image_model: str | None = Body(None, embed=True),
+                       bg_mode: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
+    """시안의 생성 설정(이미지 모델·배경 방식)을 브리프에 저장한다. 다음 배경 생성·재생성부터 적용된다(기존 배경은 그대로)."""
+    d = _design(db, design_id)
+    brief = dict(d.brief or {})
+    if image_model is not None:
+        if image_model not in imagegen.MODELS:
+            raise HTTPException(400, f"이미지 모델은 {imagegen.MODELS} 중 하나")
+        brief["image_model"] = image_model
+    if bg_mode is not None:
+        if bg_mode not in imagegen.BG_MODES:
+            raise HTTPException(400, f"배경 방식은 {list(imagegen.BG_MODES)} 중 하나")
+        brief["bg_mode"] = bg_mode
+    d.brief = brief
+    db.commit()
+    return {"settings": imagegen.settings_for(d.brief), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode")}
+
+
 @router.get("/designs/{design_id}/api-calls")
 def design_api_calls(design_id: int, db: Session = Depends(get_db)):
     """이 시안이 지금까지 부른 모델 호출 집계와 최근 내역. 어느 단계에서 호출이 몰리는지 보기 위한 것."""
@@ -162,19 +189,21 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
-    gw, gh = imagegen.size_for(template)
+    st = imagegen.settings_for(d.brief)
+    single = st["bg_mode"] == "single"           # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등)
+    gw, gh = imagegen.size_for(template, per_ratio=True if single else None)
     quality = imagegen.quality_for(final)
     ref_img = None
     if reference is not None and imagegen.can_vary() and Path(reference.file_path).exists():
         ref_img = Image.open(reference.file_path)
     try:
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style)
+        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single)
         if ref_img is not None:
             # upgrade: 참조가 같은 비율군의 초안 → 장면·구도를 고정하고 확정 품질로 다시 그린다(새 장면의 시작)
             prompt = imagegen.build_upgrade_prompt(prompt) if upgrade else imagegen.build_variant_prompt(prompt)
-            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality)
+            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"])
         else:
-            bg = imagegen.generate_background(prompt, gw, gh, quality)
+            bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"])
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except Exception as e:
@@ -183,10 +212,10 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
-              "quality": quality, "draft": imagegen.is_draft(quality),
+              "quality": quality, "draft": imagegen.is_draft(quality), "model": st["model"], "mode": st["bg_mode"],
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or path.stem) if (ref_img is not None and not upgrade) else path.stem,
-              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade)}
+              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade, single=single)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
                                "template": (reference.layout or {}).get("template"),
@@ -218,8 +247,10 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
     groups: dict[str, list[int]] = {}
     for pid, w, h in sizes:
         groups.setdefault(compose.template_for(w, h), []).append(pid)
-    if not imagegen.PER_RATIO:   # 예전 방식: 첫 번째 규격의 구도로 1장
-        groups = {compose.template_for(sizes[0][1], sizes[0][2]): [pid for pid, _, _ in sizes]}
+    if imagegen.settings_for(d.brief)["bg_mode"] == "single":
+        # 1장 방식: 가장 적게 잘리는 비율군 한 장을 모든 지면이 잘라 쓴다. 미루는 비율군·참조 변형이 없다.
+        groups = {imagegen.best_single_template([(w, h) for _, w, h in sizes]): [pid for pid, _, _ in sizes]}
+        in_use = None
     deferred: list[str] = []
     if in_use is not None:
         wanted = set(in_use)
@@ -236,7 +267,7 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
             if master is None and final:
                 # 확정 품질: 같은 비율군의 현재 초안이 있으면 그 장면을 참조해 승격한다(초안으로 고른 구도가 유지된다).
                 draft = _latest_design_bg(db, d.id, template)
-                if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_vary() \
+                if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_edit() \
                         and Path(draft.file_path).exists():
                     try:
                         path, bg, prompt, layout = _generate_one(db, d, template, reference=draft, final=True, upgrade=True)
@@ -375,13 +406,16 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     # 배경은 비율군(템플릿)마다 1장 생성하고, 같은 비율군 매체는 같은 원본을 각 규격 크기에 맞춰 자른다(cover_crop).
     # 다시 만들기를 요청했거나 이 시안에 배경이 하나도 없을 때만 새로 생성한다. 같은 비율군 배경이 없으면
     # (예: 예전에 정사각 1장만 만든 시안) 추가 생성 없이 시안의 최신 배경을 그대로 자른다.
+    st = imagegen.settings_for(d.brief)
+    single = st["bg_mode"] == "single"
     tpl = compose.template_for(w, h)
     bg_row = None
     if not regenerate_background:
-        same = _latest_design_bg(db, design_id, tpl)
+        # 1장 방식은 비율군과 무관하게 현재 장면의 최신 배경을 잘라 쓴다(생성 호출 없음)
+        same = _latest_design_bg(db, design_id) if single else _latest_design_bg(db, design_id, tpl)
         # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
         # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
-        src = same or (None if imagegen.can_vary() else _latest_design_bg(db, design_id))
+        src = same or (None if imagegen.can_vary(st["bg_mode"]) else _latest_design_bg(db, design_id))
         if src is not None and Path(src.file_path).exists():
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
@@ -393,8 +427,13 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
         # 새로 만들 때 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다. 변형이 실패하면 그 배경을 잘라 쓴다(폴백)
         ref = _latest_design_bg(db, design_id)
         final = ref is not None and not imagegen.is_draft((ref.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
+        gen_tpl = tpl
+        if single:      # 1장 방식: 참조 변형 없이, 모든 지면이 잘라 쓸 비율군 한 장을 공용 구도로 만든다
+            sizes = [(p2.production_width, p2.production_height) for pid2 in d.preset_version_ids
+                     if (p2 := db.get(PresetVersion, pid2)) and p2.production_width]
+            gen_tpl, ref = imagegen.best_single_template(sizes), None
         try:
-            path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None,
+            path, bg, prompt, layout = _generate_one(db, d, gen_tpl, reference=ref if ref and ref.file_path else None,
                                                      final=final)
             bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
         except HTTPException as e:
