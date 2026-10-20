@@ -51,6 +51,7 @@ def _version_from(b: BrandIn, brand_id: int, version_no: int) -> BrandVersion:
         logo_asset_id=b.logo_asset_id,
         logo_square_asset_id=b.logo_square_asset_id,
         logo_margin=({"percent": b.logo_margin_percent} if b.logo_margin_percent is not None else None),
+        logo_position=b.logo_position,
         levels=levels,
         colors=[c.model_dump() for c in b.colors],
         fonts=[f.model_dump() for f in b.fonts],
@@ -78,7 +79,7 @@ def _version_out(v: BrandVersion) -> dict:
     return {
         "id": v.id, "version_no": v.version_no, "created_at": v.created_at.isoformat(),
         "logo_asset_id": v.logo_asset_id, "logo_square_asset_id": v.logo_square_asset_id,
-        "logo_margin": v.logo_margin, "levels": v.levels,
+        "logo_margin": v.logo_margin, "logo_position": v.logo_position, "levels": v.levels,
         "colors": v.colors, "fonts": v.fonts, "icon_style": v.icon_style,
         "image_tone": v.image_tone, "voice": v.voice,
         "required_phrases": v.required_phrases, "forbidden_phrases": v.forbidden_phrases,

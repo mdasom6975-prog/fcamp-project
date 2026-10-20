@@ -85,12 +85,16 @@ class VoiceIn(BaseModel):
     polite: bool = False                                                # 존댓말로 작성
 
 
+LOGO_POSITIONS = ("좌상단", "우상단", "좌하단", "우하단", "자동")
+
+
 class BrandIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=300)
     logo_asset_id: int | None = None
     logo_square_asset_id: int | None = None      # 정사각 로고(1:1, 128px 이상). PMax 처럼 1:1 로고 자산을 요구하는 지면용
     logo_margin_percent: float | None = Field(default=None, ge=0, le=100)
+    logo_position: str | None = None     # 합성 로고 자리. 비우면 좌상단. '자동'은 배경이 가장 단순한 모서리를 지면마다 고른다
     colors: list[ColorIn] = []
     fonts: list[FontIn] = []
     icon_style: IconStyleIn | None = None
@@ -99,6 +103,13 @@ class BrandIn(BaseModel):
     required_phrases: list[str] = []
     forbidden_phrases: list[str] = []
     levels: dict[str, str] = {}
+
+    @field_validator("logo_position")
+    @classmethod
+    def _logo_position(cls, v: str | None) -> str | None:
+        if v is not None and v not in LOGO_POSITIONS:
+            raise ValueError(f"로고 위치는 {LOGO_POSITIONS} 중 하나: {v}")
+        return v
 
     @field_validator("levels")
     @classmethod

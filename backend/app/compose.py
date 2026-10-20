@@ -262,6 +262,48 @@ def pick_logo_corner(canvas: Image.Image, boxes: dict[str, list[int]], pad: int)
     return best, scores[best], scores
 
 
+LOGO_PLATE_BUSYNESS = 0.5        # 로고 자리 복잡도가 이 값을 넘으면 반투명 판을 깐다 (0.8 에서 낮춤 — 사진 위 로고가 묻혔다)
+TEXT_BACKING_BUSYNESS = 0.6      # 문구 블록 뒤 보강판을 까는 복잡도 기준
+TEXT_BACKING_OPACITY = 0.5
+
+
+def min_local_contrast(region: Image.Image, color: tuple[int, int, int], cols: int = 6, rows: int = 3) -> float:
+    """영역을 칸으로 나눠 글자색과 가장 대비가 약한 칸의 대비를 돌려준다. 평균색 대비는 밝은 조각을 숨기므로 칸 단위로 본다."""
+    small = region.convert("RGB").resize((cols, rows), Image.BOX)
+    return min(contrast(color, small.getpixel((x, y))) for x in range(cols) for y in range(rows))
+
+
+def text_backing(canvas: Image.Image, box: list[int], color_hex: str, opacity: float) -> Image.Image:
+    """문구 블록 뒤에 가장자리가 흐린 판을 깐다(스크림색). 사진의 밝은 조각 위에서도 글자가 읽히게 한다."""
+    x0, y0, x1, y1 = box
+    r = max(4, round((y1 - y0) * 0.12))
+    mask = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1, y1), radius=r, fill=round(255 * opacity))
+    mask = mask.filter(ImageFilter.GaussianBlur(r))
+    out = canvas.copy()
+    out.paste(Image.new("RGB", canvas.size, _hex(color_hex)), (0, 0), mask)
+    return out
+
+
+def draw_text_soft(canvas: Image.Image, items: list[tuple[int, int, str]], font, color: tuple[int, int, int]) -> Image.Image:
+    """글자 뒤에 부드러운 그림자(밝은 글자면 어둡게, 어두운 글자면 밝게)를 한 번 깔고 글자를 그린다. 반환: 새 캔버스."""
+    if not items:
+        return canvas
+    size = getattr(font, "size", 20)
+    shadow = (0, 0, 0) if _lum(color) > 0.3 else (255, 255, 255)
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    off = max(1, round(size * 0.03))
+    for x, y, text in items:
+        d.text((x + off, y + off), text, font=font, fill=shadow + (150,))
+    layer = layer.filter(ImageFilter.GaussianBlur(max(1.0, size * 0.06)))
+    out = Image.alpha_composite(canvas.convert("RGBA"), layer)
+    d = ImageDraw.Draw(out)
+    for x, y, text in items:
+        d.text((x, y), text, font=font, fill=color)
+    return out.convert("RGB")
+
+
 def _logo_plate(canvas: Image.Image, logo: Image.Image, box: list[int]) -> Image.Image:
     """복잡한 배경 위에서 로고가 묻히지 않게 반투명 판을 깐다. 로고가 밝으면 어두운 판, 어두우면 밝은 판."""
     a = logo.getchannel("A")
@@ -385,8 +427,10 @@ def compose_strip(bg: Image.Image, w: int, h: int, headline: str, font_path: str
 def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
             scrim_hex: str | None, fill_blur: bool = False, body: str | None = None, cta: str | None = None,
-            body_font_path: str | None = None, accent_hex: str | None = None, corner: str = "둥근") -> tuple[Image.Image, dict]:
+            body_font_path: str | None = None, accent_hex: str | None = None, corner: str = "둥근",
+            logo_position: str | None = None) -> tuple[Image.Image, dict]:
     """배경 위에 로고·제목(+선택: 본문·CTA 버튼)을 합성한다. 본문·CTA 는 지면 설정(in_image)이 켜진 경우에만 받는다.
+    logo_position: 브랜드 설정의 로고 자리(좌상단·우상단·좌하단·우하단). None/'자동'이면 배경이 가장 단순한 모서리를 고른다.
     문구 블록은 제목 → 본문 → CTA 순으로 아래에서 위로 쌓고, 자리가 모자라면 본문을 먼저 뺀다(제목·CTA 우선).
     띠 배너(가로세로 2.6 이상)는 CTA 를 오른쪽에 두고 본문은 1줄만."""
     bg = bg.convert("RGB")
@@ -429,30 +473,36 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     logo_plate = False
     if logo_box:
         lw, lh = logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]
-        cands = {"좌상단": [cl, ct, cl + lw, ct + lh], "우상단": [cr - lw, ct, cr, ct + lh]}
-        if tpl == HORIZONTAL:   # 가로형은 문구가 왼쪽 55%에 있어 오른쪽 아래도 비어 있다
-            cands["우하단"] = [cr - lw, cb - lh, cr, cb]
+        all_cands = {"좌상단": [cl, ct, cl + lw, ct + lh], "우상단": [cr - lw, ct, cr, ct + lh],
+                     "좌하단": [cl, cb - lh, cl + lw, cb], "우하단": [cr - lw, cb - lh, cr, cb]}
+        fixed = logo_position if logo_position in all_cands else None
+        if fixed:
+            # 브랜드 설정으로 고정: 캠페인의 모든 지면이 같은 모서리를 쓴다(지면마다 제각각이면 브랜드 인지가 흐려진다)
+            corner = fixed
+            _, score, scores = pick_logo_corner(canvas, {corner: all_cands[corner]}, pad)
+            report["logo_placement"] = {"corner": corner, "busyness": round(score, 2), "mode": "브랜드 고정"}
         else:
-            cands["좌하단"] = [cl, cb - lh, cl + lw, cb]
-            cands["우하단"] = [cr - lw, cb - lh, cr, cb]
-        corner, score, scores = pick_logo_corner(canvas, cands, pad)
-        # 세로형·정사각에서 피사체가 아래 자리를 비워 두면(위 모서리가 피사체와 안 겹치고 단순하면) 위 모서리를 우선한다 —
-        # 아래 띠는 문구 자리라 로고까지 두면 문구가 피사체 위로 밀려 올라간다
-        subj_box = crop.get("content_box_canvas")
-        if tpl != HORIZONTAL and subj_box and corner in ("좌하단", "우하단"):
-            sx0, sy0, sx1, sy1 = subj_box
-            tops = {k: v for k, v in cands.items() if k in ("좌상단", "우상단")
-                    and (v[3] + pad < sy0 or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
-            if tops:
-                corner = min(tops, key=scores.get)
-                score = scores[corner]
-        logo_box = cands[corner]
-        report["logo_placement"] = {"corner": corner, "busyness": round(score, 2)}
-        if score > 0.8:
+            cands = {k: all_cands[k] for k in ("좌상단", "우상단", "우하단")} if tpl == HORIZONTAL else dict(all_cands)
+            # 가로형은 문구가 왼쪽 55%에 있어 좌하단은 후보에서 뺀다
+            corner, score, scores = pick_logo_corner(canvas, cands, pad)
+            # 세로형·정사각에서 피사체가 아래 자리를 비워 두면(위 모서리가 피사체와 안 겹치고 단순하면) 위 모서리를 우선한다 —
+            # 아래 띠는 문구 자리라 로고까지 두면 문구가 피사체 위로 밀려 올라간다
+            subj_box = crop.get("content_box_canvas")
+            if tpl != HORIZONTAL and subj_box and corner in ("좌하단", "우하단"):
+                sx0, sy0, sx1, sy1 = subj_box
+                tops = {k: v for k, v in cands.items() if k in ("좌상단", "우상단")
+                        and (v[3] + pad < sy0 or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
+                if tops:
+                    corner = min(tops, key=scores.get)
+                    score = scores[corner]
+            report["logo_placement"] = {"corner": corner, "busyness": round(score, 2), "mode": "자동"}
+        logo_box = all_cands[corner]
+        if score > LOGO_PLATE_BUSYNESS:
             logo_plate = True
             report["warnings"].append("로고 주변 이미지가 복잡해 반투명 판을 깔았습니다")
     left_logo = bool(logo_box) and logo_box[0] <= cl + 1
-    bottom_logo = bool(logo_box) and tpl != HORIZONTAL and logo_box[1] > ct + 1
+    # 로고가 아래 모서리면 문구는 그 위에 쌓는다. 가로형은 문구가 왼쪽 열이라 왼쪽 아래 로고만 해당한다
+    bottom_logo = bool(logo_box) and logo_box[1] > ct + 1 and (tpl != HORIZONTAL or left_logo)
 
     # 2) 문구 영역
     if tpl == HORIZONTAL:
@@ -577,16 +627,30 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     # 5) 문구 색: 브랜드 텍스트색을 쓰되 대비가 부족하면 흰색/검정으로 대체
     region = canvas.crop((tx0, max(0, ty), tx1, max(ty + 1, ty1))).resize((1, 1), Image.BOX).getpixel((0, 0))
     color, fallback = pick_text_color(region, text_color_hex)
+    # 5-1) 가독성 보강: 스크림은 평균을 맞출 뿐이라 사진의 밝은 조각(피부·하늘) 위에서는 글자가 묻힌다.
+    #      문구 블록을 칸으로 나눠 가장 약한 칸의 대비가 4.5:1 에 못 미치거나 배경이 복잡하면, 블록 뒤에 흐린 판을 한 장 더 깐다.
+    block_bottom = y_cursor if not cta_box or strip else cta_box[3]
+    block = [tx0, ty, max(tx1, cta_box[2] if cta_box and not strip else tx1), block_bottom]
+    tb_pad = round(size * 0.5)
+    tb_box = [max(0, block[0] - tb_pad), max(0, block[1] - tb_pad), min(w, block[2] + tb_pad), min(h, block[3] + tb_pad)]
+    tb_region = canvas.crop(tuple(tb_box))
+    weakest = min_local_contrast(tb_region, color)
+    if weakest < 4.5 or _busyness(tb_region) > TEXT_BACKING_BUSYNESS:
+        canvas = text_backing(canvas, tb_box, scrim_hex or "#000000", TEXT_BACKING_OPACITY)
+        draw = ImageDraw.Draw(canvas)
+        region = canvas.crop((tx0, max(0, ty), tx1, max(ty + 1, ty1))).resize((1, 1), Image.BOX).getpixel((0, 0))
+        color, fallback = pick_text_color(region, text_color_hex)
+        report["text_backing"] = {"box": tb_box, "color": (scrim_hex or "#000000").upper(), "opacity": TEXT_BACKING_OPACITY,
+                                  "weakest_contrast": round(weakest, 2)}
     if fallback:
         report["warnings"].append("브랜드 텍스트색의 대비가 부족해 흰색/검정으로 대체했습니다")
-    for i, ln in enumerate(lines):
-        draw.text((tx0, ty + i * round(size * 1.28)), ln, font=font, fill=color)
+    canvas = draw_text_soft(canvas, [(tx0, ty + i * round(size * 1.28), ln) for i, ln in enumerate(lines)], font, color)
     if body and body_box:
         bf = ImageFont.truetype(body_font_path, body_size)
-        for i, ln in enumerate(body_lines):
-            draw.text((tx0, body_box[1] + i * round(body_size * 1.28)), ln, font=bf, fill=color)
+        canvas = draw_text_soft(canvas, [(tx0, body_box[1] + i * round(body_size * 1.28), ln) for i, ln in enumerate(body_lines)], bf, color)
         report["elements"].append({"type": "body", "role": "본문", "text": body, "lines": body_lines, "box": body_box,
                                    "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": body_cut})
+    draw = ImageDraw.Draw(canvas)
     if cta and cta_box:
         cta_bg, cta_fg = cta_colors(accent_hex, color)
         draw_cta(canvas, cta_box, cta, font_path, cta_font_size, cta_bg, cta_fg, corner)

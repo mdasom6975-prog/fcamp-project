@@ -44,6 +44,7 @@ erDiagram
         int version_no
         int logo_asset_id
         json logo_margin
+        string logo_position
         json levels
         json colors
         json fonts

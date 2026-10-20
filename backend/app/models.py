@@ -30,6 +30,7 @@ class BrandVersion(Base):
     logo_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     logo_square_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # 정사각 로고(1:1, Google PMax 등 필수 자산). 합성에는 쓰지 않는다
     logo_margin: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # {percent}
+    logo_position: Mapped[str | None] = mapped_column(String(10), nullable=True)   # 합성 로고 자리: 좌상단(기본)|우상단|좌하단|우하단|자동
     levels: Mapped[dict] = mapped_column(JSON, default=dict)         # 항목별 필수|권장|수정가능
     colors: Mapped[list] = mapped_column(JSON, default=list)         # [{name, hex, role, level}]
     fonts: Mapped[list] = mapped_column(JSON, default=list)          # [{family, role, level}]

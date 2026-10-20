@@ -134,6 +134,16 @@ def edge_color(img: Image.Image) -> tuple[int, int, int]:
     return tuple(sorted(c[i] for c in border)[len(border) // 2] for i in range(3))  # type: ignore[return-value]
 
 
+def _placed(draw, lines: list[str], font, p: dict, lh: int) -> list[tuple[int, int, str]]:
+    """정렬(왼쪽·가운데·오른쪽)을 반영한 줄별 (x, y, 글) 목록."""
+    out = []
+    for i, ln in enumerate(lines):
+        lw = draw.textlength(ln, font=font)
+        dx = 0 if p["align"] == "왼쪽" else (p["w"] - lw) / 2 if p["align"] == "가운데" else p["w"] - lw
+        out.append((int(p["x"] + dx), int(p["y"]) + i * lh, ln))
+    return out
+
+
 def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, logo_of) -> tuple[Image.Image, dict]:
     """elements 를 z 순서대로 그린다. 반환: (이미지, 측정값)"""
     els = sorted(elements, key=lambda e: e.get("z_index", 0))
@@ -176,10 +186,7 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
             lines = compose._wrap(draw, p["text"], font, int(p["w"]))
             lh = round(int(p["font_size"]) * LINE_H)
             color = compose._hex(p["color"])
-            for i, ln in enumerate(lines):
-                lw = draw.textlength(ln, font=font)
-                dx = 0 if p["align"] == "왼쪽" else (p["w"] - lw) / 2 if p["align"] == "가운데" else p["w"] - lw
-                draw.text((int(p["x"] + dx), int(p["y"]) + i * lh), ln, font=font, fill=color)
+            canvas = compose.draw_text_soft(canvas, _placed(draw, lines, font, p, lh), font, color)
             over = any(draw.textlength(ln, font=font) > int(p["w"]) for ln in lines)
             measure["text"] = {"lines": lines, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
                                                        int(p["y"]) + lh * len(lines)], "overflow_width": over}
@@ -196,10 +203,7 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
                 lines[-1] = last + "…"
             lh = round(int(p["font_size"]) * LINE_H)
             color = compose._hex(p["color"])
-            for i, ln in enumerate(lines):
-                lw = draw.textlength(ln, font=font)
-                dx = 0 if p["align"] == "왼쪽" else (p["w"] - lw) / 2 if p["align"] == "가운데" else p["w"] - lw
-                draw.text((int(p["x"] + dx), int(p["y"]) + i * lh), ln, font=font, fill=color)
+            canvas = compose.draw_text_soft(canvas, _placed(draw, lines, font, p, lh), font, color)
             measure["body"] = {"lines": lines, "cut": cut, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
                                                                   int(p["y"]) + lh * len(lines)]}
         elif e["type"] == "cta":

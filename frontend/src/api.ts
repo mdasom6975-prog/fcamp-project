@@ -5,6 +5,8 @@ export const ITEM_LABELS: Record<string, string> = {
   required_phrases: '필수 표현', forbidden_phrases: '금지 표현',
 }
 export type ColorRow = { role: string; hex: string }
+export type LogoPosition = '좌상단' | '우상단' | '좌하단' | '우하단' | '자동'
+export const LOGO_POSITIONS: LogoPosition[] = ['좌상단', '우상단', '좌하단', '우하단', '자동']
 export type FontRow = { role: string; source: 'provided' | 'upload'; name?: string | null; asset_id?: number | null; fileName?: string }
 export type BrandForm = {
   name: string
@@ -12,6 +14,7 @@ export type BrandForm = {
   logo_asset_id: number | null
   logo_square_asset_id: number | null     // 정사각 로고(1:1, 128px 이상) — PMax 등 1:1 로고 자산을 요구하는 지면용
   logo_margin_percent: number | null
+  logo_position: LogoPosition | null     // 합성 로고 자리. 비우면 좌상단. '자동'은 지면마다 빈 모서리를 고른다
   colors: ColorRow[]
   fonts: FontRow[]
   icon_style: { stroke_width: number; corner: '각진' | '둥근'; fill: '윤곽' | '채움'; material?: string }

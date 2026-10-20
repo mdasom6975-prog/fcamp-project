@@ -591,7 +591,7 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
             pv.safe_area, (bv.logo_margin or {}).get("percent"), text_hex, scrim_hex, fill_blur=fill_blur,
             body=sel.body if ii["body"] else None, cta=sel.cta if ii["cta"] else None,
             body_font_path=_font_path(bv, "본문", db), accent_hex=_color(bv, "주조색"),
-            corner=(bv.icon_style or {}).get("corner") or "둥근")
+            corner=(bv.icon_style or {}).get("corner") or "둥근", logo_position=bv.logo_position or "좌상단")
         report["in_image_setting"] = {"body": ii["body"], "cta": ii["cta"], "default": ii["default"]}
         if bv.logo_asset_id and logo is None:
             report["warnings"].append("로고 파일을 찾지 못해 합성하지 못했습니다")

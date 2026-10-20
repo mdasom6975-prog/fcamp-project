@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ITEM_LABELS, type BrandForm, type ColorRow, type FontRow, type Level } from './api'
+import { api, ITEM_LABELS, type BrandForm, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition } from './api'
 
 const LEVELS: Level[] = ['필수', '권장']
 
@@ -12,6 +12,7 @@ const emptyForm = (roles: string[], levels: Record<string, Level>): BrandForm =>
   logo_asset_id: null,
   logo_square_asset_id: null,
   logo_margin_percent: null,
+  logo_position: null,
   colors: roles.map((role) => ({ role, hex: DEFAULT_COLORS[role] ?? '#000000' })),
   fonts: [
     { role: '제목', source: 'provided', name: 'Pretendard-Bold' },
@@ -138,6 +139,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
       logo_asset_id: v.logo_asset_id,
       logo_square_asset_id: v.logo_square_asset_id ?? null,
       logo_margin_percent: v.logo_margin?.percent ?? null,
+      logo_position: v.logo_position ?? null,
       colors: v.colors,
       fonts: v.fonts,
       icon_style: v.icon_style?.corner ? v.icon_style : emptyForm([], defaults.levels).icon_style,
@@ -191,6 +193,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     if (item === 'logo') {
       out.push(logoDim ? `로고 원본·비율(${ratioText(logoDim.w, logoDim.h)}) 유지` : '로고 원본·비율 유지')
       if (form.logo_margin_percent != null) out.push(`로고 최소 여백 ${form.logo_margin_percent}%`)
+      out.push(form.logo_position === '자동' ? '로고 자리 자동(지면마다 빈 모서리)' : `로고 자리 ${form.logo_position ?? '좌상단'} (모든 지면 동일)`)
       if (form.logo_square_asset_id) out.push('정사각 로고 자산 등록됨 (PMax 등 1:1 로고 지면)')
     } else if (item === 'colors') {
       const n = form.colors.filter((c) => /^#[0-9a-fA-F]{6}$/.test(c.hex)).length
@@ -272,6 +275,11 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
             <label className="logo-margin">최소 여백 (로고 크기 대비 %)
               <input type="number" min={0} max={100} value={form.logo_margin_percent ?? ''}
                 onChange={(e) => set({ ...form, logo_margin_percent: e.target.value === '' ? null : Number(e.target.value) })} />
+            </label>
+            <label className="logo-margin" title="합성할 때 로고를 놓는 모서리. 캠페인의 모든 지면이 같은 자리를 써서 브랜드가 한눈에 들어옵니다. '자동'은 지면마다 배경이 가장 단순한 모서리를 골라 자리가 제각각이 될 수 있습니다">합성 로고 자리
+              <select value={form.logo_position ?? '좌상단'} onChange={(e) => set({ ...form, logo_position: e.target.value as LogoPosition })}>
+                {LOGO_POSITIONS.map((p) => <option key={p} value={p}>{p === '자동' ? '자동 (지면마다 빈 모서리)' : p}</option>)}
+              </select>
             </label>
             <div className="logo-info">
               {form.logo_asset_id && (
