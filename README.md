@@ -20,8 +20,9 @@ npm run dev        # http://localhost:5173
 
 ## 기준 데이터와 검증 (워크북 Day 2~4)
 - `specs/presets.json` · `specs/sources.md`: 규격 프리셋과 출처(시드에서 생성, `tools/export_presets.py`)
-- `brands/kucha/brand.json` · `brands/kucha/QUESTIONS.md`: 쿠챠 브랜드 키트와 가이드 해석 질문. `brands/malkkeum/`: 교차 테스트용 두 번째 브랜드
+- `brands/kucha/brand.json` · `brands/kucha/QUESTIONS.md`: 쿠챠 브랜드 키트와 가이드 해석 질문. `brands/greentable/`·`brands/learnmate/`: 시연·교차 테스트용 브랜드(더미는 이 3개만 둔다)
 - `tools/register_brand.py brands/kucha/brand.json`: 실행 중인 앱에 브랜드 등록(같은 이름이면 새 버전)
+- `tools/seed_demo.py`: 시연·QA 용 더미 브랜드 3개 + 캠페인 4개를 실행 중인 앱에 한 번에 등록(과금 없음, 재실행 안전). 데이터 설명·시나리오별 캠페인은 `demo/README.md`, 검증은 `tests/test_demo_data.py`
 - `tools/hash_logo.py <로고>`: 로고 해시·비율 기록
 - `prompts/*.md`: 모델에 보내는 모든 프롬프트 문장 (코드에는 두지 않음). 형식·변경 규칙은 `prompts/README.md`, 로더는 `backend/app/prompts.py`
 - 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q`

@@ -1,0 +1,21 @@
+{
+  "slug": "greentable_morning",
+  "brand": "greentable",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "Facebook 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1"
+  ],
+  "brief": {
+    "product_name": "아침 수확 채소 세트",
+    "description": "산지에서 아침에 딴 채소 8종을 당일 저녁 문 앞까지",
+    "key_message": "오늘 아침 밭에서, 오늘 저녁 식탁으로",
+    "target": "30~40대 맞벌이 가정",
+    "image_style": "자동",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  },
+  "product_image": "product.png"
+}
