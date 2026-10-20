@@ -587,3 +587,50 @@ def test_make_image_falls_back_to_crop_when_variant_fails(env, monkeypatch):
     assert r.status_code == 200, r.text
     bg = r.json()["background"]
     assert (bg["width"], bg["height"]) == (1024, 1536) and "fallback" in bg["layout"] and bg["layout"]["template"] == "가로형"
+
+
+def test_regenerate_makes_only_ratio_groups_in_use_and_defers_the_rest(env):
+    """합성본이 있는 지면의 비율군만 새로 만들고(여기선 세로형·가로형), 정사각은 미룬다. 미룬 비율군의 예전 배경은
+    현재 장면이 아니므로 목록에서 빠지고, 그 지면을 합성할 때 현재 장면을 참조해 1장 만든다."""
+    c, ids, calls, variants = env["client"], env["ids"], env["calls"], env["variants"]
+    p, did = ids["presets"], ids["design"]
+    _select_copy(env, p.values())
+    c.post(f"/api/designs/{did}/background/regenerate", json={})           # 합성본 없음 → 세 비율군 모두 (3회)
+    assert len(calls) == 3
+    for name in ("피드 4:5", "네이티브 2:1"):
+        assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
+    assert len(calls) == 3, "합성은 추가 호출이 없다"
+    calls.clear(); variants.clear()
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
+    assert out["generated"] == 2 and out["deferred"] == ["정사각"] and len(calls) == 2 and len(variants) == 1
+    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
+    assert rows[p["정사각 1:1"]]["background"] is None, "미룬 비율군의 예전 배경은 현재 장면이 아니라 보이지 않는다"
+    scene = rows[p["피드 4:5"]]["background"]["layout"]["scene"]
+    assert scene and rows[p["네이티브 2:1"]]["background"]["layout"]["scene"] == scene
+    # 정사각 지면을 합성하면 그때 현재 장면을 참조해 1장 만든다 (예전 정사각 배경 재사용 없음)
+    calls.clear(); variants.clear()
+    r = c.post(f"/api/designs/{did}/presets/{p['정사각 1:1']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and calls == [(1024, 1024)] and len(variants) == 1
+    assert r.json()["background"]["layout"]["scene"] == scene
+    # 이제 같은 비율군은 추가 호출 없이 재사용
+    calls.clear()
+    assert c.post(f"/api/designs/{did}/presets/{p['정사각 1:1']}/image", json={"regenerate_background": False}).status_code == 200
+    assert calls == []
+
+
+def test_editor_background_regenerate_makes_only_editing_ratio_groups(env):
+    """편집 화면의 배경 재생성은 편집 중인(요소가 있는) 매체의 비율군만 만든다. 나머지는 미루고 응답에 알린다."""
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    p, did = ids["presets"], ids["design"]
+    _select_copy(env, p.values())
+    for name in p:
+        assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
+    assert len(calls) == 3
+    pid = p["네이티브 2:1"]
+    assert c.get(f"/api/designs/{did}/presets/{pid}/edit").status_code == 200   # 편집 요소 생성
+    calls.clear()
+    r = c.post(f"/api/designs/{did}/presets/{pid}/edit/regenerate", json={"element": "background"})
+    assert r.status_code == 200, r.text
+    assert calls == [(1536, 1024)] and sorted(r.json()["deferred"]) == ["세로형", "정사각"]
+    rows = {x["preset_id"]: x for x in c.get(f"/api/designs/{did}/images").json()}
+    assert rows[pid]["background"] is not None and rows[p["피드 4:5"]]["background"] is None

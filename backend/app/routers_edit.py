@@ -301,8 +301,10 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         img_el = next(r for r in rows if r.type == "image")
         if img_el.locked:
             raise HTTPException(400, "배경이 잠겨 있어 재생성할 수 없습니다")
-        # 배경은 모든 매체가 공유한다: 1회 생성 후 전체 규격에 연결하고, 편집 중인 다른 매체도 새 배경으로 다시 그린다.
-        create_shared_background(db, d)
+        # 배경은 모든 매체가 공유한다: 편집 중인(요소가 있는) 매체의 비율군만 지금 만들어 연결하고, 그 매체들을 새 배경으로
+        # 다시 그린다. 나머지 비율군은 그 매체를 '문구 다시 합성'할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
+        editing_pids = [pid for pid in d.preset_version_ids if pid == preset_id or _els(db, d.id, pid)]
+        _, deferred = create_shared_background(db, d, in_use=editing_pids)
         img_el.props = {**img_el.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}   # 새 이미지는 자르기 초기화
         db.flush()
         applied, skipped = [], []
@@ -322,7 +324,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
             oimg.props = {**oimg.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}
             _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
             applied.append(pid)
-        extra = {"applied": applied, "skipped": skipped}
+        extra = {"applied": applied, "skipped": skipped, "deferred": deferred}
     elif element == "text":
         t = next((r for r in rows if r.type == "text"), None)
         if t is None or t.locked:

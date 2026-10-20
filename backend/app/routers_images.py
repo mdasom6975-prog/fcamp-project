@@ -54,15 +54,38 @@ def _latest(db: Session, design_id: int, pid: int, kind: str) -> GeneratedImage 
         GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
 
 
+def _scene(g: GeneratedImage | None) -> str | None:
+    """배경이 속한 장면 id. 배경 재생성 1회가 장면 하나이고, 그 참조로 만든 다른 비율군 변형은 같은 장면이다.
+    장면을 기록하기 전(예전) 배경은 None → 어느 장면과도 같은 것으로 본다."""
+    return (g.layout or {}).get("scene") if g is not None else None
+
+
+def _same_scene(g: GeneratedImage, current: str | None) -> bool:
+    s = _scene(g)
+    return s is None or current is None or s == current
+
+
 def _latest_design_bg(db: Session, design_id: int, template: str | None = None) -> GeneratedImage | None:
-    """시안의 최신 배경. template 을 주면 그 비율군(생성 크기의 비율 기준)으로 만든 배경만 찾는다."""
+    """시안의 최신 배경. template 을 주면 그 비율군(생성 크기의 비율 기준)으로 만든 배경 중 **현재 장면**(가장 최근 배경의
+    장면)에 속하는 것만 찾는다. 배경을 새로 만든 뒤 아직 안 만든 비율군의 예전 배경이 재사용되지 않게 하기 위한 것."""
     rows = db.scalars(select(GeneratedImage).where(
         GeneratedImage.design_id == design_id, GeneratedImage.kind == "background"
     ).order_by(GeneratedImage.id.desc())).all()
+    if template is None:
+        return rows[0] if rows else None
+    current = _scene(rows[0]) if rows else None
     for g in rows:
-        if template is None or compose.template_for(g.width, g.height) == template:
+        if compose.template_for(g.width, g.height) == template and _same_scene(g, current):
             return g
     return None
+
+
+def _current_bg(db: Session, design_id: int, pid: int) -> GeneratedImage | None:
+    """지면에 연결된 최신 배경이 현재 장면이면 그 행, 아니면(배경을 새로 만든 뒤 이 비율군은 아직 안 만듦) None."""
+    bg = _latest(db, design_id, pid, "background")
+    if bg is None:
+        return None
+    return bg if _same_scene(bg, _scene(_latest_design_bg(db, design_id))) else None
 
 
 def _design(db: Session, design_id: int) -> Design:
@@ -93,7 +116,7 @@ def list_images(design_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
     out = []
     for pid in d.preset_version_ids:
-        out.append({"preset_id": pid, "background": _img_out(_latest(db, design_id, pid, "background")),
+        out.append({"preset_id": pid, "background": _img_out(_current_bg(db, design_id, pid)),
                     "composite": _img_out(_latest(db, design_id, pid, "composite"))})
     return out
 
@@ -160,6 +183,8 @@ def _generate_one(db: Session, d: Design, template: str,
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "draft": imagegen.is_draft(quality),
+              # 장면 id: 참조로 만들면 참조의 장면(같은 장면), 아니면 이 파일이 새 장면의 시작
+              "scene": (_scene(reference) or path.stem) if ref_img is not None else path.stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
@@ -173,11 +198,15 @@ def _bg_row(d: Design, pid: int, path: Path | str, bg_w: int, bg_h: int, prompt:
                           width=bg_w, height=bg_h, prompt=prompt, brand_version_id=bv_id, layout=dict(layout))
 
 
-def create_shared_background(db: Session, d: Design, final: bool = False) -> dict[int, GeneratedImage]:
-    """배경을 비율군(가로형/정사각/세로형)마다 1장씩 만들고, 같은 비율군의 규격은 같은 파일로 연결한다. {preset_id: 배경 행}.
+def create_shared_background(db: Session, d: Design, final: bool = False,
+                             in_use: list[int] | None = None) -> tuple[dict[int, GeneratedImage], list[str]]:
+    """배경을 비율군(가로형/정사각/세로형)마다 1장씩 만들고, 같은 비율군의 규격은 같은 파일로 연결한다.
+    반환: ({preset_id: 배경 행}, 미뤄 둔 비율군 이름들).
     final=False(기본)면 초안 품질로 만든다. 형태·구도가 정해지면 final=True 로 한 번만 확정 품질로 다시 만든다.
     첫 비율군(시안의 첫 규격 기준)은 프롬프트로 생성하고, 나머지 비율군은 그 이미지를 참조로 붙여 **같은 장면**을
-    각 비율의 구도로 다시 만든다(images.edit, IMAGE_BG_VARIANT=0 이면 독립 생성). 비용은 비율군 수(1~3장)만큼 든다.
+    각 비율의 구도로 다시 만든다(images.edit, IMAGE_BG_VARIANT=0 이면 독립 생성). 비용은 만든 비율군 수만큼 든다.
+    in_use 를 주면 그 지면들이 속한 비율군만 지금 만들고, 나머지 비율군은 미뤄 둔다(그 지면을 합성할 때
+    make_image 가 현재 장면을 참조해 1장 만든다). None 이면 모든 비율군을 만든다.
     IMAGE_BG_PER_RATIO=0 이면 정사각 1장을 모두가 공유."""
     sizes = [(pid, pv.production_width, pv.production_height) for pid in d.preset_version_ids
              if (pv := db.get(PresetVersion, pid)) and pv.production_width]
@@ -189,6 +218,15 @@ def create_shared_background(db: Session, d: Design, final: bool = False) -> dic
         groups.setdefault(compose.template_for(w, h), []).append(pid)
     if not imagegen.PER_RATIO:   # 예전 방식: 첫 번째 규격의 구도로 1장
         groups = {compose.template_for(sizes[0][1], sizes[0][2]): [pid for pid, _, _ in sizes]}
+    deferred: list[str] = []
+    if in_use is not None:
+        wanted = set(in_use)
+        now = {t: p for t, p in groups.items() if wanted & set(p)}
+        if not now:                       # 사용 중인 지면이 없으면 첫 비율군만 만든다
+            first = next(iter(groups))
+            now = {first: groups[first]}
+        deferred = [t for t in groups if t not in now]
+        groups = now
     rows: dict[int, GeneratedImage] = {}
     master: GeneratedImage | None = None
     for template, pids in groups.items():
@@ -211,7 +249,7 @@ def create_shared_background(db: Session, d: Design, final: bool = False) -> dic
         db.flush()
         if master is None:
             master = rows[pids[0]]
-    return rows
+    return rows, deferred
 
 
 @router.post("/designs/{design_id}/background/regenerate")
@@ -219,7 +257,9 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
                           final: bool = Body(False, embed=True), db: Session = Depends(get_db)):
     """시안 전체의 배경을 비율군마다 새로 생성하고, 같은 비율군 매체가 같은 원본을 공유하도록 연결한다.
     style 을 주면 브리프의 배경 형태(image_style)를 그 값으로 바꾼 뒤 생성한다.
-    final=True 면 확정 품질(IMAGE_QUALITY)로, 아니면 초안 품질(IMAGE_QUALITY_DRAFT)로 만든다."""
+    final=True 면 확정 품질(IMAGE_QUALITY)로, 아니면 초안 품질(IMAGE_QUALITY_DRAFT)로 만든다.
+    배경은 **합성본이 있는 지면의 비율군**만 지금 만든다(합성본이 하나도 없으면 모든 비율군). 나머지 비율군은
+    그 지면을 합성할 때 현재 장면을 참조해 만든다 → 쓰지 않는 비율군의 호출이 없어진다."""
     d = _design(db, design_id)
     if style is not None:
         style = style.strip() or imagegen.AUTO_STYLE
@@ -227,11 +267,12 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
             raise HTTPException(400, f"배경 형태는 {[imagegen.AUTO_STYLE, *imagegen.STYLES]} 중 하나")
         d.brief = {**(d.brief or {}), "image_style": style}
         db.flush()
-    rows = create_shared_background(db, d, final=final)
+    composed = [pid for pid in d.preset_version_ids if _latest(db, design_id, pid, "composite") is not None]
+    rows, deferred = create_shared_background(db, d, final=final, in_use=composed or None)
     db.commit()
     first = next(iter(rows.values()))
     fallbacks = sorted({r.layout.get("fallback") for r in rows.values() if r.layout.get("fallback")})
-    return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}),
+    return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}), "deferred": deferred,
             "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
             "quality": first.layout.get("quality"), "draft": bool(first.layout.get("draft")),
             "warnings": [f"일부 비율군은 변형 생성에 실패해 첫 배경을 잘라 썼습니다: {m}" for m in fallbacks]}

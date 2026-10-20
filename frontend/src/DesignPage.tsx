@@ -68,6 +68,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   const [imgTab, setImgTab] = useState<number | null>(null)
   const [bgBusy, setBgBusy] = useState(false)
   const [bgMsg, setBgMsg] = useState<string | null>(null)
+  const [bgNote, setBgNote] = useState<string | null>(null)   // 재생성 뒤 안내(미뤄 둔 비율군 등)
   const hasDraftBg = Object.values(imgs).some((r) => r?.background?.layout.draft)   // 초안 품질 배경이 하나라도 있는가
   const qualitySplit = !usage?.quality || usage.quality.draft !== usage.quality.final   // 초안/확정 품질이 다르게 설정돼 있는가
   const [imgErr, setImgErr] = useState<Record<number, string>>({})
@@ -132,14 +133,16 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
     }
   }
 
-  // 배경은 비율군(가로형/정사각/세로형)마다 1장 새로 만들고, 이미 합성된 매체는 새 배경으로 다시 합성한다(합성은 추가 생성 비용 없음).
+  // 배경은 합성본이 있는 매체의 비율군만 1장씩 새로 만들고(합성본이 없으면 모든 비율군), 그 매체를 새 배경으로 다시 합성한다.
+  // 아직 합성하지 않은 비율군은 나중에 그 매체를 합성할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
   // final=false: 초안 품질(싸게, 형태·구도를 고르는 동안) / true: 확정 품질(내보낼 배경, 마음에 들 때 1회)
   const regenBackground = (final: boolean) => overlay.run(
-    `${final ? '확정 품질로' : '초안 품질로'} 배경 새로 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)`, () => regenBackgroundInner(final))
+    `${final ? '확정 품질로' : '초안 품질로'} 배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)`, () => regenBackgroundInner(final))
   const regenBackgroundInner = async (final: boolean) => {
-    setBgBusy(true); setBgMsg(null)
+    setBgBusy(true); setBgMsg(null); setBgNote(null)
     try {
-      await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final })
+      const out = await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final }) as { deferred?: string[] }
+      if (out.deferred?.length) setBgNote(`아직 합성본이 없는 비율군(${out.deferred.join(', ')})은 그 지면을 합성할 때 같은 장면으로 만듭니다.`)
       onDesignChange()
       const failed: string[] = []
       for (const g of withCopy) {
@@ -284,7 +287,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
               </label>
               <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={() => regenBackground(false)}
                 title="형태·구도를 고르는 동안은 초안 품질로 만듭니다 (비용 약 1/4)">
-                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}비율군마다 1장, 모든 매체에 적용)
+                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}합성한 비율군마다 1장, 모든 매체에 적용)
               </button>
               {qualitySplit && <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background) || !hasDraftBg} onClick={() => regenBackground(true)}
                 title="지금 형태·구도가 마음에 들면 한 번만 확정 품질로 다시 만듭니다. 내보내기 전에 실행하세요">
@@ -294,6 +297,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
               {bgBusy && <span className="muted">배경 생성 후 합성된 매체를 다시 합성하는 중… 1~2분 걸릴 수 있습니다.</span>}
             </div>
             {bgMsg && <div className="notice err">{bgMsg}</div>}
+            {bgNote && <p className="muted">{bgNote}</p>}
             {qualitySplit && hasDraftBg && !bgBusy && (
               <p className="muted">현재 배경은 초안 품질입니다. 형태·구도가 정해지면 '확정 품질로 배경 생성'을 한 번 실행한 뒤 내보내세요. 검수에서도 경고로 표시됩니다.</p>
             )}
