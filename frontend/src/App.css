@@ -447,6 +447,9 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .img-tags { position: absolute; left: 6px; top: 6px; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 70px); }
 .img-tag { font-size: 11px; padding: 2px 6px; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; white-space: nowrap; }
 .img-tag.draft { background: rgba(180, 83, 9, .85); }
+.img-tag.setting { background: rgba(37, 99, 235, .85); }
+.in-image-row { align-items: baseline; }
+.in-image-row select { margin-left: 4px; }
 /* 개발자 지표(호출 횟수·추정 비용) — 생성 화면마다 한 줄 */
 .devstats { margin: 6px 0 10px; padding: 6px 10px; border: 1px dashed var(--line, #cbd5e1); border-radius: var(--radius-sm); font-size: 12px; color: #475569; background: #f8fafc; }
 .devstats-line { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }

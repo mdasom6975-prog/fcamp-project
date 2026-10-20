@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
 import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
 import { PhraseBox } from './BrandPage'
-import ImageGrid, { fileUrl, type ImgRow } from './ImageGrid'
+import ImageGrid, { fileUrl, inImageChanged, inImageDefault, type ImgRow, type InImage } from './ImageGrid'
 import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
@@ -21,14 +21,14 @@ type Design = {
   brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
-  presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string }[]
+  presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string; in_image?: InImage }[]
   brand: { id: number; name: string; version_no: number; current_version_no: number }
   brand_outdated: boolean; created_at: string
   text_asset_fields?: string[]    // 문구를 여러 개 요구하는 지면(PMax 등)의 필드. 있으면 '추가 문구 자산 생성' 버튼
 }
 
-async function post(url: string, body: unknown) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function post(url: string, body: unknown, method: 'POST' | 'PUT' = 'POST') {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
     const d = j.detail
@@ -65,8 +65,9 @@ type Screen = 'design' | 'edit' | 'review'
 type View = 'master' | 'setup' | 'copy' | 'images' | 'icons' | 'edit' | 'review'
 
 type PanelView = 'copy' | 'images' | 'icons'
-function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, textAssets, assetFields, view, onDesignChange, onEdit, onReview, onGoImages }: {
+function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
   designId: number; brandName: string; versionNo: number | null; imageStyle: string
+  inImage: Record<number, InImage | undefined>    // 지면별 '이미지 안 문구' 설정(서버가 계산한 현재값·기본 여부)
   view: PanelView    // 3열 화면의 가운데에 무엇을 보일지: 카피 / 이미지 / 아이콘 (상태는 한 인스턴스가 공유)
   genSettings: { image_model?: string | null; bg_mode?: string | null }    // 브리프에 저장된 생성 설정(없으면 서버 기본)
   textAssets?: Record<string, string[]>    // PMax 등 문구를 여러 개 요구하는 지면용 추가 문구 자산(카피 생성 때 함께 받음)
@@ -140,6 +141,25 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
   const makeOne = async (presetId: number, regenerate: boolean) => {
     await post(`/api/designs/${designId}/presets/${presetId}/image`, { regenerate_background: regenerate })
   }
+
+  // 이미지 안 문구(본문·CTA) 설정: 저장한 뒤 합성본이 있으면 배경을 유지한 채 바로 다시 합성한다(이미지 API 호출 없음 → 비용 0).
+  const [inImage, setInImage] = useState(inImageProp)
+  useEffect(() => setInImage(inImageProp), [inImageProp])
+  const setInImageFor = (presetId: number, body: boolean, cta: boolean) => overlay.run('이미지 안 문구 설정을 저장하고 다시 합성하는 중…', async () => {
+    setImgErr((x) => ({ ...x, [presetId]: '' }))
+    try {
+      const j = await post(`/api/designs/${designId}/presets/${presetId}/in-image`, { body, cta }, 'PUT') as InImage
+      setInImage((m) => ({ ...m, [presetId]: j }))
+      if (imgs[presetId]?.composite) {
+        setImgBusy(presetId)
+        await makeOne(presetId, false)
+        await loadImgs()
+      }
+      onDesignChange()
+    } catch (e) {
+      setImgErr((x) => ({ ...x, [presetId]: (e as Error).message }))
+    } finally { setImgBusy(null) }
+  })
 
   // 배경은 시안당 1회만 생성하고, 아직 합성이 없는 나머지 매체도 같은 배경을 각 규격 크기로 맞춰 이어서 합성한다(추가 생성 비용 없음).
   const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate))
@@ -413,7 +433,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
                       </button>
                     )}
                   </div>
-                  <ImageGrid items={withCopy} rows={imgs} selected={cur.preset_id} onSelect={(id) => { setImgTab(id); setLightbox(true) }}
+                  <ImageGrid items={withCopy.map((g) => ({ ...g, in_image: inImage[g.preset_id] }))} rows={imgs} selected={cur.preset_id} onSelect={(id) => { setImgTab(id); setLightbox(true) }}
                     badge={(it, row) => row?.composite
                       ? <span className="badge b-ok">합성됨</span>
                       : it.content_kind === '완성형' && !groups.find((g) => g.preset_id === it.preset_id)?.variants.some((v) => v.selected)
@@ -427,6 +447,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
                       position={`${idx + 1} / ${withCopy.length}`}>
                       <ImageBlock key={cur.preset_id} g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
                         canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
+                        inImage={inImage[cur.preset_id]} onInImage={setInImageFor}
                         onEdit={(id) => { setLightbox(false); onEdit(id) }} />
                     </Lightbox>
                   )}
@@ -580,15 +601,39 @@ function Lightbox({ title, subtitle, position, onClose, onPrev, onNext, children
   )
 }
 
-function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit }: {
+// 이미지 안 문구 단계: 제목만 / 제목+본문 / 제목+본문+CTA (설계안 결정 1). 서버 설정 {body, cta} 와 상호 변환.
+type InImageLevel = 'title' | 'body' | 'full'
+const inImageLevel = (s: InImage) => (s.cta ? 'full' : s.body ? 'body' : 'title') as InImageLevel
+const IN_IMAGE_LEVELS: { v: InImageLevel; label: string; body: boolean; cta: boolean }[] = [
+  { v: 'title', label: '제목만', body: false, cta: false },
+  { v: 'body', label: '제목 + 본문', body: true, cta: false },
+  { v: 'full', label: '제목 + 본문 + CTA 버튼', body: true, cta: true },
+]
+const inImageDefaultLabel = (name: string) => (inImageDefault(name).cta ? '제목 + 본문 + CTA' : '제목만')
+
+function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit, inImage, onInImage }: {
   g: CopyGroup; row?: ImgRow; busy: boolean; err?: string; canMake: boolean
   onMake: (presetId: number, regenerate: boolean) => void; onEdit: (presetId: number) => void
+  inImage?: InImage; onInImage?: (presetId: number, body: boolean, cta: boolean) => void
 }) {
   const comp = row?.composite
   const sep = g.content_kind === '분리 자산형'
   return (
     <div className="imgblock">
       {sep && <p className="muted">분리 자산형: 텍스트 없는 이미지만 만들고, 로고·카피는 내보내기에서 별도 파일로 제공합니다.</p>}
+      {!sep && inImage?.available && onInImage && (
+        <div className="row in-image-row">
+          <label>이미지 안 문구{' '}
+            <select value={inImageLevel(inImage)} disabled={busy}
+              onChange={(e) => { const lv = IN_IMAGE_LEVELS.find((l) => l.v === e.target.value); if (lv) onInImage(g.preset_id, lv.body, lv.cta) }}>
+              {IN_IMAGE_LEVELS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
+            </select>
+          </label>
+          <span className="muted">
+            이 지면 기본: {inImageDefaultLabel(g.name)}{inImageChanged(inImage, g.name) ? ' · 직접 바꿈' : ''}. 본문·CTA 를 이미지 밖에 그리는 매체(Meta·카카오)는 제목만 권장. 바꾸면 배경을 유지한 채 바로 다시 합성합니다(비용 없음).
+          </span>
+        </div>
+      )}
       {comp && (
         <div className="preview">
           <img src={fileUrl(comp)} alt={`${g.name} 미리보기`} />
@@ -1086,6 +1131,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   }
 
 
+  // 지면별 '이미지 안 문구' 설정 — 같은 presets 면 같은 객체를 넘겨 CopyPanel 의 로컬 상태가 렌더마다 초기화되지 않게 한다
+  const inImageMap = useMemo(() => Object.fromEntries((active?.presets ?? []).map((p) => [p.id, p.in_image])) as Record<number, InImage | undefined>, [active?.presets])
   if (brands.length === 0 && loaded)
     return <main className="page"><h1>규격·메시지·시안</h1><p className="muted">먼저 '브랜드' 탭에서 브랜드를 등록해 주세요.</p></main>
 
@@ -1457,6 +1504,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
               <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no}
                 imageStyle={d.brief.image_style ?? '자동'} genSettings={{ image_model: d.brief.image_model, bg_mode: d.brief.bg_mode }}
                 textAssets={d.brief.text_assets} assetFields={d.text_asset_fields} view={view as PanelView}
+                inImage={inImageMap}
                 onDesignChange={() => { loadDesigns(); setWsTick((t) => t + 1) }}
                 onEdit={goEdit} onReview={() => goView('review')} onGoImages={() => goView('images')} />
             </section>

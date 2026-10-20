@@ -12,9 +12,21 @@ export type ImgOut = {
   }
 } | null
 export type ImgRow = { preset_id: number; background: ImgOut; composite: ImgOut }
+// 지면별 '이미지 안 문구' 설정(서버 in_image_for): 본문·CTA 를 이미지에 그리는지, 지면 유형 기본값 그대로인지
+export type InImage = { body: boolean; cta: boolean; available: boolean; default: boolean }
 export type GridItem = {
   preset_id: number; platform: string; name: string; width: number | null; height: number | null; content_kind?: string
+  in_image?: InImage
 }
+// 지면 유형 기본값(서버 in_image_default 와 같은 규칙): 이미지가 광고 전체인 업로드형 배너만 본문·CTA 를 켠다
+export const inImageDefault = (name: string) => (name.startsWith('업로드형') ? { body: true, cta: true } : { body: false, cta: false })
+// 기본값과 다르게 설정했는가(저장했더라도 값이 기본과 같으면 '기본'으로 본다)
+export const inImageChanged = (s: InImage | undefined, name: string) =>
+  !!s && s.available && (s.body !== inImageDefault(name).body || s.cta !== inImageDefault(name).cta)
+// 카드 태그: 기본값과 다르게 설정한 지면만 표시한다
+export const inImageTag = (s: InImage | undefined, name: string) =>
+  !s || !inImageChanged(s, name) ? null : s.body && s.cta ? '본문·CTA 안' : s.body ? '본문 안' : s.cta ? 'CTA 안' : '제목만'
+
 
 export const thumbUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/thumb?v=${c.file ?? c.id}`
 export const fileUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/file?v=${c.file ?? c.id}`
@@ -49,6 +61,7 @@ export default function ImageGrid({ items, rows, selected, onSelect, badge, dimm
                 : <span className="muted">미생성</span>}
               <span className="img-tags">
                 {it.content_kind === '분리 자산형' && <span className="img-tag">분리 자산형</span>}
+                {inImageTag(it.in_image, it.name) && <span className="img-tag setting" title="이미지 안 문구 설정을 지면 기본값과 다르게 바꿨습니다">{inImageTag(it.in_image, it.name)}</span>}
                 {row?.background?.layout.draft && <span className="img-tag draft" title={`배경을 초안 품질(${row.background.layout.quality})로 만들었습니다. 내보내기 전에 '확정 품질로 배경 생성'을 실행하세요`}>초안 배경</span>}
                 {comp?.layout.crop?.mode === '블러 채우기' && <span className="img-tag" title="보완 변형을 만들지 못해 원본 전체를 넣고 남는 자리를 흐린 확대본으로 채웠습니다">블러 채움</span>}
                 {row?.background?.layout.single_extra && <span className="img-tag" title="1장 방식에서 잘라 쓰면 피사체가 많이 사라져 원본을 참조해 이 비율군용으로 1장 더 만들었습니다">보완 변형</span>}
