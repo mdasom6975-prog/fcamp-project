@@ -5,6 +5,7 @@ from sqlalchemy import func, inspect, select, text
 
 from . import models  # noqa: F401  (테이블 등록)
 from .db import DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
+from .routers_analysis import router as analysis_router
 from .routers_assets import router as assets_router
 from .routers_brands import router as brands_router
 from .routers_copy import router as copy_router
@@ -57,6 +58,7 @@ app.include_router(edit_router)
 app.include_router(review_router)
 app.include_router(export_router)
 app.include_router(designs_router)
+app.include_router(analysis_router)
 app.include_router(spec_update_router)  # /presets/{id} 보다 먼저 등록해야 update-status 가 가려지지 않는다
 app.include_router(presets_router)
 

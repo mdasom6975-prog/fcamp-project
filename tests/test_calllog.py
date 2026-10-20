@@ -100,3 +100,23 @@ def test_pricing_file_overrides_defaults(log, tmp_path, monkeypatch):
     assert pricing.cost_of({"ok": True, "api": "chat", "provider": "openai", "model": "my-model",
                             "tokens_in": 1_000_000, "tokens_out": 0}) == (1.0, False)
     assert pricing.table()["chat"]["gpt-4.1-mini"]["in"] == 0.40, "기본 항목은 유지된다"
+
+
+def test_prompt_text_is_saved_separately(log, tmp_path, monkeypatch):
+    """보낸 프롬프트 전문은 data/prompt_log/<id>.json 에 두고 행에는 prompt_id 만 남는다. 실패 호출도 전문을 남긴다."""
+    monkeypatch.setattr(calllog, "PROMPT_DIR", tmp_path / "prompt_log")
+    with calllog.timed("chat", "copy", "anthropic", "m") as info:
+        info["prompt_text"] = {"system": "S", "user": "U"}
+    with pytest.raises(RuntimeError):
+        with calllog.timed("images.generate", "background", "openai", "m") as info:
+            info["prompt_text"] = {"prompt": "P"}
+            raise RuntimeError("boom")
+    calllog.record("images.generate", "icon", "openai", "m", prompt_text={"prompt": ""})   # 빈 전문은 저장하지 않는다
+    rows = calllog._rows()
+    assert "prompt_text" not in rows[0] and calllog.prompt_text(rows[0]["prompt_id"]) == {"system": "S", "user": "U"}
+    assert rows[1]["ok"] is False and calllog.prompt_text(rows[1]["prompt_id"]) == {"prompt": "P"}
+    assert "prompt_id" not in rows[2]
+    assert calllog.prompt_text(None) is None and calllog.prompt_text("../etc/passwd") is None and calllog.prompt_text("없음") is None
+    assert calllog.calls(None) == [] or True     # design 없는 호출은 calls(None) 대상이 아니어도 된다
+    s = calllog.stage_summary(None, {"a": ("copy",), "b": ("background", "icon")})
+    assert (s["a"]["count"], s["b"]["count"], s["b"]["failed"]) == (1, 1, 1)

@@ -38,13 +38,20 @@ def anthropic_client():
     return _anthropic_client
 
 
-def _claude_json(system: str, user: str, schema: dict) -> tuple[dict, object]:
-    """Claude 에 JSON 스키마 출력을 요청한다. 반환: (파싱한 dict, 응답 객체)."""
+def _claude_json(system: str, user: str, schema: dict, images: list[bytes] | None = None) -> tuple[dict, object]:
+    """Claude 에 JSON 스키마 출력을 요청한다. 반환: (파싱한 dict, 응답 객체).
+    images 를 주면(PNG 바이트) 사용자 메시지 앞에 이미지 블록으로 붙인다(분석 화면의 비전 채점)."""
     import anthropic
+    import base64
     client = anthropic_client()
+    content: str | list = user
+    if images:
+        content = [{"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                 "data": base64.b64encode(b).decode()}} for b in images]
+        content.append({"type": "text", "text": user})
     kwargs = dict(
         model=CLAUDE_MODEL, max_tokens=CLAUDE_MAX_TOKENS, system=system,
-        messages=[{"role": "user", "content": user}],
+        messages=[{"role": "user", "content": content}],
         output_config={"effort": CLAUDE_EFFORT, "format": {"type": "json_schema", "schema": schema}},
     )
     try:
@@ -72,12 +79,23 @@ def _openai_json(system: str, user: str) -> tuple[dict, object]:
 
 
 def chat_json(system: str, user: str, kind: str, schema: dict) -> dict:
-    """시스템·사용자 프롬프트로 JSON 하나를 받는다. 호출 기록(calllog)에 공급자·모델·토큰·소요 시간을 남긴다.
+    """시스템·사용자 프롬프트로 JSON 하나를 받는다. 호출 기록(calllog)에 공급자·모델·토큰·소요 시간과 보낸 프롬프트 전문을 남긴다.
     schema 는 JSON Schema(object). openai 경로에서는 스키마를 강제하지 못하고 프롬프트의 형식 지시에 의존한다."""
     provider = "anthropic" if CHAT_PROVIDER == "anthropic" else "openai"
     with calllog.timed("chat", kind, provider, chat_model()) as info:
+        info["prompt_text"] = {"system": system, "user": user}
         data, r = _claude_json(system, user, schema) if provider == "anthropic" else _openai_json(system, user)
         _note_usage(info, r, provider)
+    return data if isinstance(data, dict) else {}
+
+
+def vision_json(system: str, user: str, images: list[bytes], kind: str, schema: dict) -> dict:
+    """이미지(PNG 바이트)를 함께 보내 JSON 하나를 받는다. 공급자는 Claude 고정(CHAT_PROVIDER 와 무관 — 이미지 입력 경로는
+    여기 하나뿐이다). 호출 기록에는 프롬프트 전문과 이미지 수만 남긴다(이미지 자체는 저장하지 않는다)."""
+    with calllog.timed("chat", kind, "anthropic", CLAUDE_MODEL, images=len(images)) as info:
+        info["prompt_text"] = {"system": system, "user": user}
+        data, r = _claude_json(system, user, schema, images=images)
+        _note_usage(info, r, "anthropic")
     return data if isinstance(data, dict) else {}
 
 

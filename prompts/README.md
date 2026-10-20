@@ -21,6 +21,7 @@
 | `image/style/{실사인물,실사제품,플랫일러스트,3D렌더,그래픽패턴}.md` | 배경 형태(표현 방식). 브리프 `image_style` 또는 자동 선택(`imagegen.pick_style`)으로 파일을 고른다 | `imagegen.build_prompt` |
 | `image/same_scene.md` | 비율군 변형 배경. 첫 비율군 배경을 참조 이미지로 붙여 같은 장면을 다른 비율 구도로 (`{{base}}` 는 그 비율군의 background 프롬프트) | `imagegen.build_variant_prompt` |
 | `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
+| `analysis/judge_system.md` · `judge_user.md` | 분석 화면 비전 채점: 생성 배경 1장을 Claude 가 보고 톤·내용·표현 방식·금지 요소·글자 항목을 1~5점 (참고값, 검수 아님) | `analysis.judge_background` |
 
 `_` 로 시작하는 파일은 partial(다른 파일이 include 하는 조각)이다.
 

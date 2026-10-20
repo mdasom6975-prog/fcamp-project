@@ -169,3 +169,12 @@ def test_background_variant_prompt():
     from app import imagegen
     base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간")
     _assert_snapshot("image__variant_가로형", imagegen.build_variant_prompt(base) + "\n")
+
+
+# ---- 분석 화면 비전 채점 (analysis): 이미지는 보내지 않고 문장만 고정한다 ----
+def test_judge_prompt():
+    from app import analysis, prompts
+    from types import SimpleNamespace
+    bv = SimpleNamespace(image_tone=BRAND["image_tone"])
+    vars = analysis.judge_vars(SimpleNamespace(name="쿠챠"), bv, BRIEF, "실사 제품·공간")
+    _assert_snapshot("analysis__judge", f"[SYSTEM]\n{prompts.render('analysis/judge_system')}\n\n[USER]\n{prompts.render('analysis/judge_user', **vars)}\n")

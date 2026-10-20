@@ -229,7 +229,8 @@ def _openai_png(prompt: str, model: str, quality: str, size: str = OPENAI_SIZE, 
     """OpenAI 이미지 1장을 PNG 바이트로. extra 는 background·output_format 등 추가 인자. kind 는 호출 기록용."""
     import openai
     try:
-        with calllog.timed("images.generate", kind, "openai", model, size=size, quality=quality):
+        with calllog.timed("images.generate", kind, "openai", model, size=size, quality=quality) as info:
+            info["prompt_text"] = {"prompt": prompt}
             r = client().with_options(timeout=240.0, max_retries=0).images.generate(
                 model=model, prompt=prompt, size=size, quality=quality, n=1, **extra)
     except openai.RateLimitError as e:   # 분당 제한이거나 크레딧 부족. 하루 소진으로 기록하지 않는다
@@ -293,7 +294,8 @@ def _generate_cloudflare(prompt: str) -> Image.Image:
     if not account or not token:
         raise RuntimeError("CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN 이 .env 에 없습니다")
     url = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{CF_MODEL}"
-    with calllog.timed("images.generate", "background", "cloudflare", CF_MODEL):
+    with calllog.timed("images.generate", "background", "cloudflare", CF_MODEL) as info:
+        info["prompt_text"] = {"prompt": prompt[:CF_MAX_PROMPT_CHARS]}
         r = httpx.post(url, headers={"Authorization": f"Bearer {token}"}, timeout=120.0,
                        json={"prompt": prompt[:CF_MAX_PROMPT_CHARS], "steps": CF_STEPS})
     # 429 또는 일일 무료 할당량 초과 코드(4006)
@@ -380,7 +382,8 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
     model = model or OPENAI_MODEL
     extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and fidelity_supported(model)) else {}
     def _edit(**kw):
-        with calllog.timed("images.edit", "variant", "openai", model, size=f"{w}x{h}", quality=quality):
+        with calllog.timed("images.edit", "variant", "openai", model, size=f"{w}x{h}", quality=quality) as info:
+            info["prompt_text"] = {"prompt": prompt}
             return client().with_options(timeout=240.0, max_retries=0).images.edit(
                 model=model, image=buf, prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
     try:

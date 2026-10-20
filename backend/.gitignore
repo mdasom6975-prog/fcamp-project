@@ -6,3 +6,5 @@ storage/
 data/image_usage.json
 data/api_calls.jsonl
 data/model_caps.json
+data/prompt_log/
+data/analysis/
