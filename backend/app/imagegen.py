@@ -224,7 +224,38 @@ def can_vary() -> bool:
     return VARIANT and PER_RATIO and PROVIDER == "openai"
 
 
-_fidelity_supported = True   # 모델이 input_fidelity 를 거절하면 False 로 바꿔 이후 호출에서는 보내지 않는다
+# 모델이 input_fidelity 를 거절한 사실을 모델별로 파일에 기억한다. 메모리 플래그만 쓰면 서버를 재시작할 때마다
+# 첫 변형 호출이 한 번 거절당한 뒤(과금 없음, 약 2초) 재시도하므로, 프로세스가 바뀌어도 처음부터 보내지 않게 한다.
+CAPS_FILE = BASE_DIR / "data" / "model_caps.json"
+_caps_cache: dict | None = None
+
+
+def _caps() -> dict:
+    """{모델명: {"input_fidelity": bool}}. 파일이 없거나 깨졌으면 빈 dict."""
+    global _caps_cache
+    if _caps_cache is None:
+        try:
+            _caps_cache = json.loads(CAPS_FILE.read_text())
+        except (OSError, ValueError):
+            _caps_cache = {}
+        if not isinstance(_caps_cache, dict):
+            _caps_cache = {}
+    return _caps_cache
+
+
+def fidelity_supported(model: str = OPENAI_MODEL) -> bool:
+    """이 모델에 input_fidelity 를 보내도 되는가. 거절 기록이 없으면 True(한 번 보내 보고 거절되면 기록한다)."""
+    return (_caps().get(model) or {}).get("input_fidelity", True) is not False
+
+
+def _remember_fidelity(model: str, supported: bool) -> None:
+    caps = _caps()
+    caps[model] = {**(caps.get(model) or {}), "input_fidelity": supported}
+    try:
+        CAPS_FILE.parent.mkdir(exist_ok=True)
+        CAPS_FILE.write_text(json.dumps(caps, ensure_ascii=False, indent=1))
+    except OSError:
+        pass                      # 기록 실패는 다음 프로세스에서 한 번 더 거절당하는 것 외에 영향이 없다
 
 
 def error_info(e: Exception) -> dict:
@@ -252,8 +283,7 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
     reference.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     buf.name = "reference.png"
-    global _fidelity_supported
-    extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and _fidelity_supported) else {}
+    extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and fidelity_supported(OPENAI_MODEL)) else {}
     def _edit(**kw):
         with calllog.timed("images.edit", "variant", "openai", OPENAI_MODEL, size=f"{w}x{h}", quality=quality):
             return client().with_options(timeout=240.0, max_retries=0).images.edit(
@@ -264,7 +294,7 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
         except openai.BadRequestError as e:
             # 일부 모델(gpt-image-2.5 계열)은 input_fidelity 를 받지 않는다 → 그 인자만 빼고 한 번 더 (검증 단계 실패라 과금 없음)
             if extra and _is_fidelity_error(e):
-                _fidelity_supported = False
+                _remember_fidelity(OPENAI_MODEL, False)      # 이후 호출·다음 프로세스부터는 처음부터 보내지 않는다
                 buf.seek(0)
                 r = _edit()
             else:

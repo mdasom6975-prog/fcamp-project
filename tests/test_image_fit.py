@@ -453,14 +453,21 @@ def test_generate_variant_retries_without_input_fidelity(monkeypatch):
         def with_options(self, **kw): return self
     monkeypatch.setattr(imagegen, "client", lambda: FakeClient())
     monkeypatch.setattr(imagegen, "VARIANT_FIDELITY", "high")
-    monkeypatch.setattr(imagegen, "_fidelity_supported", True)
     monkeypatch.setattr(imagegen, "usage", lambda provider=None: {"exhausted": False})
     monkeypatch.setattr(imagegen, "_bump", lambda **kw: None)
+    assert imagegen.fidelity_supported(imagegen.OPENAI_MODEL)
     out = imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
     assert out.size == (16, 16)
     assert [("input_fidelity" in c) for c in calls] == [True, False]
     imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
     assert len(calls) == 3 and "input_fidelity" not in calls[-1], "두 번째 호출부터는 처음부터 보내지 않는다"
+    # 거절은 모델별로 파일에 남아 다음 프로세스(캐시 비움)에서도 처음부터 보내지 않는다. 다른 모델은 다시 시도한다.
+    import json
+    assert json.loads(imagegen.CAPS_FILE.read_text())[imagegen.OPENAI_MODEL]["input_fidelity"] is False
+    monkeypatch.setattr(imagegen, "_caps_cache", None)
+    assert not imagegen.fidelity_supported(imagegen.OPENAI_MODEL) and imagegen.fidelity_supported("other-model")
+    imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
+    assert len(calls) == 4 and "input_fidelity" not in calls[-1]
 
 
 def test_variant_failure_falls_back_to_master(env, monkeypatch):

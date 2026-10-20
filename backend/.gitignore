@@ -5,3 +5,4 @@ storage/
 .env
 data/image_usage.json
 data/api_calls.jsonl
+data/model_caps.json
