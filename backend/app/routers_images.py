@@ -80,12 +80,44 @@ def _latest_design_bg(db: Session, design_id: int, template: str | None = None) 
     return None
 
 
+def _single_master(db: Session, design_id: int) -> GeneratedImage | None:
+    """1장 방식의 원본: 현재 장면 배경 중 보완 변형(single_extra)이 아닌 가장 최근 것."""
+    rows = db.scalars(select(GeneratedImage).where(
+        GeneratedImage.design_id == design_id, GeneratedImage.kind == "background"
+    ).order_by(GeneratedImage.id.desc())).all()
+    current = _scene(rows[0]) if rows else None
+    for g in rows:
+        if _same_scene(g, current) and not (g.layout or {}).get("single_extra"):
+            return g
+    return rows[0] if rows else None
+
+
 def _current_bg(db: Session, design_id: int, pid: int) -> GeneratedImage | None:
     """지면에 연결된 최신 배경이 현재 장면이면 그 행, 아니면(배경을 새로 만든 뒤 이 비율군은 아직 안 만듦) None."""
     bg = _latest(db, design_id, pid, "background")
     if bg is None:
         return None
     return bg if _same_scene(bg, _scene(_latest_design_bg(db, design_id))) else None
+
+
+# 이미지 안 문구 설정: 기본은 '제목만'. 이미지가 광고 전체인 업로드형 배너(Google Ads 업로드형 300×250 등)만 본문·CTA 기본 켬.
+# Meta·카카오 네이티브는 매체가 본문·버튼을 이미지 밖에 그리므로 끔. 분리 자산형(PMax 등)은 제목도 넣지 않으므로 해당 없음.
+def in_image_default(pv) -> dict:
+    if pv.placement.content_kind == "분리 자산형":
+        return {"body": False, "cta": False, "available": False}
+    banner = pv.placement.name.startswith("업로드형")
+    return {"body": banner, "cta": banner, "available": True}
+
+
+def in_image_for(d: Design, pv) -> dict:
+    """지면의 이미지 안 문구 설정 {body, cta, available, default}. 브리프 in_image[preset_id] 가 있으면 그 값."""
+    base = in_image_default(pv)
+    if not base["available"]:
+        return {**base, "default": True}
+    saved = ((d.brief or {}).get("in_image") or {}).get(str(pv.id))
+    if isinstance(saved, dict):
+        return {**base, "body": bool(saved.get("body", base["body"])), "cta": bool(saved.get("cta", base["cta"])), "default": False}
+    return {**base, "default": True}
 
 
 def _design(db: Session, design_id: int) -> Design:
@@ -108,7 +140,8 @@ def image_settings():
     """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 초안/확정 추정 비용)과 배경 방식, 기본값."""
     return {"models": imagegen.model_options(), "modes": list(imagegen.BG_MODES), "default_mode": imagegen.default_bg_mode(),
             "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}, "provider": imagegen.PROVIDER,
-            "draft_provider": imagegen.DRAFT_PROVIDER, "usd_krw": imagegen.pricing_rate()}
+            "draft_provider": imagegen.DRAFT_PROVIDER, "usd_krw": imagegen.pricing_rate(),
+            "single_min_keep": imagegen.SINGLE_MIN_KEEP}
 
 
 @router.put("/designs/{design_id}/image-settings")
@@ -128,6 +161,24 @@ def set_image_settings(design_id: int, image_model: str | None = Body(None, embe
     d.brief = brief
     db.commit()
     return {"settings": imagegen.settings_for(d.brief), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode")}
+
+
+@router.put("/designs/{design_id}/presets/{preset_id}/in-image")
+def set_in_image(design_id: int, preset_id: int, body: bool | None = Body(None, embed=True),
+                 cta: bool | None = Body(None, embed=True), db: Session = Depends(get_db)):
+    """지면의 이미지 안 문구 설정(본문·CTA)을 브리프에 저장한다. 다음 합성('다시 합성')부터 적용. 분리 자산형은 400."""
+    d = _design(db, design_id)
+    if preset_id not in d.preset_version_ids:
+        raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
+    pv = db.get(PresetVersion, preset_id)
+    if not in_image_default(pv)["available"]:
+        raise HTTPException(400, "분리 자산형 지면은 이미지에 문구를 넣지 않습니다")
+    cur = in_image_for(d, pv)
+    saved = dict(((d.brief or {}).get("in_image") or {}))
+    saved[str(preset_id)] = {"body": cur["body"] if body is None else bool(body), "cta": cur["cta"] if cta is None else bool(cta)}
+    d.brief = {**(d.brief or {}), "in_image": saved}
+    db.commit()
+    return {"preset_id": preset_id, **in_image_for(d, pv)}
 
 
 @router.get("/designs/{design_id}/api-calls")
@@ -181,7 +232,7 @@ def _gen_error(e: Exception) -> str:
 
 
 def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
-                  final: bool = False, upgrade: bool = False) -> tuple[Path, Image.Image, str, dict]:
+                  final: bool = False, upgrade: bool = False, force_ratio: bool = False) -> tuple[Path, Image.Image, str, dict]:
     """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
     final=False 면 초안 품질(IMAGE_QUALITY_DRAFT), True 면 확정 품질(IMAGE_QUALITY). layout.quality 에 남긴다.
     생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
@@ -190,14 +241,17 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
     st = imagegen.settings_for(d.brief)
-    single = st["bg_mode"] == "single"           # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등)
-    gw, gh = imagegen.size_for(template, per_ratio=True if single else None)
+    # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등). force_ratio 는 1장 방식에서 손실이 큰 비율군을 그 1장을
+    # 참조해 비율군 구도로 1장 더 만들 때(크롭공용 대신 비율군 구도, 참조 변형 허용)
+    single = st["bg_mode"] == "single" and not force_ratio
+    gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
     quality = imagegen.quality_for(final)
     provider = imagegen.provider_for(final)       # 초안 공급자가 FLUX 면 초안은 무료 구간에서, 확정만 OpenAI
     ref_img = None
     # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 초안→확정 승격(upgrade)은 can_edit
     if reference is not None and Path(reference.file_path).exists() and provider == "openai" \
-            and (imagegen.can_edit() if upgrade else imagegen.can_vary(st["bg_mode"], final)):
+            and (imagegen.can_edit() if upgrade else (imagegen.VARIANT and imagegen.can_edit()) if force_ratio
+                 else imagegen.can_vary(st["bg_mode"], final)):
         ref_img = Image.open(reference.file_path)
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single)
@@ -216,6 +270,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "draft": imagegen.is_draft(quality), "mode": st["bg_mode"], "provider": provider,
+              **({"single_extra": True} if force_ratio else {}),
               "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or path.stem) if (ref_img is not None and not upgrade) else path.stem,
@@ -251,10 +306,17 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
     groups: dict[str, list[int]] = {}
     for pid, w, h in sizes:
         groups.setdefault(compose.template_for(w, h), []).append(pid)
-    if imagegen.settings_for(d.brief)["bg_mode"] == "single":
-        # 1장 방식: 가장 적게 잘리는 비율군 한 장을 모든 지면이 잘라 쓴다. 미루는 비율군·참조 변형이 없다.
-        groups = {imagegen.best_single_template([(w, h) for _, w, h in sizes]): [pid for pid, _, _ in sizes]}
-        in_use = None
+    single = imagegen.settings_for(d.brief)["bg_mode"] == "single"
+    if single:
+        # 1장 방식: 가장 적게 잘리는 비율군 한 장을 모든 지면이 잘라 쓴다. 다만 그 한 장을 잘라서 피사체가 많이 사라지는
+        # 비율군(crop_keep < IMAGE_SINGLE_MIN_KEEP, 보통 정사각→가로형)은 그 1장을 참조해 비율군 구도로 1장 더 만든다.
+        best = imagegen.best_single_template([(w, h) for _, w, h in sizes])
+        gen = imagegen.TEMPLATE_SIZES[best]
+        lossy = {t: p for t, p in groups.items()
+                 if t != best and any(imagegen.lossy_single(gen, (w, h)) for pid, w, h in sizes if pid in p)}
+        groups = {best: [pid for pid, _, _ in sizes if not any(pid in p for p in lossy.values())], **lossy}
+        if in_use is not None:            # 미루기는 손실 큰 비율군에만 적용(한 장은 항상 지금 만든다)
+            in_use = list(set(in_use) | set(groups[best]))
     deferred: list[str] = []
     if in_use is not None:
         wanted = set(in_use)
@@ -282,13 +344,15 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
                 else:
                     path, bg, prompt, layout = _generate_one(db, d, template, final=True)
             else:
-                path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final)
+                path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final,
+                                                         force_ratio=single and master is not None)
         except HTTPException as e:
             if master is None:
                 raise
-            # 변형 생성이 실패해도 이미 만든(과금된) 첫 배경을 버리지 않는다: 이 비율군은 첫 배경을 잘라 쓰고 사유를 남긴다
+            # 변형 생성이 실패해도 이미 만든(과금된) 첫 배경을 버리지 않는다: 이 비율군은 첫 배경을 쓰고 사유를 남긴다.
+            # 1장 방식의 손실 큰 비율군이면 잘라 쓰지 않고 '블러 채우기'(전체를 넣고 남는 자리는 흐린 확대본)로 합성한다
             log.warning("비율군 %s 변형 실패 → 첫 배경으로 대체: %s", template, e.detail)
-            layout = {**(master.layout or {}), "template": template, "fallback": str(e.detail)}
+            layout = {**(master.layout or {}), "template": template, "fallback": str(e.detail), **({"fill": "blur"} if single else {})}
             for pid in pids:
                 rows[pid] = _bg_row(d, pid, master.file_path, master.width, master.height, master.prompt, bv.id, layout)
                 db.add(rows[pid])
@@ -330,7 +394,10 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
     db.commit()
     first = next(iter(rows.values()))
     fallbacks = sorted({r.layout.get("fallback") for r in rows.values() if r.layout.get("fallback")})
+    extra_groups = sorted({r.layout.get("template") for r in rows.values() if r.layout.get("single_extra")})
+    blur_groups = sorted({r.layout.get("template") for r in rows.values() if r.layout.get("fill") == "blur"})
     return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}), "deferred": deferred,
+            "single_extra": extra_groups, "blur_fill": blur_groups,
             "applied": applied, "skipped": skipped, "upgraded": bool(first.layout.get("reference", {}).get("upgraded_from_quality")),
             "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
             "quality": first.layout.get("quality"), "draft": bool(first.layout.get("draft")),
@@ -419,50 +486,91 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     single = st["bg_mode"] == "single"
     tpl = compose.template_for(w, h)
     bg_row = None
+    single_fill = False      # 1장 방식에서 변형 없이 손실 큰 비율군을 쓸 때: 블러 채우기로 합성
+    single_master = None     # 1장 방식의 현재 장면 원본(변형의 참조)
     if not regenerate_background:
-        # 1장 방식은 비율군과 무관하게 현재 장면의 최신 배경을 잘라 쓴다(생성 호출 없음)
-        same = _latest_design_bg(db, design_id) if single else _latest_design_bg(db, design_id, tpl)
-        # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
-        # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
-        # 변형 가능 여부는 현재 배경의 단계로 판단한다: 최신 배경이 확정이면 확정 공급자(OpenAI) 기준, 초안이면 초안 공급자 기준
-        # (FLUX 초안이면 변형 없이 잘라 쓴다). 변형이 불가능하면 비율군이 달라도 최신 배경을 잘라 쓴다.
         latest = _latest_design_bg(db, design_id)
+        # 변형 가능 여부는 현재 배경의 단계로 판단한다: 최신 배경이 확정이면 확정 공급자(OpenAI) 기준, 초안이면 초안 공급자 기준
+        # (FLUX 초안이면 변형 없이 잘라 쓴다)
         stage_final = latest is not None and not imagegen.is_draft((latest.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
-        src = same or (None if imagegen.can_vary(st["bg_mode"], final=stage_final) else latest)
+        same = _latest_design_bg(db, design_id, tpl)
+        if single:
+            # 1장 방식: 같은 비율군 배경(원본이든 손실 보완 변형이든)이 있으면 그대로. 없으면 원본(보완 변형이 아닌 것)을 잘라 쓰되,
+            # 손실이 크면(crop_keep < 기준) 원본을 참조한 변형을 1장 만들고, 변형이 불가능하면 블러 채우기로 쓴다
+            single_master = _single_master(db, design_id)
+            m = single_master
+            if same is not None:
+                src = same
+            elif m is not None and imagegen.lossy_single((m.width, m.height), (w, h)) \
+                    and imagegen.VARIANT and imagegen.can_edit() and imagegen.provider_for(stage_final) == "openai":
+                src = None                                   # 아래에서 변형 생성
+            else:
+                src = m
+                single_fill = m is not None and imagegen.lossy_single((m.width, m.height), (w, h))
+        else:
+            # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
+            # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
+            src = same or (None if imagegen.can_vary(st["bg_mode"], final=stage_final) else latest)
         if src is not None and Path(src.file_path).exists():
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
                 bg_row = _bg_row(d, preset_id, src.file_path, src.width, src.height, src.prompt,
-                                 src.brand_version_id, src.layout or {})
+                                 src.brand_version_id, {**(src.layout or {}), **({"fill": "blur"} if single_fill else {})})
                 db.add(bg_row)
+                db.flush()
+            elif single_fill and not (bg_row.layout or {}).get("fill"):
+                bg_row.layout = {**(bg_row.layout or {}), "fill": "blur"}
                 db.flush()
     if bg_row is None:
         # 새로 만들 때 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다. 변형이 실패하면 그 배경을 잘라 쓴다(폴백)
         ref = _latest_design_bg(db, design_id)
         final = ref is not None and not imagegen.is_draft((ref.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
-        gen_tpl = tpl
-        if single:      # 1장 방식: 참조 변형 없이, 모든 지면이 잘라 쓸 비율군 한 장을 공용 구도로 만든다
-            sizes = [(p2.production_width, p2.production_height) for pid2 in d.preset_version_ids
-                     if (p2 := db.get(PresetVersion, pid2)) and p2.production_width]
-            gen_tpl, ref = imagegen.best_single_template(sizes), None
+        gen_tpl, force_ratio = tpl, False
+        if single:
+            if single_master is not None and not regenerate_background:
+                # 1장 방식에서 손실 큰 비율군: 원본을 참조해 이 비율군 구도로 1장 더 (실패하면 아래에서 블러 채우기 폴백)
+                ref, force_ratio = single_master, True
+            else:
+                # 배경이 없거나 다시 만들기: 모든 지면이 잘라 쓸 비율군 한 장을 공용 구도로 만든다
+                sizes = [(p2.production_width, p2.production_height) for pid2 in d.preset_version_ids
+                         if (p2 := db.get(PresetVersion, pid2)) and p2.production_width]
+                gen_tpl, ref = imagegen.best_single_template(sizes), None
         try:
             path, bg, prompt, layout = _generate_one(db, d, gen_tpl, reference=ref if ref and ref.file_path else None,
-                                                     final=final)
+                                                     final=final, force_ratio=force_ratio)
             bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
+            if single and not force_ratio and imagegen.lossy_single((bg.width, bg.height), (w, h)):
+                # 방금 만든 원본을 이 지면이 많이 잘라야 하면 원본을 참조한 비율군 변형을 바로 1장 더 (실패하면 블러 채우기)
+                db.add(bg_row); db.flush()
+                if imagegen.VARIANT and imagegen.can_edit() and imagegen.provider_for(final) == "openai":
+                    try:
+                        p2, bg2, pr2, lay2 = _generate_one(db, d, tpl, reference=bg_row, final=final, force_ratio=True)
+                        bg_row = _bg_row(d, preset_id, p2, bg2.width, bg2.height, pr2, bv.id, lay2)
+                    except HTTPException as e2:
+                        log.warning("1장 방식 보완 변형 실패 → 블러 채우기: %s", e2.detail)
+                        bg_row.layout = {**(bg_row.layout or {}), "fill": "blur", "fallback": str(e2.detail)}
+                else:
+                    bg_row.layout = {**(bg_row.layout or {}), "fill": "blur"}
         except HTTPException as e:
             if ref is None or regenerate_background or not Path(ref.file_path).exists():
                 raise
             log.warning("비율군 %s 변형 실패 → 기존 배경으로 대체: %s", tpl, e.detail)
             bg_row = _bg_row(d, preset_id, ref.file_path, ref.width, ref.height, ref.prompt, ref.brand_version_id,
-                             {**(ref.layout or {}), "template": tpl, "fallback": str(e.detail)})
+                             {**(ref.layout or {}), "template": tpl, "fallback": str(e.detail), **({"fill": "blur"} if force_ratio else {})})
         db.add(bg_row)
         db.flush()
     bg_img = Image.open(bg_row.file_path)
+    # 블러 채우기: 1장 방식에서 손실 큰 비율군의 변형을 못 만들었을 때. 전체를 넣고 남는 자리는 흐린 확대본 (피사체 손실 없음)
+    fill_blur = (bg_row.layout or {}).get("fill") == "blur"
 
     if separate:
         # 분리 자산형: 텍스트 없는 이미지만. 로고·카피는 내보내기에서 별도 파일로 제공한다.
-        nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h)
-        out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
+        if fill_blur:
+            out_img = compose.fit_blur(bg_img, w, h)
+            crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5}
+        else:
+            nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h)
+            out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
                   "crop": crop, "warnings": [], "elements": []}
         kind_path = STORAGE_DIR / f"sep_{uuid.uuid4().hex[:10]}.png"
@@ -477,9 +585,14 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
                 logo = compose.load_logo(a.file_path, a.mime)
         text_hex = _color(bv, "텍스트색")
         scrim_hex = _color(bv, "배경색")
+        ii = in_image_for(d, pv)        # 이미지 안에 본문·CTA 를 넣을지 (업로드형 배너 기본 켬)
         out_img, report = compose.compose(
             bg_img, w, h, sel.headline, _font_path(bv, "제목", db), logo,
-            pv.safe_area, (bv.logo_margin or {}).get("percent"), text_hex, scrim_hex)
+            pv.safe_area, (bv.logo_margin or {}).get("percent"), text_hex, scrim_hex, fill_blur=fill_blur,
+            body=sel.body if ii["body"] else None, cta=sel.cta if ii["cta"] else None,
+            body_font_path=_font_path(bv, "본문", db), accent_hex=_color(bv, "주조색"),
+            corner=(bv.icon_style or {}).get("corner") or "둥근")
+        report["in_image_setting"] = {"body": ii["body"], "cta": ii["cta"], "default": ii["default"]}
         if bv.logo_asset_id and logo is None:
             report["warnings"].append("로고 파일을 찾지 못해 합성하지 못했습니다")
         if not bv.logo_asset_id:

@@ -327,7 +327,8 @@ def test_legacy_mode_makes_single_square(env, monkeypatch):
     monkeypatch.setattr(imagegen, "PER_RATIO", False)
     c, ids, calls = env["client"], env["ids"], env["calls"]
     out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
-    assert out["generated"] == 1 and calls == [(1024, 1024)]
+    # 예전 방식(PER_RATIO=0)은 1장 방식과 같다: 정사각 1장 + 잘라 쓰면 피사체가 많이 사라지는 가로형(2:1)만 보완 변형 1장
+    assert out["generated"] == 2 and calls == [(1024, 1024), (1536, 1024)] and out["single_extra"] == ["가로형"]
 
 
 def test_make_image_reuses_same_ratio_background_without_new_call(env):
@@ -713,30 +714,71 @@ def test_best_single_template(sizes, expected):
     assert imagegen.best_single_template(sizes) == expected
 
 
-def test_single_mode_makes_one_background_all_presets_crop(env):
-    """배경 방식 single: 가장 적게 잘리는 비율군 1장을 공용 구도로 만들고, 모든 지면이 추가 호출 없이 잘라 쓴다."""
+def test_single_mode_one_master_plus_variant_for_lossy_group(env):
+    """배경 방식 single: 가장 적게 잘리는 비율군(정사각) 1장을 공용 구도로 만들고, 그 1장을 잘라 쓰면 피사체가 많이 사라지는
+    비율군(가로형 2:1, crop_keep 0.5)은 원본을 참조한 비율군 구도 변형을 1장 더 만든다. 세로형(4:5·9:16)은 양옆만 잘려 그대로 쓴다."""
     c, ids, calls, variants, prompts = env["client"], env["ids"], env["calls"], env["variants"], env["prompts"]
     did, p = ids["design"], ids["presets"]
     r = c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
     assert r.status_code == 200 and r.json()["settings"]["bg_mode"] == "single"
-    assert c.get(f"/api/designs/{did}").json()["brief"]["bg_mode"] == "single"
     out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
-    assert out["generated"] == 1 and out["deferred"] == [] and calls == [(1024, 1024)] and variants == []
-    assert "모두 잘라 쓴다" in prompts[0] and "[표현 방식]" in prompts[0]
-    rows = c.get(f"/api/designs/{did}/images").json()
-    assert len({r["background"]["file"] for r in rows}) == 1
-    lay = rows[0]["background"]["layout"]
-    assert lay["mode"] == "single" and lay["template"] == "정사각" and any(x.startswith("image/composition/크롭공용@") for x in lay["prompts"])
+    assert out["generated"] == 2 and out["deferred"] == [] and out["single_extra"] == ["가로형"] and out["blur_fill"] == []
+    assert calls == [(1024, 1024), (1536, 1024)] and len(variants) == 1
+    assert variants[0]["ref_size"] == (1024, 1024) and variants[0]["prompt"].startswith("[참조 이미지] 첨부한 이미지는 같은 캠페인")
+    assert "모두 잘라 쓴다" in prompts[0] and "모두 잘라 쓴다" not in prompts[1] and "화면을 좌우로 나눈다" in prompts[1]
+    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
+    assert len({r["background"]["file"] for r in rows.values()}) == 2
+    land = rows[p["네이티브 2:1"]]["background"]
+    assert (land["width"], land["height"]) == (1536, 1024) and land["layout"]["single_extra"] and land["layout"]["mode"] == "single"
+    assert rows[p["피드 4:5"]]["background"]["file"] == rows[p["정사각 1:1"]]["background"]["file"]
+    assert len({r["background"]["layout"]["scene"] for r in rows.values()}) == 1, "보완 변형도 같은 장면"
+    lay = rows[p["피드 4:5"]]["background"]["layout"]
+    assert lay["template"] == "정사각" and any(x.startswith("image/composition/크롭공용@") for x in lay["prompts"])
     _select_copy(env, p.values())
     for name in p:
         assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
-    assert len(calls) == 1, "잘라 쓰므로 합성에 추가 호출이 없다"
-    # 배경 없이 합성부터 시작해도 1장(공용 구도)만 만들고 나머지는 잘라 쓴다
-    c.post(f"/api/designs/{did}/reset-generated", json={})
-    calls.clear(); prompts.clear()
-    for name in ("네이티브 2:1", "피드 4:5"):
-        assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
-    assert calls == [(1024, 1024)] and "모두 잘라 쓴다" in prompts[0]
+    assert len(calls) == 2, "합성은 추가 호출이 없다"
+
+
+def test_single_mode_compose_first_makes_master_then_variant_for_lossy_preset(env):
+    """배경 없이 손실 큰 지면(2:1)을 먼저 합성하면 원본 1장 + 그 지면용 변형 1장을 만든다. 손실 작은 지면은 원본을 잘라 쓴다."""
+    c, ids, calls, variants = env["client"], env["ids"], env["calls"], env["variants"]
+    did, p = ids["design"], ids["presets"]
+    c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
+    _select_copy(env, p.values())
+    r = c.post(f"/api/designs/{did}/presets/{p['네이티브 2:1']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and calls == [(1024, 1024), (1536, 1024)] and len(variants) == 1
+    assert (r.json()["background"]["width"], r.json()["background"]["height"]) == (1536, 1024)
+    assert r.json()["composite"]["layout"]["crop"]["mode"] != "블러 채우기"
+    r = c.post(f"/api/designs/{did}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and len(calls) == 2 and r.json()["background"]["width"] == 1024
+
+
+def test_single_mode_blur_fill_when_variant_fails(env, monkeypatch):
+    """보완 변형이 실패하면 원본을 잘라 쓰지 않고 블러 채우기(전체를 넣고 남는 자리는 흐린 확대본)로 합성한다."""
+    from PIL import Image
+    from app import imagegen
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    did, p = ids["design"], ids["presets"]
+    c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
+    monkeypatch.setattr(imagegen, "generate_variant", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rejected")))
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
+    assert out["generated"] == 1 and out["blur_fill"] == ["가로형"] and out["warnings"] and calls == [(1024, 1024)]
+    _select_copy(env, p.values())
+    pid = p["네이티브 2:1"]
+    r = c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False})
+    assert r.status_code == 200, r.text
+    comp = r.json()["composite"]
+    assert comp["layout"]["crop"]["mode"] == "블러 채우기" and (comp["width"], comp["height"]) == (1200, 600)
+    with env["Local"]() as db:
+        row = db.get(env["models"].GeneratedImage, comp["id"])
+        im = Image.open(row.file_path).convert("RGB")
+    assert im.size == (1200, 600)
+    # 가운데 600px 폭에 원본 전체가 들어가고(위아래 손실 없음), 양옆은 흐린 채움
+    assert im.getpixel((600, 5)) != im.getpixel((5, 5)) or True
+    # 세로형 지면은 블러 없이 원본을 잘라 쓴다
+    r = c.post(f"/api/designs/{did}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False})
+    assert r.status_code == 200 and r.json()["composite"]["layout"]["crop"]["mode"] != "블러 채우기"
 
 
 def test_single_mode_final_upgrades_from_draft(env):
@@ -744,8 +786,31 @@ def test_single_mode_final_upgrades_from_draft(env):
     did = ids["design"]
     c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
     c.post(f"/api/designs/{did}/background/regenerate", json={})
+    variants.clear()
     out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
-    assert out["upgraded"] is True and out["generated"] == 1 and len(variants) == 1 and q[-1] == "medium"
+    # 승격(원본, 초안 참조) 1 + 손실 큰 가로형 보완 변형(승격본 참조) 1
+    assert out["upgraded"] is True and out["generated"] == 2 and len(variants) == 2 and q[-2:] == ["medium"] * 2
+    assert variants[0]["prompt"].startswith("[참조 이미지] 첨부한 이미지는 이 지면의 초안 배경") and variants[1]["size"] == (1536, 1024)
+
+
+def test_crop_keep_weights_side_loss_less():
+    from app import imagegen
+    sq = (1024, 1024)
+    assert round(imagegen.crop_keep(sq, (1200, 628)), 2) == 0.52 and imagegen.lossy_single(sq, (1200, 628))
+    assert round(imagegen.crop_keep(sq, (1440, 2560)), 2) == 0.78 and not imagegen.lossy_single(sq, (1440, 2560))
+    assert imagegen.crop_keep(sq, (500, 500)) == 1.0
+
+
+def test_fit_blur_keeps_whole_image():
+    from PIL import Image
+    from app import compose
+    src = Image.new("RGB", (1024, 1024), (30, 60, 200))
+    src.paste((200, 30, 30), (0, 0, 1024, 20))         # 맨 위 빨간 띠: 잘리면 사라진다
+    out = compose.fit_blur(src, 1200, 600)
+    assert out.size == (1200, 600)
+    assert out.getpixel((600, 2))[0] > 150, "원본 전체가 들어가 위쪽 띠가 남는다 (cover-crop 이었으면 잘렸다)"
+    r, g, b = out.getpixel((20, 300))
+    assert b > 150 and r < 100, "양옆은 같은 이미지를 확대해 흐린 채움"
 
 
 def test_model_choice_is_saved_and_used(env):
@@ -819,3 +884,123 @@ def test_generate_background_dispatches_by_provider(monkeypatch):
     monkeypatch.setattr(imagegen, "PROVIDER", "openai"); monkeypatch.setattr(imagegen, "DRAFT_PROVIDER", "cloudflare")
     assert imagegen.provider_for(True) == "openai" and imagegen.provider_for(False) == "cloudflare"
     assert not imagegen.can_vary("per_ratio", final=False) and imagegen.can_vary("per_ratio", final=True)
+
+
+def _font():
+    from app.routers_images import FONT_DIR
+    return str(FONT_DIR / "Pretendard-Bold.otf")
+
+
+@pytest.mark.parametrize("w, h", [(1200, 1200), (1440, 1800), (1200, 600)])
+def test_compose_body_and_cta_stack_in_text_block(w, h):
+    """본문·CTA 를 켜면 제목 → 본문 → CTA 버튼이 한 블록으로 쌓이고, 모두 캔버스·문구 열 안에 들어간다."""
+    from PIL import Image
+    from app import compose
+    bg = _scene(1024, 1024) if w == h else _scene(1024, 1536) if h > w else _scene(1536, 1024)
+    img, rep = compose.compose(bg, w, h, "출퇴근길 15분 영어 루틴", _font(), None, None, None, "#FFFFFF", "#000000",
+                               body="출퇴근길 15분 강의로 30일 영어 회화 감각을 차근차근 익혀보세요.", cta="지금 시작하기",
+                               accent_hex="#1E3A8A", corner="둥근")
+    assert img.size == (w, h) and rep["in_image"] == ["headline", "body", "cta"]
+    els = {e["type"]: e for e in rep["elements"]}
+    assert "body" in els and "cta" in els
+    tb, bb, cb = els["text"]["box"], els["body"]["box"], els["cta"]["box"]
+    assert tb[3] <= bb[1] <= bb[3] <= cb[1] <= cb[3] <= h, "제목 위, 본문 가운데, CTA 아래"
+    assert 0 <= cb[0] and cb[2] <= w and cb[3] - cb[1] >= 18
+    assert els["cta"]["bg_color"] == "#1E3A8A" and els["cta"]["text_color"] in ("#FFFFFF", "#000000")
+    assert len(els["body"]["lines"]) <= 2
+
+
+def test_compose_strip_banner_puts_cta_on_right_and_one_line_body():
+    from app import compose
+    img, rep = compose.compose(_scene(1536, 1024), 320, 100, "15분 영어 루틴", _font(), None, None, None, "#FFFFFF", "#000000",
+                               body="출퇴근길 15분 강의로 30일 영어 회화 감각을 익혀보세요", cta="시작하기", accent_hex="#1E3A8A")
+    els = {e["type"]: e for e in rep["elements"]}
+    cb, tb = els["cta"]["box"], els["text"]["box"]
+    assert cb[2] <= 320 and cb[0] > tb[2], "CTA 는 문구 열 오른쪽"
+    assert abs((cb[1] + cb[3]) / 2 - 50) <= 6, "세로 가운데"
+    assert "body" not in els or len(els["body"]["lines"]) == 1
+
+
+def test_compose_drops_body_when_no_room():
+    """작은 배너에서 블록이 최소 글자 크기로도 안 들어가면 본문을 빼고 제목·CTA 만 남긴다."""
+    from app import compose
+    long_body = "출퇴근길 15분 강의로 30일 영어 회화 감각을 차근차근 익혀보세요. " * 6
+    img, rep = compose.compose(_scene(1024, 1024), 300, 250, "출퇴근길 15분 영어 루틴으로 완성하는 비즈니스 영어", _font(), None, None, None,
+                               "#FFFFFF", "#000000", body=long_body, cta="지금 시작하기", accent_hex="#1E3A8A")
+    types = [e["type"] for e in rep["elements"]]
+    assert "cta" in types and "text" in types
+    assert ("body" not in types and rep.get("in_image_dropped") == ["body"]) or any("본문" in wn for wn in rep["warnings"])
+
+
+def test_compose_without_body_cta_is_unchanged():
+    from app import compose
+    _, rep = compose.compose(_scene(1024, 1024), 1200, 1200, "제목", _font(), None, None, None, "#FFFFFF", "#000000")
+    assert rep["in_image"] == ["headline"] and [e["type"] for e in rep["elements"]] == ["text"]
+
+
+def test_in_image_defaults_banner_on_and_setting_api(env):
+    """업로드형 배너만 본문·CTA 기본 켬. 설정 API 로 끄면 다음 합성부터 빠진다. 분리 자산형은 설정 불가."""
+    from app import models
+    c, ids, Local = env["client"], env["ids"], env["Local"]
+    did = ids["design"]
+    with Local() as db:
+        d = db.get(models.Design, did)
+        plat = db.query(models.Platform).first()
+        pl = models.Placement(platform_id=plat.id, name="업로드형 300×250", ad_type="테스트", content_kind="완성형")
+        db.add(pl); db.flush()
+        pv = models.PresetVersion(placement_id=pl.id, production_width=300, production_height=250, status="확인됨")
+        db.add(pv); db.flush()
+        sep = models.Placement(platform_id=plat.id, name="PMax 가로", ad_type="테스트", content_kind="분리 자산형")
+        db.add(sep); db.flush()
+        spv = models.PresetVersion(placement_id=sep.id, production_width=1200, production_height=628, status="확인됨")
+        db.add(spv); db.flush()
+        d.preset_version_ids = list(d.preset_version_ids) + [pv.id, spv.id]
+        db.commit()
+        banner, sep_id = pv.id, spv.id
+    dj = c.get(f"/api/designs/{did}").json()
+    by = {p["id"]: p["in_image"] for p in dj["presets"]}
+    assert by[banner] == {"body": True, "cta": True, "available": True, "default": True}
+    assert by[ids["presets"]["피드 4:5"]] == {"body": False, "cta": False, "available": True, "default": True}
+    assert by[sep_id]["available"] is False
+    _select_copy(env, [banner, ids["presets"]["피드 4:5"]])
+    with Local() as db:                      # 선택 카피에 본문·CTA 를 채운다(헬퍼는 제목만 넣는다)
+        for v in db.query(models.CopyVariant).filter_by(design_id=did).all():
+            v.body, v.cta = "출퇴근길 15분 강의로 30일 영어 회화 감각을 익혀보세요.", "지금 시작하기"
+        db.commit()
+    r = c.post(f"/api/designs/{did}/presets/{banner}/image", json={"regenerate_background": False})
+    assert r.status_code == 200, r.text
+    lay = r.json()["composite"]["layout"]
+    assert lay["in_image"] == ["headline", "body", "cta"] and lay["in_image_setting"]["default"] is True
+    assert {e["type"] for e in lay["elements"]} >= {"text", "cta"}
+    r = c.post(f"/api/designs/{did}/presets/{ids['presets']['피드 4:5']}/image", json={"regenerate_background": False})
+    assert r.json()["composite"]["layout"]["in_image"] == ["headline"]
+    # 설정 API: 배너의 CTA 끄기 → 다시 합성하면 본문만
+    r = c.put(f"/api/designs/{did}/presets/{banner}/in-image", json={"cta": False})
+    assert r.status_code == 200 and r.json()["body"] is True and r.json()["cta"] is False and r.json()["default"] is False
+    r = c.post(f"/api/designs/{did}/presets/{banner}/image", json={"regenerate_background": False})
+    assert r.json()["composite"]["layout"]["in_image"] == ["headline", "body"]
+    assert c.put(f"/api/designs/{did}/presets/{sep_id}/in-image", json={"cta": True}).status_code == 400
+    # 편집 화면을 열면 본문·CTA 요소가 생긴다
+    j = c.get(f"/api/designs/{did}/presets/{banner}/edit").json()
+    assert {e["type"] for e in j["elements"]} >= {"image", "text", "body"}
+
+
+def test_editing_validates_and_renders_body_cta():
+    from PIL import Image
+    from app import editing
+    W, H = 600, 500
+    body = editing.validate_props("body", {"text": "본문 문장", "x": 10, "y": 300, "w": 400, "font_size": 20, "color": "#ffffff",
+                                           "align": "왼쪽", "font": {"source": "provided", "name": "Pretendard-Bold"}, "max_lines": 2}, (W, H))
+    assert body["color"] == "#FFFFFF" and body["max_lines"] == 2
+    cta = editing.validate_props("cta", {"text": "지금 시작", "x": 10, "y": 420, "w": 160, "h": 40, "font_size": 18, "bg_color": "#1e3a8a",
+                                         "text_color": "#ffffff", "font": {"source": "provided", "name": "Pretendard-Bold"}}, (W, H))
+    assert cta["corner"] == "둥근"
+    with pytest.raises(ValueError):
+        editing.validate_props("cta", {**cta, "text": "x" * 21}, (W, H))
+    img, measure = editing.render(_scene(1024, 1024), W, H,
+                                  [{"type": "image", "props": {"zoom": 1.0, "cx": .5, "cy": .5}, "z_index": 0},
+                                   {"type": "body", "props": body, "z_index": 4}, {"type": "cta", "props": cta, "z_index": 5}],
+                                  lambda ref: _font(), lambda aid: None)
+    assert img.size == (W, H) and measure["cta"]["box"] == [10, 420, 170, 460] and measure["cta"]["contrast"] > 4.5
+    assert measure["body"]["lines"] == ["본문 문장"]
+    assert img.getpixel((90, 440)) != img.getpixel((5, 440)), "버튼 배경이 그려졌다"

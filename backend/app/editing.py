@@ -7,8 +7,9 @@ ALIGNS = ("왼쪽", "가운데", "오른쪽")
 LINE_H = 1.28
 
 
-def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None) -> list[dict]:
-    """6-3 합성 결과(layout)를 편집 가능한 요소 목록으로 바꾼다. 로고는 기본 잠금."""
+def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None, body_font_ref: dict | None = None) -> list[dict]:
+    """6-3 합성 결과(layout)를 편집 가능한 요소 목록으로 바꾼다. 로고는 기본 잠금.
+    본문(body)·CTA(cta)는 합성 때 지면 설정으로 넣은 경우에만 요소로 나온다."""
     crop = layout.get("crop") or {}     # 6-3 합성이 내용 상자 기준으로 자른 초점을 그대로 이어받는다
     els: list[dict] = [{"type": "image", "role": "배경", "locked": False, "z_index": 0,
                         "props": {"zoom": float(crop.get("zoom", 1.0)), "cx": float(crop.get("cx", 0.5)),
@@ -26,6 +27,18 @@ def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None) ->
             els.append({"type": "text", "role": "제목", "locked": False, "z_index": 3,
                         "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "font_size": e["font_size"],
                                   "color": e["color"], "align": "왼쪽", "font": font_ref, "text_override": False}})
+        elif e["type"] == "body":
+            x0, y0, x1, _ = e["box"]
+            els.append({"type": "body", "role": "본문", "locked": False, "z_index": 4,
+                        "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "font_size": e["font_size"],
+                                  "color": e["color"], "align": "왼쪽", "font": body_font_ref or font_ref,
+                                  "max_lines": max(1, len(e.get("lines") or [1])), "text_override": False}})
+        elif e["type"] == "cta":
+            x0, y0, x1, y1 = e["box"]
+            els.append({"type": "cta", "role": "CTA", "locked": False, "z_index": 5,
+                        "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0, "font_size": e["font_size"],
+                                  "bg_color": e["bg_color"], "text_color": e["text_color"], "font": font_ref,
+                                  "corner": e.get("corner", "둥근"), "text_override": False}})
     return els
 
 
@@ -74,6 +87,42 @@ def validate_props(el_type: str, p: dict, canvas: tuple[int, int]) -> dict:
                 "w": num("w", 20, 2 * W, int), "font_size": num("font_size", 8, 400, int),
                 "color": p["color"].upper(), "align": p["align"], "font": font,
                 "text_override": bool(p.get("text_override", False))}
+    if el_type == "body":
+        if not _hexok(p.get("color")):
+            raise ValueError("color 는 #RRGGBB 형식이어야 합니다")
+        text = str(p.get("text", "")).strip()
+        if not text:
+            raise ValueError("본문이 비어 있습니다")
+        if len(text) > 600:
+            raise ValueError("본문은 600자 이하여야 합니다")
+        if p.get("align") not in ALIGNS:
+            raise ValueError(f"align 은 {ALIGNS} 중 하나")
+        font = p.get("font") or {}
+        if font.get("source") not in ("provided", "upload"):
+            raise ValueError("font 가 올바르지 않습니다")
+        return {"text": text, "x": num("x", -W, 2 * W, int), "y": num("y", -H, 2 * H, int),
+                "w": num("w", 20, 2 * W, int), "font_size": num("font_size", 8, 400, int),
+                "color": p["color"].upper(), "align": p["align"], "font": font,
+                "max_lines": num("max_lines", 1, 6, int) if "max_lines" in p else 2,
+                "text_override": bool(p.get("text_override", False))}
+    if el_type == "cta":
+        for k in ("bg_color", "text_color"):
+            if not _hexok(p.get(k)):
+                raise ValueError(f"{k} 는 #RRGGBB 형식이어야 합니다")
+        text = str(p.get("text", "")).strip()
+        if not text:
+            raise ValueError("CTA 문구가 비어 있습니다")
+        if len(text) > 20:
+            raise ValueError("CTA 문구는 20자 이하여야 합니다")
+        font = p.get("font") or {}
+        if font.get("source") not in ("provided", "upload"):
+            raise ValueError("font 가 올바르지 않습니다")
+        if p.get("corner", "둥근") not in ("둥근", "각진"):
+            raise ValueError("corner 는 둥근 | 각진")
+        return {"text": text, "x": num("x", -W, 2 * W, int), "y": num("y", -H, 2 * H, int),
+                "w": num("w", 16, 2 * W, int), "h": num("h", 12, H, int), "font_size": num("font_size", 8, 200, int),
+                "bg_color": p["bg_color"].upper(), "text_color": p["text_color"].upper(), "font": font,
+                "corner": p.get("corner", "둥근"), "text_override": bool(p.get("text_override", False))}
     raise ValueError("알 수 없는 요소 종류")
 
 
@@ -134,6 +183,33 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
             over = any(draw.textlength(ln, font=font) > int(p["w"]) for ln in lines)
             measure["text"] = {"lines": lines, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
                                                        int(p["y"]) + lh * len(lines)], "overflow_width": over}
+        elif e["type"] == "body":
+            draw = ImageDraw.Draw(canvas)
+            font = ImageFont.truetype(font_path_of(p["font"]), int(p["font_size"]))
+            lines = compose._wrap(draw, p["text"], font, int(p["w"]))
+            cut = len(lines) > int(p.get("max_lines", 2))
+            if cut:
+                lines = lines[:int(p.get("max_lines", 2))]
+                last = lines[-1]
+                while last and draw.textlength(last + "…", font=font) > int(p["w"]):
+                    last = last[:-1]
+                lines[-1] = last + "…"
+            lh = round(int(p["font_size"]) * LINE_H)
+            color = compose._hex(p["color"])
+            for i, ln in enumerate(lines):
+                lw = draw.textlength(ln, font=font)
+                dx = 0 if p["align"] == "왼쪽" else (p["w"] - lw) / 2 if p["align"] == "가운데" else p["w"] - lw
+                draw.text((int(p["x"] + dx), int(p["y"]) + i * lh), ln, font=font, fill=color)
+            measure["body"] = {"lines": lines, "cut": cut, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
+                                                                  int(p["y"]) + lh * len(lines)]}
+        elif e["type"] == "cta":
+            box = [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]), int(p["y"] + p["h"])]
+            compose.draw_cta(canvas, box, p["text"], font_path_of(p["font"]), int(p["font_size"]),
+                             compose._hex(p["bg_color"]), compose._hex(p["text_color"]), p.get("corner", "둥근"))
+            draw = ImageDraw.Draw(canvas)
+            font = ImageFont.truetype(font_path_of(p["font"]), int(p["font_size"]))
+            measure["cta"] = {"box": box, "overflow_width": draw.textlength(p["text"], font=font) > int(p["w"]) - 8,
+                              "contrast": compose.contrast(compose._hex(p["bg_color"]), compose._hex(p["text_color"]))}
     return canvas, measure
 
 
@@ -153,6 +229,16 @@ def warnings_for(measure: dict, W: int, H: int, safe: dict | None, brand_hexes: 
             out.append("문구 한 줄이 상자 너비보다 깁니다")
     if "logo" in measure and measure["logo"].get("box"):
         box_warn("로고", measure["logo"]["box"])
+    if "body" in measure:
+        box_warn("본문", measure["body"]["box"])
+        if measure["body"].get("cut"):
+            out.append("본문이 줄 수 상한을 넘어 뒤를 줄였습니다")
+    if "cta" in measure:
+        box_warn("CTA 버튼", measure["cta"]["box"])
+        if measure["cta"].get("overflow_width"):
+            out.append("CTA 문구가 버튼보다 깁니다")
+        if measure["cta"].get("contrast", 21) < 4.5:
+            out.append("CTA 버튼의 글자·배경 대비가 낮습니다 (4.5:1 미만)")
     if text_color and brand_hexes and text_color.upper() not in brand_hexes:
         out.append("문구 색이 브랜드에 등록된 색이 아닙니다")
     if text and "text" in measure and text_color:

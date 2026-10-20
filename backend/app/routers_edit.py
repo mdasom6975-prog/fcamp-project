@@ -36,9 +36,9 @@ def _preset(db: Session, d: Design, pid: int) -> PresetVersion:
     return pv
 
 
-def _font_ref(bv: BrandVersion) -> dict:
+def _font_ref(bv: BrandVersion, role: str = "제목") -> dict:
     fonts = bv.fonts or []
-    f = next((x for x in fonts if x.get("role") == "제목"), None) or (fonts[0] if fonts else None)
+    f = next((x for x in fonts if x.get("role") == role), None) or (fonts[0] if fonts else None)
     if f and f.get("source") == "upload" and f.get("asset_id"):
         return {"source": "upload", "asset_id": f["asset_id"]}
     if f and f.get("source") == "provided" and f.get("name"):
@@ -91,7 +91,7 @@ def _bootstrap(db: Session, d: Design, pid: int, bv: BrandVersion) -> list[Eleme
     comp = _latest(db, d.id, pid, "composite", original_only=True)
     if not comp or (comp.layout or {}).get("separate_assets"):
         raise HTTPException(400, "먼저 이미지를 생성해 주세요 (카피 선택 후 이미지 생성)")
-    for e in editing.default_elements(comp.layout, _font_ref(bv), bv.logo_asset_id):
+    for e in editing.default_elements(comp.layout, _font_ref(bv), bv.logo_asset_id, _font_ref(bv, "본문")):
         props = dict(e["props"])
         props["_role"] = e["role"]
         scope = "공통" if e["type"] == "text" else "지면별"

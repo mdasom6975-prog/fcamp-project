@@ -65,6 +65,24 @@ def retained_fraction(gen: tuple[int, int], target: tuple[int, int]) -> float:
     return (w / s) * (h / s) / (W * H)
 
 
+# 1장 방식에서 '잘라 써도 되는' 기준. 세로가 잘리면(정사각→가로형) 피사체 자체가 없어지므로 손실을 그대로 세고,
+# 가로가 잘리면(정사각→세로형) 중앙의 피사체는 남으므로 손실을 절반만 센다. 이 값보다 적게 남는 비율군은 1장을 참조한 변형을 1장 더 만든다.
+SINGLE_MIN_KEEP = float(os.getenv("IMAGE_SINGLE_MIN_KEEP", "0.6"))
+SIDE_LOSS_WEIGHT = 0.5
+
+
+def crop_keep(gen: tuple[int, int], target: tuple[int, int]) -> float:
+    """1장 방식의 체감 보존율(0~1). cover-crop 으로 남는 비율에 잘리는 축의 가중치를 적용한다."""
+    (W, H), (w, h) = gen, target
+    keep = retained_fraction(gen, target)
+    cuts_height = (w / h) > (W / H)       # 목표가 더 넓으면 위아래가 잘린다
+    return 1 - (1 - keep) * (1.0 if cuts_height else SIDE_LOSS_WEIGHT)
+
+
+def lossy_single(gen: tuple[int, int], target: tuple[int, int]) -> bool:
+    return crop_keep(gen, target) < SINGLE_MIN_KEEP
+
+
 def best_single_template(sizes: list[tuple[int, int]]) -> str:
     """1장 방식에서 쓸 생성 비율군: 모든 지면으로 잘랐을 때 '가장 많이 잘리는 지면'의 손실이 가장 작은 것.
     같으면 정사각(비용이 2/3)을 고른다. 세로형만 있으면 세로형, 가로형만이면 가로형, 섞이면 보통 정사각이 된다."""
@@ -257,13 +275,13 @@ def model_options() -> list[dict]:
 
 
 def generate_transparent(prompt: str, model: str | None = None, quality: str | None = None,
-                         kind: str = "icon") -> Image.Image:
+                         kind: str = "icon", size: str | None = None) -> Image.Image:
     """투명 배경(알파) PNG 1장 — 3D 아이콘용. 공급자는 OpenAI 고정(FLUX 는 투명 출력이 없다).
     일일 한도·크레딧 처리는 배경 생성과 같고, 카운터는 openai 로 기록한다."""
     if usage("openai")["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
                             "한도를 올리려면 IMAGE_DAILY_LIMIT 을 조정하세요")
-    data = _openai_png(prompt, model or OPENAI_MODEL, quality or OPENAI_QUALITY, kind=kind,
+    data = _openai_png(prompt, model or OPENAI_MODEL, quality or OPENAI_QUALITY, size=size or OPENAI_SIZE, kind=kind,
                        background="transparent", output_format="png")
     return Image.open(io.BytesIO(data)).convert("RGBA")
 

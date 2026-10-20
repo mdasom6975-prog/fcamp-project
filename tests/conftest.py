@@ -14,3 +14,6 @@ def _calllog_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(calllog, "LOG_FILE", tmp_path / "api_calls.jsonl")
     monkeypatch.setattr(imagegen, "CAPS_FILE", tmp_path / "model_caps.json")
     monkeypatch.setattr(imagegen, "_caps_cache", None)
+    # 아이콘 격자 렌더(기본 4x3)는 격자 테스트에서만 켠다. 나머지 테스트는 아이콘마다 1장 렌더를 가정한다
+    from app import icons
+    monkeypatch.setattr(icons, "GRID_CELLS", 0)

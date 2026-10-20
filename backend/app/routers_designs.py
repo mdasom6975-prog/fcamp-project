@@ -135,10 +135,16 @@ def _out(d: Design, db: Session) -> dict:
     for pid in d.preset_version_ids:
         v = db.get(PresetVersion, pid)
         if v:
+            from .routers_images import in_image_for
             presets.append({"id": v.id, "platform": v.placement.platform.name, "name": v.placement.name,
-                            "width": v.production_width, "height": v.production_height, "status": v.status})
+                            "width": v.production_width, "height": v.production_height, "status": v.status,
+                            "in_image": in_image_for(d, v)})
+    from .copyfields import asset_spec
+    pvs = [db.get(PresetVersion, pid) for pid in d.preset_version_ids]
     return {
         "id": d.id, "kind": d.kind, "status": d.status, "brief": d.brief, "presets": presets,
+        # 문구를 여러 개 요구하는 지면(PMax 등)의 필드 — 있으면 '추가 문구 자산 생성' 버튼을 보인다
+        "text_asset_fields": [a["field"] for a in asset_spec([v for v in pvs if v])],
         # 실제 적용되는 필수·금지 표현(캠페인 입력 우선, 비면 브랜드 규칙)과 출처
         "effective_phrases": phrases.effective(bv, d.brief) if bv else None,
         "brand": {"id": d.brand_id, "name": brand.name if brand else None,

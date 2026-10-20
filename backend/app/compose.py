@@ -10,11 +10,49 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 HORIZONTAL, SQUARE, VERTICAL = "가로형", "정사각", "세로형"
+STRIP_RATIO = 2.6      # 띠 배너(320×100 등): 가로형의 하위 배치 — 왼쪽 이미지, 가운데 문구, 오른쪽 CTA
+BODY_MAX_LINES = {VERTICAL: 2, SQUARE: 2, HORIZONTAL: 2}
+CTA_MAX_CHARS = 8
 
 
 def template_for(w: int, h: int) -> str:
     r = w / h
     return HORIZONTAL if r >= 1.25 else VERTICAL if r <= 0.8 else SQUARE
+
+
+def is_strip(w: int, h: int) -> bool:
+    return w / h >= STRIP_RATIO
+
+
+def pick_text_color(region, text_color_hex: str | None) -> tuple[tuple[int, int, int], bool]:
+    """브랜드 텍스트색이 배경과 대비 4.5:1 이상이면 그 색, 아니면 흰/검 중 더 대비가 큰 쪽. 반환: (색, 대체 여부)."""
+    if text_color_hex:
+        cand = _hex(text_color_hex)
+        if contrast(cand, region) >= 4.5:
+            return cand, False
+    white_better = contrast((255, 255, 255), region) >= contrast((0, 0, 0), region)
+    return ((255, 255, 255) if white_better else (0, 0, 0)), bool(text_color_hex)
+
+
+def cta_colors(accent_hex: str | None, fallback_text: tuple[int, int, int]) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """CTA 버튼 배경(브랜드 주조색, 없으면 문구색의 반전)과 글자색(흰/검 중 대비가 큰 쪽)."""
+    bg = _hex(accent_hex) if accent_hex else tuple(255 - c for c in fallback_text)
+    fg = (255, 255, 255) if contrast((255, 255, 255), bg) >= contrast((0, 0, 0), bg) else (0, 0, 0)
+    return bg, fg
+
+
+def draw_cta(canvas: Image.Image, box: list[int], text: str, font_path: str, size: int, bg, fg, corner: str) -> None:
+    """둥근 사각형 버튼 + 가운데 글자. corner 는 브랜드 아이콘 스타일(둥근/각진)."""
+    x0, y0, x1, y1 = box
+    h = y1 - y0
+    radius = h // 2 if corner != "각진" else max(2, round(h * 0.15))
+    ImageDraw.Draw(canvas).rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=bg)
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.truetype(font_path, size)
+    tw = draw.textlength(text, font=font)
+    bb = font.getbbox(text)
+    th = bb[3] - bb[1]
+    draw.text((x0 + (x1 - x0 - tw) / 2, y0 + (h - th) / 2 - bb[1]), text, font=font, fill=fg)
 
 
 def content_box(img: Image.Image) -> tuple[int, int, int, int] | None:
@@ -96,6 +134,19 @@ def cover_crop(img: Image.Image, w: int, h: int, focus: bool = True) -> Image.Im
     nw, nh, x, y, _ = crop_window(img, w, h, focus)
     img = img.resize((nw, nh), Image.LANCZOS)
     return img.crop((x, y, x + w, y + h))
+
+
+def fit_blur(img: Image.Image, w: int, h: int) -> Image.Image:
+    """잘라내지 않고 전체를 (w, h) 안에 맞춰 넣고, 남는 자리는 같은 이미지를 확대해 흐린 것으로 채운다.
+    1장 방식에서 손실이 큰 비율군의 변형 생성이 실패했을 때의 폴백 — 피사체는 하나도 잘리지 않는다."""
+    from PIL import ImageFilter
+    img = img.convert("RGB")
+    back = cover_crop(img, w, h, focus=False).filter(ImageFilter.GaussianBlur(radius=max(w, h) / 40))
+    s = min(w / img.width, h / img.height)
+    fw, fh = max(1, round(img.width * s)), max(1, round(img.height * s))
+    fg = img.resize((fw, fh), Image.LANCZOS)
+    back.paste(fg, ((w - fw) // 2, (h - fh) // 2))
+    return back
 
 
 def load_logo(path: str, mime: str) -> Image.Image:
@@ -225,12 +276,136 @@ def _logo_plate(canvas: Image.Image, logo: Image.Image, box: list[int]) -> Image
     return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
 
 
+def compose_strip(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
+                  safe: dict | None, text_color_hex: str | None, scrim_hex: str | None, body: str | None, cta: str | None,
+                  body_font_path: str, accent_hex: str | None, corner: str) -> tuple[Image.Image, dict]:
+    """띠 배너(가로세로 2.6 이상, 예: 320×100). 왼쪽 30% 는 피사체 중심으로 자른 이미지 조각, 오른쪽은 같은 이미지를 흐리고
+    어둡게 깐 바탕 위에 로고 · 제목(+본문 1줄) · CTA 버튼을 한 줄로 놓는다. 세로가 낮아 문구를 쌓지 않는다."""
+    bg = bg.convert("RGB")
+    L, T, R, B, safe_src = _margins(w, h, safe)
+    canvas = fit_blur(bg, w, h)
+    left_w = round(w * 0.3)
+    canvas.paste(cover_crop(bg, left_w, h), (0, 0))
+    scrim = _hex(scrim_hex or "#000000")
+    mask = Image.new("L", (w - left_w, h), round(255 * 0.55))
+    canvas.paste(Image.new("RGB", (w - left_w, h), scrim), (left_w, 0), mask)
+    report: dict = {"template": HORIZONTAL, "layout_variant": "띠형", "canvas": [w, h], "content_box": [L, T, w - R, h - B],
+                    "margin_source": safe_src, "warnings": [], "elements": [],
+                    "crop": {"mode": "띠형", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [0, 0, left_w, h]},
+                    "scrim": {"mode": "띠형", "color": (scrim_hex or "#000000").upper(), "opacity": 0.55}}
+    gap = round(h * 0.08)
+    x = left_w + gap
+    cy = h / 2
+    draw = ImageDraw.Draw(canvas)
+    right = w - R
+    # CTA: 오른쪽 끝. 폭은 캔버스의 30% 이내(글자 크기를 줄여 맞춘다)
+    cta_box = None
+    cta_h = max(18, min(64, round(h * 0.38)))        # 높이의 38%, 다만 큰 띠 배너에서도 64px 을 넘지 않게
+    cta_size = max(10, round(cta_h * 0.5))
+    if cta:
+        while True:
+            cf = ImageFont.truetype(font_path, cta_size)
+            cw = round(draw.textlength(cta, font=cf) + cta_h * 0.8)
+            if cw <= w * 0.3 or cta_size <= 10:
+                break
+            cta_size -= 1
+        cta_box = [right - cw, round(cy - cta_h / 2), right, round(cy + cta_h / 2)]
+        right = cta_box[0] - gap
+    # 로고: 문구 왼쪽, 높이의 36% 이내·폭 12% 이내. 넣고도 문구 폭이 캔버스의 40% 이상 남을 때만 넣는다(띠 배너는 폭이 생명)
+    if logo is not None:
+        lh = round(h * 0.36)
+        lw = max(1, round(logo.width * lh / logo.height))
+        if lw > w * 0.12:
+            lw = round(w * 0.12); lh = max(1, round(logo.height * lw / logo.width))
+        if right - (x + lw + gap) >= w * 0.28:
+            box = [x, round(cy - lh / 2), x + lw, round(cy + lh / 2)]
+            lg = logo.resize((lw, lh), Image.LANCZOS)
+            canvas.paste(lg, (box[0], box[1]), lg)
+            report["elements"].append({"type": "logo", "box": box, "locked": True, "note": "원본 비율 유지"})
+            x = box[2] + gap
+        else:
+            report["warnings"].append("띠 배너 폭이 좁아 로고를 뺐습니다 (편집에서 넣을 수 있습니다)")
+    avail_w = max(20, right - x)
+    # 제목: 한 줄 우선, 안 되면 두 줄. 글자 크기는 높이의 26% 부터 줄인다
+    size = max(12, min(56, round(h * 0.26)))        # 제목 시작 크기: 높이의 26%, 최대 56px
+    min_size = max(10, round(size * 0.5))
+    body_size = 0
+    body_lines: list[str] = []
+    while True:
+        font = ImageFont.truetype(font_path, size)
+        lines = _wrap(draw, headline, font, avail_w)
+        block_h = round(size * 1.28) * len(lines)
+        if body:
+            body_size = max(10, round(size * 0.6))
+            bf = ImageFont.truetype(body_font_path, body_size)
+            wrapped = _wrap(draw, body, bf, avail_w)
+            # 본문은 제목이 한 줄로 들어가고 본문도 한 줄에 다 들어갈 때만
+            if len(lines) == 1 and len(wrapped) == 1 and draw.textlength(wrapped[0], font=bf) <= avail_w:
+                body_lines = wrapped
+                block_h += round(h * 0.04) + round(body_size * 1.28)
+            else:
+                body_lines = []
+        fits = len(lines) <= 2 and block_h <= h - T - B and all(draw.textlength(ln, font=font) <= avail_w for ln in lines)
+        if fits or size <= min_size:
+            break
+        size -= 1
+    if body and not body_lines:
+        report["warnings"].append("띠 배너 폭이 좁아 본문을 이미지에서 뺐습니다 (제목·CTA 만 합성)")
+        body = None
+    if not fits:
+        report["warnings"].append("문구가 영역을 넘칠 수 있습니다 (최소 글자 크기에서도 맞지 않음)")
+    text_h = round(size * 1.28) * len(lines)
+    body_h = (round(h * 0.04) + round(body_size * 1.28)) if body else 0
+    ty = round(cy - (text_h + body_h) / 2)
+    region = canvas.crop((x, max(0, ty), max(x + 1, right), min(h, ty + text_h + body_h))).resize((1, 1), Image.BOX).getpixel((0, 0))
+    color, fallback = pick_text_color(region, text_color_hex)
+    if fallback:
+        report["warnings"].append("브랜드 텍스트색의 대비가 부족해 흰색/검정으로 대체했습니다")
+    for i, ln in enumerate(lines):
+        draw.text((x, ty + i * round(size * 1.28)), ln, font=font, fill=color)
+    text_box = [x, ty, right, ty + text_h]
+    report["elements"].append({"type": "text", "role": "제목", "text": headline, "lines": lines, "box": text_box,
+                               "font_size": size, "color": "#%02X%02X%02X" % color, "color_fallback": fallback, "fits": fits})
+    if body:
+        by = ty + text_h + round(h * 0.04)
+        bf = ImageFont.truetype(body_font_path, body_size)
+        draw.text((x, by), body_lines[0], font=bf, fill=color)
+        report["elements"].append({"type": "body", "role": "본문", "text": body, "lines": body_lines,
+                                   "box": [x, by, right, by + round(body_size * 1.28)], "font_size": body_size,
+                                   "color": "#%02X%02X%02X" % color, "cut": True})
+    if cta and cta_box:
+        cta_bg, cta_fg = cta_colors(accent_hex, color)
+        draw_cta(canvas, cta_box, cta, font_path, cta_size, cta_bg, cta_fg, corner)
+        report["elements"].append({"type": "cta", "role": "CTA", "text": cta, "box": cta_box, "font_size": cta_size,
+                                   "bg_color": "#%02X%02X%02X" % cta_bg, "text_color": "#%02X%02X%02X" % cta_fg, "corner": corner})
+    report["in_image"] = ["headline"] + (["body"] if body else []) + (["cta"] if cta else [])
+    return canvas, report
+
+
 def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
-            scrim_hex: str | None) -> tuple[Image.Image, dict]:
+            scrim_hex: str | None, fill_blur: bool = False, body: str | None = None, cta: str | None = None,
+            body_font_path: str | None = None, accent_hex: str | None = None, corner: str = "둥근") -> tuple[Image.Image, dict]:
+    """배경 위에 로고·제목(+선택: 본문·CTA 버튼)을 합성한다. 본문·CTA 는 지면 설정(in_image)이 켜진 경우에만 받는다.
+    문구 블록은 제목 → 본문 → CTA 순으로 아래에서 위로 쌓고, 자리가 모자라면 본문을 먼저 뺀다(제목·CTA 우선).
+    띠 배너(가로세로 2.6 이상)는 CTA 를 오른쪽에 두고 본문은 1줄만."""
     bg = bg.convert("RGB")
-    nw, nh, x, y, crop = crop_window(bg, w, h)
-    canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
+    body = (body or "").strip() or None
+    cta = (cta or "").strip() or None
+    body_font_path = body_font_path or font_path
+    if is_strip(w, h):
+        return compose_strip(bg, w, h, headline, font_path, logo, safe, text_color_hex, scrim_hex, body, cta,
+                             body_font_path, accent_hex, corner)
+    strip = False
+    if fill_blur:        # 블러 채우기: 자르지 않고 전체를 넣는다(1장 방식 폴백). 내용 상자는 전체로 본다
+        canvas = fit_blur(bg, w, h)
+        s = min(w / bg.width, h / bg.height)
+        fw, fh = round(bg.width * s), round(bg.height * s)
+        ox, oy = (w - fw) // 2, (h - fh) // 2
+        crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [ox, oy, ox + fw, oy + fh]}
+    else:
+        nw, nh, x, y, crop = crop_window(bg, w, h)
+        canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
     tpl = template_for(w, h)
     L, T, R, B, safe_src = _margins(w, h, safe)
     cl, ct, cr, cb = L, T, w - R, h - B          # 콘텐츠 영역
@@ -307,6 +482,19 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                 tx1 = sx0 - gap
             else:
                 report["warnings"].append("문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)")
+    # 띠 배너: CTA 는 문구 열 오른쪽에 세로 가운데, 문구 열은 그만큼 좁아진다
+    cta_h = 0
+    if cta:
+        cta_h = round(h * (0.26 if strip else 0.11 if tpl == HORIZONTAL else 0.065))
+        cta_h = max(cta_h, 18)
+    cta_box: list[int] | None = None
+    cta_font_size = max(10, round(cta_h * 0.5)) if cta else 0
+    if cta and strip:
+        probe = ImageDraw.Draw(canvas)
+        cf = ImageFont.truetype(font_path, cta_font_size)
+        cw = round(probe.textlength(cta, font=cf) + cta_h)
+        cta_box = [tx1 - cw, round((ct + cb) / 2 - cta_h / 2), tx1, round((ct + cb) / 2 + cta_h / 2)]
+        tx1 = cta_box[0] - gap
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
     # 3) 스크림(가독성 보조): 문구 쪽에서 투명해지는 그라디언트
@@ -314,40 +502,102 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     canvas = apply_scrim(canvas, tpl, scrim_hex or "#000000", scrim_opacity)
     report["scrim"] = {"mode": tpl, "color": (scrim_hex or "#000000").upper(), "opacity": scrim_opacity}
 
-    # 4) 제목 크기 맞춤 (잘라내지 않고 크기를 줄이며, 그래도 넘치면 경고만 남긴다)
+    # 4) 문구 블록 크기 맞춤: 제목(+본문 +CTA)을 한 덩어리로 보고 제목 크기를 줄여 가며 맞춘다. 본문은 줄 수 상한을 넘으면
+    #    "…"로 줄이고, 블록이 최소 글자 크기에서도 안 들어가면 본문을 먼저 뺀다(제목·CTA 우선). 그래도 넘치면 경고만 남긴다.
     draw = ImageDraw.Draw(canvas)
+    body_max_lines = 1 if strip else BODY_MAX_LINES.get(tpl, 2)
+    body_min_size = 11
+    inner_gap = round(h * 0.012) if not strip else round(h * 0.04)
     size = max(24, round(min(w, h) * 0.09))      # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
     lines: list[str] = []
+    body_lines: list[str] = []
+    body_size = 0
+    body_dropped = False
     font = ImageFont.truetype(font_path, size)
+    def body_fit(bsize: int) -> tuple[list[str], bool]:
+        bf = ImageFont.truetype(body_font_path, bsize)
+        bl = _wrap(draw, body, bf, avail_w)
+        cut = len(bl) > body_max_lines
+        if cut:
+            bl = bl[:body_max_lines]
+            last = bl[-1]
+            while last and draw.textlength(last + "…", font=bf) > avail_w:
+                last = last[:-1]
+            bl[-1] = last + "…"
+        return bl, cut
     while True:
         font = ImageFont.truetype(font_path, size)
         lines = _wrap(draw, headline, font, avail_w)
         lh_px = round(size * 1.28)
         block_h = lh_px * len(lines)
+        if body:
+            body_size = max(body_min_size, round(size * 0.55))
+            body_lines, _cut = body_fit(body_size)
+            block_h += inner_gap + round(body_size * 1.28) * len(body_lines)
+        if cta and not strip:
+            block_h += inner_gap + cta_h
         fits = block_h <= avail_h and all(draw.textlength(ln, font=font) <= avail_w for ln in lines)
         if fits or size <= min_size:
             break
         size -= 2
+    if not fits and body:
+        body, body_lines, body_dropped = None, [], True      # 자리가 모자라면 본문을 빼고 제목·CTA 만
+        report["warnings"].append("문구 자리가 좁아 본문을 이미지에서 뺐습니다 (제목·CTA 만 합성)")
+        lh_px = round(size * 1.28)
+        block_h = lh_px * len(lines) + ((inner_gap + cta_h) if cta and not strip else 0)
+        fits = block_h <= avail_h and all(draw.textlength(ln, font=font) <= avail_w for ln in lines)
     if not fits:
         report["warnings"].append("문구가 영역을 넘칠 수 있습니다 (최소 글자 크기에서도 맞지 않음)")
+    body_cut = bool(body) and body_fit(body_size)[1]
+    if body_cut:
+        report["warnings"].append(f"본문이 {body_max_lines}줄을 넘어 뒤를 줄였습니다 (편집에서 줄이거나 본문을 끄세요)")
     text_h = round(size * 1.28) * len(lines)
-    ty = ty1 - text_h                      # 영역 하단에 정렬
-    text_box = [tx0, ty, tx1, ty1]
+    body_h = (round(body_size * 1.28) * len(body_lines)) if body else 0
+    # 아래에서 위로: CTA(띠형 제외) → 본문 → 제목
+    y_cursor = ty1
+    if cta and not strip:
+        probe_font = ImageFont.truetype(font_path, cta_font_size)
+        cw = round(draw.textlength(cta, font=probe_font) + cta_h)
+        cw = min(cw, round(avail_w * 0.7)) if cw > avail_w * 0.7 else cw
+        cta_box = [tx0, y_cursor - cta_h, tx0 + cw, y_cursor]
+        y_cursor = cta_box[1] - inner_gap
+    body_box: list[int] | None = None
+    if body:
+        body_box = [tx0, y_cursor - body_h, tx1, y_cursor]
+        y_cursor = body_box[1] - inner_gap
+    ty = y_cursor - text_h
+    text_box = [tx0, ty, tx1, y_cursor]
+    if strip:   # 띠형: 문구 블록을 세로 가운데로
+        shift = round((ct + cb) / 2 - (ty + y_cursor) / 2)
+        shift = max(ct - ty, min(shift, cb - y_cursor))
+        ty += shift; text_box = [tx0, ty, tx1, y_cursor + shift]
+        if body_box:
+            body_box = [body_box[0], body_box[1] + shift, body_box[2], body_box[3] + shift]
 
     # 5) 문구 색: 브랜드 텍스트색을 쓰되 대비가 부족하면 흰색/검정으로 대체
     region = canvas.crop((tx0, max(0, ty), tx1, max(ty + 1, ty1))).resize((1, 1), Image.BOX).getpixel((0, 0))
-    color, fallback = None, False
-    if text_color_hex:
-        cand = _hex(text_color_hex)
-        if contrast(cand, region) >= 4.5:
-            color = cand
-    if color is None:
-        fallback = bool(text_color_hex)
-        color = (255, 255, 255) if contrast((255, 255, 255), region) >= contrast((0, 0, 0), region) else (0, 0, 0)
-        if fallback:
-            report["warnings"].append("브랜드 텍스트색의 대비가 부족해 흰색/검정으로 대체했습니다")
+    color, fallback = pick_text_color(region, text_color_hex)
+    if fallback:
+        report["warnings"].append("브랜드 텍스트색의 대비가 부족해 흰색/검정으로 대체했습니다")
     for i, ln in enumerate(lines):
         draw.text((tx0, ty + i * round(size * 1.28)), ln, font=font, fill=color)
+    if body and body_box:
+        bf = ImageFont.truetype(body_font_path, body_size)
+        for i, ln in enumerate(body_lines):
+            draw.text((tx0, body_box[1] + i * round(body_size * 1.28)), ln, font=bf, fill=color)
+        report["elements"].append({"type": "body", "role": "본문", "text": body, "lines": body_lines, "box": body_box,
+                                   "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": body_cut})
+    if cta and cta_box:
+        cta_bg, cta_fg = cta_colors(accent_hex, color)
+        draw_cta(canvas, cta_box, cta, font_path, cta_font_size, cta_bg, cta_fg, corner)
+        if len(cta) > CTA_MAX_CHARS:
+            report["warnings"].append(f"CTA 가 {CTA_MAX_CHARS}자를 넘어 버튼이 깁니다 (짧은 문구를 권장)")
+        report["elements"].append({"type": "cta", "role": "CTA", "text": cta, "box": cta_box, "font_size": cta_font_size,
+                                   "bg_color": "#%02X%02X%02X" % cta_bg, "text_color": "#%02X%02X%02X" % cta_fg,
+                                   "corner": corner})
+    report["in_image"] = ["headline"] + (["body"] if body else []) + (["cta"] if cta else [])
+    if body_dropped:
+        report["in_image_dropped"] = ["body"]
 
     # 6) 로고 합성
     if logo is not None and logo_box:
