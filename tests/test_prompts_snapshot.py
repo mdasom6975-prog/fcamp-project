@@ -73,7 +73,7 @@ def capture_ask(monkeypatch):
     from app import icons
     calls: list[tuple[str, str]] = []
 
-    def fake_ask(system: str, user: str, kind: str = "icon_names") -> dict:
+    def fake_ask(system: str, user: str, kind: str = "icon_names", schema: dict | None = None) -> dict:
         calls.append((system, user))
         return {"icons": [{"name": "보관함", "concept": "상자", "elements": [{"tag": "rect", "attrs": {"x": "4", "y": "4", "width": "16", "height": "16"}}]}]}
 

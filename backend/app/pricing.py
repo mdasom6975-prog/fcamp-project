@@ -22,7 +22,11 @@ DEFAULT = {
     "image": {"gpt-image-1": _IMAGE_1, "gpt-image-1.5": _IMAGE_1, "*": _IMAGE_1},
     # 채팅: 모델 → {in, out} = 100만 토큰당 USD. '*' 는 표에 없는 모델의 추정 요율(소형 모델 기준).
     "chat": {"gpt-4.1-mini": {"in": 0.40, "out": 1.60}, "gpt-4o-mini": {"in": 0.15, "out": 0.60},
-             "gpt-4.1": {"in": 2.00, "out": 8.00}, "*": {"in": 0.40, "out": 1.60}},
+             "gpt-4.1": {"in": 2.00, "out": 8.00},
+             # Claude (Anthropic 1차 API 요금, 100만 토큰당 USD)
+             "claude-opus-5-5": {"in": 4.00, "out": 20.00}, "claude-sonnet-5-5": {"in": 2.00, "out": 10.00},
+             "claude-haiku-5-5": {"in": 0.10, "out": 0.50}, "claude-opus-5": {"in": 5.00, "out": 25.00},
+             "*": {"in": 0.40, "out": 1.60}},
     # 무료 구간을 쓰는 공급자(장당 0)
     "free_providers": ["cloudflare"],
 }

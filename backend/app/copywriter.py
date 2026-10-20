@@ -1,11 +1,10 @@
 """카피 생성 (6-2). 지면별 문구 제한을 생성 조건으로 주고, 생성 후 코드로 다시 검사한다."""
-import json
 import os
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from . import calllog, prompts
+from . import prompts
 from .db import BASE_DIR
 from .textcount import METHODS, count_len
 
@@ -128,6 +127,16 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
                if l.get("method") == "전각 2자 계산" else "공백 포함")
         return f"- {label}: {', '.join(rng) or '제한 없음'} ({how}, 매체 필드명 '{l['field']}')"
 
+    # 추가 문구 자산(PMax 등 '문구 수량' 조건): limits["assets"] 에 copyfields.asset_spec 결과가 오면 요구 줄을 만든다
+    assets = ""
+    spec = limits.get("assets") or []
+    if spec:
+        how = lambda m: ("한글 등 전각 문자는 글자당 2자로 계산(한글 한 글자=2), 영문·숫자·공백은 1자" if m == "전각 2자 계산" else "공백 포함")
+        rows = [f"- {a['field']}: 정확히 {a['count']}개, 각 {a['max_chars']}자 이하({how(a['method'])})" if a.get("max_chars")
+                else f"- {a['field']}: 정확히 {a['count']}개" for a in spec]
+        assets = ("\n[추가 문구 자산] 아래 지면은 문구를 여러 개 요구한다(" + ", ".join(sorted({p for a in spec for p in a["placements"]})) +
+                  "). JSON 의 \"assets\" 객체에 필드명을 키로, 문구 문자열 배열을 값으로 넣는다. 서로 다른 각도의 문장으로, 위 브랜드 규칙과 "
+                  "금지 표현을 똑같이 지키고 각 문구는 제한의 90% 이내로 쓴다.\n" + "\n".join(rows))
     # 문장은 prompts/copy/system.md · user.md 에 있다. 여기서는 분기(없음/지정 없음)와 제한 줄만 계산해 넘긴다.
     voice = brand.get("voice", {})
     system = prompts.render("copy/system", variants=VARIANTS, icon_count=ICON_CANDIDATES)
@@ -148,6 +157,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         limit_headline=rule("headline", "headline(제목)"),
         limit_body=rule("body", "body(본문)"),
         limit_cta=rule("cta", "cta(행동 유도)"),
+        assets=assets,
     )
     return system, user
 
@@ -164,36 +174,49 @@ def parse_icons(data: dict) -> list[dict]:
     return out[:ICON_CANDIDATES]
 
 
+def parse_assets(data: dict, spec: list[dict]) -> dict:
+    """응답의 assets {필드: [문구]} 를 요구 필드만, 빈 값·중복 제거해 최대 개수까지 돌려준다."""
+    out = {}
+    raw = data.get("assets") or {}
+    for a in spec:
+        vals, seen = [], set()
+        for t in (raw.get(a["field"]) or []) if isinstance(raw, dict) else []:
+            t = str(t or "").strip()
+            if t and t not in seen:
+                seen.add(t); vals.append(t)
+        out[a["field"]] = vals[:a["max"]]
+    return out
+
+
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
-             icons_out: list | None = None) -> list[dict]:
-    """카피 변형을 만든다. icons_out 리스트를 주면 같은 응답의 아이콘 기능명 후보를 거기에 채운다(추가 호출 없음)."""
+             icons_out: list | None = None, assets_out: dict | None = None) -> list[dict]:
+    """카피 변형을 만든다. icons_out 리스트를 주면 같은 응답의 아이콘 기능명 후보를, assets_out dict 를 주면
+    추가 문구 자산(limits["assets"] 요구)을 거기에 채운다(추가 호출 없음)."""
     system, user = _prompt(brand_name, brand, brief, placement, limits)
-    with calllog.timed("chat", "copy", "openai", CHAT_MODEL) as info:
-        r = client().chat.completions.create(
-            model=CHAT_MODEL,
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        )
-        calllog.note_usage(info, r)
-    data = json.loads(r.choices[0].message.content or "{}")
+    from . import llm       # 공급자(Claude/OpenAI) 전환은 llm.py 가 맡는다. 순환 import 를 피해 함수 안에서 가져온다
+    data = llm.chat_json(system, user, "copy", llm.copy_schema([a["field"] for a in (limits.get("assets") or [])]))
     if icons_out is not None:
         icons_out[:] = parse_icons(data)
+    if assets_out is not None and limits.get("assets"):
+        assets_out.clear(); assets_out.update(parse_assets(data, limits["assets"]))
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
         out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta")})
     return out
 
 
-def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int, list[dict]]:
-    """생성 → 코드 검사. 반환: (변형, 시도 수, 아이콘 기능명 후보). 기본은 1회 호출.
+def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int, list[dict], dict]:
+    """생성 → 코드 검사. 반환: (변형, 시도 수, 아이콘 기능명 후보, 추가 문구 자산). 기본은 1회 호출.
     COPY_AUTO_RETRY=1 이면 통과한 변형이 하나도 없을 때만 1회 더 생성해 위반이 적은 쪽을 채택한다(사용자는 변형 하나를
     고르므로 깨끗한 변형이 하나면 충분하다). 아이콘 후보는 마지막 응답의 것을 쓴다."""
-    best, best_bad, attempts, icons = None, 10**9, 0, []
+    best, best_bad, attempts, icons, assets = None, 10**9, 0, [], {}
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
         got: list = []
-        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got)
+        got_assets: dict = {}
+        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got, assets_out=got_assets)
         icons = got or icons
+        assets = got_assets or assets
         for v in variants:
             v["violations"] = check(v, limits, brand)
         bad = sum(1 for v in variants if v["violations"])
@@ -201,4 +224,4 @@ def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[
             best, best_bad = variants, bad
         if best is not None and any(not v["violations"] for v in best):
             break
-    return best or [], attempts, icons
+    return best or [], attempts, icons, assets

@@ -8,7 +8,6 @@
 3d 는 알파 채널의 경계 상자를, svg 는 렌더링한 도형의 경계 상자를 기준으로 맞춘다.
 """
 import io
-import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -17,8 +16,8 @@ from xml.sax.saxutils import escape
 
 from PIL import Image
 
-from . import calllog, imagegen, prompts
-from .copywriter import CHAT_MODEL, ICON_CANDIDATES, client
+from . import imagegen, prompts
+from .copywriter import ICON_CANDIDATES
 
 COUNT = 10
 CANDIDATES = ICON_CANDIDATES   # 제안 호출 1회에 받는 기능명 수(여유분 포함). 중복·오류 제거 뒤 COUNT 개를 쓴다
@@ -28,9 +27,28 @@ RENDER = os.getenv("ICON_RENDER", "3d").strip().lower()          # 3d | svg
 MODEL_3D = os.getenv("ICON_IMAGE_MODEL", imagegen.OPENAI_MODEL)    # 3D 아이콘 이미지 모델 (기본: 배경과 같은 모델)
 QUALITY_3D = os.getenv("ICON_IMAGE_QUALITY", "medium")             # low | medium | high
 WORKERS_3D = 3                                                     # 동시 렌더 수 (세트 10개 → 약 2~3분)
-# 격자 렌더(ICON_GRID=n): 한 장에 n×n 개를 그려 잘라 쓴다. 0/1 이면 아이콘마다 1장. 2 면 10개가 3장(4+4+2)으로 줄고
-# 아이콘당 512px(출력 256px 이상)이라 화질은 충분하지만, 모델이 격자를 어기면 칸이 잘려 '다시 그리기'가 필요할 수 있다.
-GRID = max(0, int(os.getenv("ICON_GRID", "0") or 0))
+# 격자 렌더(ICON_GRID="열x행" 또는 n → n×n, 0 이면 끔): 한 장에 여러 아이콘을 그려 칸 단위로 잘라 쓴다.
+# 기본 4x3: 가로 캔버스(1536×1024)에 12칸 → 세트 10개가 호출 1회. 칸은 384×341px 라 출력(256px)에 충분하다.
+# 2 (2×2, 1024²) 는 10개가 3회·칸 512px 로 더 안전하다. 모델이 격자를 어기면 칸이 잘려 개별 '다시 그리기'(1장)가 필요할 수 있다.
+def _parse_grid(v: str) -> tuple[int, int]:
+    v = (v or "").strip().lower()
+    if not v or v in ("0", "off", "false"):
+        return 0, 0
+    if "x" in v:
+        c, r = v.split("x", 1)
+        return max(0, int(c or 0)), max(0, int(r or 0))
+    n = max(0, int(v))
+    return (n, n) if n >= 2 else (0, 0)
+
+
+GRID_COLS, GRID_ROWS = _parse_grid(os.getenv("ICON_GRID", "4x3"))
+GRID_CELLS = GRID_COLS * GRID_ROWS if GRID_COLS >= 1 and GRID_ROWS >= 1 and GRID_COLS * GRID_ROWS >= 2 else 0
+# 격자 캔버스: 열이 많으면 가로(1536×1024), 행이 많으면 세로, 같으면 정사각 — 칸이 정사각에 가깝게
+GRID_SIZE = "1536x1024" if GRID_COLS > GRID_ROWS else "1024x1536" if GRID_ROWS > GRID_COLS else "1024x1024"
+
+
+def grid_label() -> str | None:
+    return f"{GRID_COLS}x{GRID_ROWS}" if GRID_CELLS else None
 ALLOWED = {
     "path": {"d"}, "circle": {"cx", "cy", "r"}, "ellipse": {"cx", "cy", "rx", "ry"},
     "rect": {"x", "y", "width", "height", "rx", "ry"}, "line": {"x1", "y1", "x2", "y2"},
@@ -134,13 +152,10 @@ def to_png(svg: str, w: int, h: int) -> bytes:
 
 
 # ---- 모델 호출 ---- (문장은 prompts/icons/*.md, 공통 출력 규격은 prompts/icons/_output_spec.md)
-def _ask(system: str, user: str, kind: str = "icon_names") -> dict:
-    with calllog.timed("chat", kind, "openai", CHAT_MODEL) as info:
-        r = client().chat.completions.create(
-            model=CHAT_MODEL, response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
-        calllog.note_usage(info, r)
-    return json.loads(r.choices[0].message.content or "{}")
+def _ask(system: str, user: str, kind: str = "icon_names", schema: dict | None = None) -> dict:
+    """텍스트 모델에 JSON 을 요청한다(공급자 전환은 llm.py). schema 는 svg 제안이면 ICONS_SVG_SCHEMA, 아니면 3D 기능명 스키마."""
+    from . import llm
+    return llm.chat_json(system, user, kind, schema or llm.ICONS_3D_SCHEMA)
 
 
 def propose_and_draw(brand_name: str, brief: dict, style: dict, forbidden: list[str]) -> list[dict]:
@@ -149,7 +164,8 @@ def propose_and_draw(brand_name: str, brief: dict, style: dict, forbidden: list[
                           description=brief.get("description") or "없음", key_message=brief.get("key_message") or "없음",
                           target=brief.get("target") or "없음", stroke_width=style["stroke_width"], corner=style["corner"],
                           fill=style["fill"], forbidden=", ".join(forbidden) or "없음", count=CANDIDATES)
-    data = _ask(system, user)
+    from . import llm
+    data = _ask(system, user, schema=llm.ICONS_SVG_SCHEMA)
     return list(data.get("icons") or [])[:CANDIDATES]
 
 
@@ -157,7 +173,8 @@ def redraw_one(brand_name: str, brief: dict, name: str, concept: str, style: dic
     system = prompts.render("icons/redraw_system")
     user = prompts.render("icons/redraw_user", brand_name=brand_name, product_name=brief.get("product_name"),
                           name=name, concept=concept)
-    data = _ask(system, user, "icon_redraw")
+    from . import llm
+    data = _ask(system, user, "icon_redraw", schema=llm.ICONS_SVG_SCHEMA)
     items = data.get("icons") or []
     return items[0].get("elements", []) if items else []
 
@@ -168,7 +185,8 @@ def propose_more(brand_name: str, brief: dict, style: dict, forbidden: list[str]
     user = prompts.render("icons/more_user", brand_name=brand_name, product_name=brief.get("product_name"),
                           description=brief.get("description") or "없음", existing=", ".join(existing),
                           forbidden=", ".join(forbidden) or "없음", need=need)
-    return list(_ask(system, user).get("icons") or [])[:need]
+    from . import llm
+    return list(_ask(system, user, schema=llm.ICONS_SVG_SCHEMA).get("icons") or [])[:need]
 
 
 # ---- 3D 렌더 ---- (기능명·오브젝트 묘사는 prompts/icons/propose3d_*·more3d_*, 렌더 문장은 render3d + _3d_style)
@@ -213,30 +231,36 @@ def render3d(prompt: str) -> Image.Image:
     return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D, kind="icon")
 
 
-def render_grid_prompt(cells: list[tuple[str, str]], vars: dict, n: int) -> str:
-    """격자 1장의 프롬프트. cells = [(기능명, 오브젝트 묘사)] (최대 n*n). 빈 칸은 모델에게 비워 두라고 한다."""
+def render_grid_prompt(cells: list[tuple[str, str]], vars: dict, cols: int, rows: int) -> str:
+    """격자 1장의 프롬프트. cells = [(기능명, 오브젝트 묘사)] (최대 cols*rows). 빈 칸은 모델에게 비워 두라고 한다."""
     lines = [f"{i}. \"{name}\": {concept or name}" for i, (name, concept) in enumerate(cells, 1)]
-    return prompts.render("icons/render3d_grid", count=len(cells), n=n, cells="\n".join(lines), **vars)
+    return prompts.render("icons/render3d_grid", count=len(cells), cols=cols, rows=rows, cells="\n".join(lines), **vars)
 
 
-def split_grid(im: Image.Image, n: int) -> list[Image.Image]:
-    """n×n 격자 이미지를 칸 순서(왼쪽 위 → 오른쪽 → 다음 줄)대로 잘라 돌려준다. 칸 경계 2% 는 이웃 번짐을 피해 버린다."""
+def render_grid(prompt: str) -> Image.Image:
+    """격자 1장을 격자 캔버스 크기로 렌더한다."""
+    return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D, kind="icon", size=GRID_SIZE)
+
+
+def split_grid(im: Image.Image, cols: int, rows: int) -> list[Image.Image]:
+    """cols×rows 격자 이미지를 칸 순서(왼쪽 위 → 오른쪽 → 다음 줄)대로 잘라 돌려준다. 칸 경계 2% 는 이웃 번짐을 피해 버린다."""
     im = im.convert("RGBA")
-    cw, ch = im.width / n, im.height / n
+    cw, ch = im.width / cols, im.height / rows
     pad_x, pad_y = cw * 0.02, ch * 0.02
     out = []
-    for r in range(n):
-        for c in range(n):
+    for r in range(rows):
+        for c in range(cols):
             box = (round(c * cw + pad_x), round(r * ch + pad_y), round((c + 1) * cw - pad_x), round((r + 1) * ch - pad_y))
             out.append(im.crop(box))
     return out
 
 
-def render_many(prompt_list: list[str]) -> list[Image.Image | Exception]:
-    """여러 아이콘을 동시에 렌더한다. 실패는 예외 객체로 돌려주어 호출자가 건너뛰기·재시도를 정한다."""
+def render_many(prompt_list: list[str], fn=None) -> list[Image.Image | Exception]:
+    """여러 장을 동시에 렌더한다(fn 기본 render3d, 격자는 render_grid). 실패는 예외 객체로 돌려주어 호출자가 건너뛰기·재시도를 정한다."""
+    fn = fn or render3d
     def one(pr: str):
         try:
-            return render3d(pr)
+            return fn(pr)
         except Exception as e:  # noqa: BLE001 — 개별 실패가 세트 전체를 막지 않게
             return e
     ctx = copy_context()     # 호출 기록의 시안 id(ContextVar)가 작업 스레드에도 보이게

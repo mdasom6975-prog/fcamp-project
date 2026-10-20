@@ -6,5 +6,6 @@ pillow
 fonttools
 python-multipart
 openai
+anthropic
 resvg-py
 httpx
