@@ -254,41 +254,86 @@ def test_render_only_picked_names_then_append_more(env, monkeypatch):
     assert cj["rendered"] == 10 and sum(x["rendered"] for x in cj["candidates"]) == 10
 
 
-def _grid_image(k: int, n: int = 2, side: int = 1024):
-    """n×n 격자에 k 개의 불투명 원을 칸 중앙에 둔 투명 이미지 (모델이 격자를 지킨 결과를 흉내)."""
+def _grid_image(k: int, cols: int = 2, rows: int = 2, size=(1024, 1024)):
+    """cols×rows 격자에 k 개의 불투명 원을 칸 중앙에 둔 투명 이미지 (모델이 격자를 지킨 결과를 흉내)."""
     from PIL import Image, ImageDraw
-    im = Image.new("RGBA", (side, side), (0, 0, 0, 0)); dr = ImageDraw.Draw(im)
-    cw = side / n
+    im = Image.new("RGBA", size, (0, 0, 0, 0)); dr = ImageDraw.Draw(im)
+    cw, ch = size[0] / cols, size[1] / rows
+    rad = min(cw, ch) * 0.3
     for i in range(k):
-        r, c = divmod(i, n)
-        cx, cy = (c + 0.5) * cw, (r + 0.5) * cw
-        dr.ellipse((cx - cw * 0.3, cy - cw * 0.3, cx + cw * 0.3, cy + cw * 0.3), fill=(40, 90, 200, 255))
+        r, c = divmod(i, cols)
+        cx, cy = (c + 0.5) * cw, (r + 0.5) * ch
+        dr.ellipse((cx - rad, cy - rad, cx + rad, cy + rad), fill=(40, 90, 200, 255))
     return im
 
 
-def test_grid_render_uses_fewer_calls(env, monkeypatch):
-    """ICON_GRID=2: 10개를 2×2 격자 3장(4+4+2)으로 렌더해 잘라 저장한다. 각 아이콘은 투명·정상 크기로 맞춰진다."""
+def _grid_env(monkeypatch, cols, rows, size):
+    from app import icons
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    monkeypatch.setattr(icons, "GRID_COLS", cols); monkeypatch.setattr(icons, "GRID_ROWS", rows)
+    monkeypatch.setattr(icons, "GRID_CELLS", cols * rows); monkeypatch.setattr(icons, "GRID_SIZE", size)
+
+
+def test_grid_default_renders_ten_icons_in_one_call(env, monkeypatch):
+    """기본 ICON_GRID=4x3: 가로 캔버스 1장에 10개를 그려 12칸 중 10칸을 잘라 저장한다 → 호출 1회."""
     from app import icons
     c = env["client"]
     did = _icon_set_design(env)
-    monkeypatch.setattr(icons, "RENDER", "3d")
-    monkeypatch.setattr(icons, "GRID", 2)
+    _grid_env(monkeypatch, 4, 3, "1536x1024")
+    seen: list[tuple[str, object]] = []
+    def fake_many(plist, fn=None):
+        seen.extend((p, fn) for p in plist)
+        return [_grid_image(10, 4, 3, (1536, 1024)) for _ in plist]
+    monkeypatch.setattr(icons, "render_many", fake_many)
+    j = c.post(f"/api/designs/{did}/icons", json={}).json()
+    assert j["made"] == 10 and j["complete"] and len(seen) == 1, "10개 → 격자 1장"
+    p, fn = seen[0]
+    assert fn is icons.render_grid and "가로 4칸 × 세로 3줄" in p and '10. "후보10"' in p and "11." not in p.split("[배치]")[0]
+    assert all(not a["violations"] for a in j["icons"])
+    assert all(abs(a["style"]["bbox"][2] - a["style"]["bbox"][0] - 20) < 0.6 for a in j["icons"]), "live area 에 맞춰짐"
+    s = c.get("/api/icon-settings").json()
+    assert s["grid"] == "4x3" and s["grid_cells"] == 12 and s["grid_size"] == "1536x1024"
+
+
+def test_grid_2x2_uses_three_calls(env, monkeypatch):
+    """ICON_GRID=2: 10개를 2×2 격자 3장(4+4+2)으로 렌더한다."""
+    from app import icons
+    c = env["client"]
+    did = _icon_set_design(env)
+    _grid_env(monkeypatch, 2, 2, "1024x1024")
     prompts_seen: list[str] = []
-    def fake_many(plist):
+    def fake_many(plist, fn=None):
         prompts_seen.extend(plist)
         return [_grid_image(min(4, 10 - 4 * i)) for i, _ in enumerate(plist)]
     monkeypatch.setattr(icons, "render_many", fake_many)
     j = c.post(f"/api/designs/{did}/icons", json={}).json()
-    assert j["made"] == 10 and j["complete"] and len(prompts_seen) == 3, "10개 → 격자 3장"
-    assert "2×2 격자" in prompts_seen[0] and '1. "후보1"' in prompts_seen[0] and '4. "후보4"' in prompts_seen[0]
-    assert '2. "후보10"' in prompts_seen[2] and "3." not in prompts_seen[2].split("[배치]")[0]
-    assert all(not a["violations"] for a in j["icons"]), "칸 모서리가 비어 투명 배경으로 판정"
-    assert all(abs(a["style"]["bbox"][2] - a["style"]["bbox"][0] - 20) < 0.6 for a in j["icons"]), "live area 에 맞춰짐"
+    assert j["made"] == 10 and len(prompts_seen) == 3
+    assert "가로 2칸 × 세로 2줄" in prompts_seen[0] and '2. "후보10"' in prompts_seen[2]
 
 
-def test_split_grid_cells_in_order():
+def test_grid_parse_and_split():
     from app import icons
-    im = _grid_image(4)
-    cells = icons.split_grid(im, 2)
+    assert icons._parse_grid("4x3") == (4, 3) and icons._parse_grid("2") == (2, 2) and icons._parse_grid("0") == (0, 0)
+    assert icons._parse_grid("1") == (0, 0) and icons._parse_grid("") == (0, 0)
+    cells = icons.split_grid(_grid_image(4), 2, 2)
     assert len(cells) == 4 and all(cell.size == (492, 492) for cell in cells), "칸 512px 에서 경계 2%(10px)씩 뺀 크기"
     assert all(cell.getchannel("A").getbbox() for cell in cells)
+    wide = icons.split_grid(_grid_image(10, 4, 3, (1536, 1024)), 4, 3)
+    assert len(wide) == 12 and sum(1 for w in wide if w.getchannel("A").getbbox()) == 10
+
+
+def test_icon_reset_deletes_set_and_files_but_keeps_candidates(env):
+    from pathlib import Path
+    from app import models
+    c, did, Local = env["client"], env["ids"]["design"], env["Local"]
+    with Local() as db:
+        d = db.get(models.Design, did); d.brief = {**d.brief, "icon_candidates": [{"name": "후보1", "concept": "x"}]}; db.commit()
+    env["add_icons"](3)
+    with Local() as db:
+        files = [a.png_path for a in db.query(models.IconAsset).all()]
+    assert len(files) == 3 and all(Path(f).exists() for f in files)
+    r = c.post(f"/api/designs/{did}/icons/reset", json={})
+    assert r.status_code == 200 and r.json() == {"icons_deleted": 3, "deleted_files": 6}, r.text
+    assert c.get(f"/api/designs/{did}/icons").json() == [] and not any(Path(f).exists() for f in files)
+    assert c.get(f"/api/designs/{did}").json()["brief"]["icon_candidates"] == [{"name": "후보1", "concept": "x"}]
+    assert c.post(f"/api/designs/{did}/icons/reset", json={}).json()["icons_deleted"] == 0

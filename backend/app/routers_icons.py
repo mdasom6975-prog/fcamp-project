@@ -140,7 +140,8 @@ def list_icons(design_id: int, db: Session = Depends(get_db)):
 @router.get("/icon-settings")
 def icon_settings():
     """프론트 안내용: 현재 렌더 방식·모델·품질."""
-    return {"render": icons.RENDER, "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "count": icons.COUNT}
+    return {"render": icons.RENDER, "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "count": icons.COUNT,
+            "grid": icons.grid_label(), "grid_cells": icons.GRID_CELLS, "grid_size": icons.GRID_SIZE if icons.GRID_CELLS else None}
 
 
 def _draw_save_svg(db, d, bv, brand, items, style, w, h, forbidden, batch=1, start=1) -> tuple[int, list[dict]]:
@@ -199,16 +200,15 @@ def _render_save_3d(db, d, bv, items, style, w, h, forbidden, batch=1, start=1) 
     ICON_GRID=n 이고 2개 이상이면 n×n 격자 한 장에 여러 개를 그려 잘라 쓴다(호출 수 1/n²)."""
     palette = _palette(bv)
     sv = icons.style_vars(style, palette, bv.image_tone or {})
-    n = icons.GRID
-    if n >= 2 and len(items) >= 2:
-        per = n * n
+    per = icons.GRID_CELLS
+    if per >= 2 and len(items) >= 2:
         chunks = [items[i:i + per] for i in range(0, len(items), per)]
-        gprompts = [icons.render_grid_prompt([(str(it["name"]).strip(), str(it.get("concept") or "")) for it in ch], sv, n)
-                    for ch in chunks]
-        grids = icons.render_many(gprompts)
+        gprompts = [icons.render_grid_prompt([(str(it["name"]).strip(), str(it.get("concept") or "")) for it in ch], sv,
+                                             icons.GRID_COLS, icons.GRID_ROWS) for ch in chunks]
+        grids = icons.render_many(gprompts, icons.render_grid)
         plist, results = [], []
         for ch, gp, g in zip(chunks, gprompts, grids):
-            cells = icons.split_grid(g, n) if not isinstance(g, Exception) else [g] * len(ch)
+            cells = icons.split_grid(g, icons.GRID_COLS, icons.GRID_ROWS) if not isinstance(g, Exception) else [g] * len(ch)
             for k, _ in enumerate(ch):
                 plist.append(gp); results.append(cells[k] if k < len(cells) else ValueError("격자 칸이 모자랍니다"))
     else:
@@ -334,6 +334,30 @@ def _set_result(db, design_id: int, made: int, skipped: list[dict]) -> dict:
     lst = list_icons(design_id, db)
     return {"icons": lst, "requested": icons.COUNT, "made": made, "skipped": skipped,
             "complete": len(lst) >= icons.COUNT, "render": icons.RENDER}
+
+
+@router.post("/designs/{design_id}/icons/reset")
+def reset_icons(design_id: int, db: Session = Depends(get_db)):
+    """이 캠페인의 브랜드 규칙 버전에 속한 아이콘 세트(행·파일)를 지운다. 시안 이미지 초기화와는 별개다.
+    세트는 규칙 버전 소유라 같은 버전을 쓰는 다른 캠페인에서도 사라진다. 기능명 후보(brief.icon_candidates)는 남겨
+    다시 만들 때 제안 호출 없이 쓴다."""
+    d = _design(db, design_id)
+    rows = db.scalars(select(IconAsset).where(IconAsset.brand_version_id == d.brand_version_id)).all()
+    files: set[str] = set()
+    for a in rows:
+        files.update(p for p in (a.png_path, a.source_path) if p)
+        db.delete(a)
+    invalidate_icon_reviews(db, d.brand_version_id)
+    db.flush()
+    still = {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
+    removed = 0
+    for p in files - still:
+        fp = Path(p)
+        if STORAGE_DIR in fp.parents and fp.exists():
+            fp.unlink()
+            removed += 1
+    db.commit()
+    return {"icons_deleted": len(rows), "deleted_files": removed}
 
 
 @router.post("/designs/{design_id}/icons/fill")
