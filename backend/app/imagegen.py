@@ -29,7 +29,9 @@ VARIANT_FIDELITY = os.getenv("IMAGE_VARIANT_FIDELITY", "high")      # high | low
 # 템플릿 → gpt-image 지원 크기. 비정사각은 픽셀이 1.5배라 출력 토큰(비용)도 약 1.5배다.
 TEMPLATE_SIZES = {"세로형": (1024, 1536), "가로형": (1536, 1024), "정사각": (1024, 1024)}
 # 사용자가 시안마다 고를 수 있는 이미지 모델 목록(IMAGE_MODELS, 쉼표 구분). 비용·품질 비교용. 기본 모델은 항상 포함.
-MODELS = [m.strip() for m in os.getenv("IMAGE_MODELS", "").split(",") if m.strip()]
+# 환경변수가 없으면 gpt-image 계열 후보를 기본으로 둔다(계정에서 못 쓰는 모델은 생성 시 공급자 오류 문구로 알 수 있다).
+DEFAULT_MODEL_CHOICES = ["gpt-image-1", "gpt-image-1.5", "gpt-image-2.5-flare"]
+MODELS = [m.strip() for m in os.getenv("IMAGE_MODELS", ",".join(DEFAULT_MODEL_CHOICES)).split(",") if m.strip()]
 if OPENAI_MODEL not in MODELS:
     MODELS.insert(0, OPENAI_MODEL)
 # 배경 방식: per_ratio = 비율군마다 1장(1~3회, 변형은 images.edit) / single = 1장을 모든 지면이 잘라 씀(1회, edit 없음)
