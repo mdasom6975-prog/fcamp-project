@@ -10,6 +10,7 @@ export type BrandForm = {
   name: string
   description: string
   logo_asset_id: number | null
+  logo_square_asset_id: number | null     // 정사각 로고(1:1, 128px 이상) — PMax 등 1:1 로고 자산을 요구하는 지면용
   logo_margin_percent: number | null
   colors: ColorRow[]
   fonts: FontRow[]

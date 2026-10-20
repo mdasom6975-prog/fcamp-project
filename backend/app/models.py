@@ -28,6 +28,7 @@ class BrandVersion(Base):
     brand_id: Mapped[int] = mapped_column(ForeignKey("brands.id"))
     version_no: Mapped[int] = mapped_column(Integer)
     logo_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logo_square_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # 정사각 로고(1:1, Google PMax 등 필수 자산). 합성에는 쓰지 않는다
     logo_margin: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # {percent}
     levels: Mapped[dict] = mapped_column(JSON, default=dict)         # 항목별 필수|권장|수정가능
     colors: Mapped[list] = mapped_column(JSON, default=list)         # [{name, hex, role, level}]

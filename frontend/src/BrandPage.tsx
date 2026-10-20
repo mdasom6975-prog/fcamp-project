@@ -10,6 +10,7 @@ const emptyForm = (roles: string[], levels: Record<string, Level>): BrandForm =>
   name: '',
   description: '',
   logo_asset_id: null,
+  logo_square_asset_id: null,
   logo_margin_percent: null,
   colors: roles.map((role) => ({ role, hex: DEFAULT_COLORS[role] ?? '#000000' })),
   fonts: [
@@ -95,12 +96,14 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const [msg, setMsg] = useState<{ ok: boolean; text: string[] } | null>(null)
   const [logoName, setLogoName] = useState('')
   const [logoDim, setLogoDim] = useState<{ w: number; h: number } | null>(null)
+  const [logoSqDim, setLogoSqDim] = useState<{ w: number; h: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [baseline, setBaseline] = useState('')      // 불러온/저장한 시점의 폼 (변경 여부 비교용)
   const [oldView, setOldView] = useState(false)       // 현재 버전이 아닌 이전 버전을 보는 중
   const [savedId, setSavedId] = useState<number | null>(null)   // 이번에 저장한 브랜드 (시안으로 이동 가능)
   const [iconRender, setIconRender] = useState<'3d' | 'svg'>('3d')   // 아이콘 렌더 방식(서버 설정): 3d 면 선 굵기·채움은 쓰지 않는다
   const logoInput = useRef<HTMLInputElement>(null)
+  const logoSqInput = useRef<HTMLInputElement>(null)
 
   const loadBrands = useCallback(() => api.brands().then(setBrands), [])
 
@@ -128,11 +131,12 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     const b = await api.brand(id, versionId)
     const v = b.version
     setSelected(id); setVersions(b.versions); setViewVersion(v.id); setMsg(null); setSavedId(null)
-    setLogoName(v.logo_asset_id ? `등록된 로고 (파일 #${v.logo_asset_id})` : ''); setLogoDim(null)
+    setLogoName(v.logo_asset_id ? `등록된 로고 (파일 #${v.logo_asset_id})` : ''); setLogoDim(null); setLogoSqDim(null)
     const loaded: BrandForm = {
       name: b.name,
       description: b.description ?? '',
       logo_asset_id: v.logo_asset_id,
+      logo_square_asset_id: v.logo_square_asset_id ?? null,
       logo_margin_percent: v.logo_margin?.percent ?? null,
       colors: v.colors,
       fonts: v.fonts,
@@ -187,6 +191,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     if (item === 'logo') {
       out.push(logoDim ? `로고 원본·비율(${ratioText(logoDim.w, logoDim.h)}) 유지` : '로고 원본·비율 유지')
       if (form.logo_margin_percent != null) out.push(`로고 최소 여백 ${form.logo_margin_percent}%`)
+      if (form.logo_square_asset_id) out.push('정사각 로고 자산 등록됨 (PMax 등 1:1 로고 지면)')
     } else if (item === 'colors') {
       const n = form.colors.filter((c) => /^#[0-9a-fA-F]{6}$/.test(c.hex)).length
       if (n) out.push(`텍스트·도형·아이콘은 허용 색상 ${n}개만`)
@@ -286,6 +291,38 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
               <button type="button" className="logo-btn" onClick={() => logoInput.current?.click()}>
                 {form.logo_asset_id ? '원본 파일 교체' : '로고 파일 선택'}
               </button>
+            </div>
+          </div>
+          {/* 정사각 로고: Google PMax 처럼 1:1 로고 자산을 요구하는 지면용. 합성에는 쓰지 않고 검수·내보내기에만 쓴다 */}
+          <div className="logo-row" style={{ marginTop: 10 }}>
+            <div className="logo-box">
+              {form.logo_square_asset_id ? (
+                <img src={`/api/assets/${form.logo_square_asset_id}/file`} alt="정사각 로고"
+                  onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && i.naturalHeight) setLogoSqDim({ w: i.naturalWidth, h: i.naturalHeight }) }} />
+              ) : <span className="muted">정사각 로고 없음</span>}
+            </div>
+            <div className="logo-info">
+              <div className="logo-name">정사각 로고 (선택){logoSqDim && <span className="logo-ratio">{logoSqDim.w}×{logoSqDim.h}</span>}</div>
+              <div className="logo-help">Google PMax 처럼 1:1 로고 자산을 요구하는 지면에 쓰입니다. 1:1, 128×128 이상(권장 1200×1200), PNG·SVG. 기본 로고는 변형하지 않으므로 심볼형 파일을 따로 올리세요. 검수와 내보내기에만 쓰이고 이미지 합성에는 쓰지 않습니다.</div>
+              <input ref={logoSqInput} type="file" hidden accept=".png,.svg,image/png,image/svg+xml"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f && f.size > 300 * 1024) { setMsg({ ok: false, text: ['로고 파일은 300KB 이하여야 합니다'] }); return }
+                  upload('logo', f, (r) => {
+                    if (r.width && r.height && (Math.abs(r.width / r.height - 1) > 0.05 || Math.min(r.width, r.height) < 128)) {
+                      setMsg({ ok: false, text: [`정사각 로고는 1:1 이고 128×128 이상이어야 합니다 (올린 파일 ${r.width}×${r.height})`] }); return
+                    }
+                    set({ ...form, logo_square_asset_id: r.id })
+                    setLogoSqDim(r.width && r.height ? { w: r.width, h: r.height } : null)
+                  })
+                }} />
+              <div className="row">
+                <button type="button" className="logo-btn" onClick={() => logoSqInput.current?.click()}>
+                  {form.logo_square_asset_id ? '정사각 로고 교체' : '정사각 로고 선택'}
+                </button>
+                {form.logo_square_asset_id && <button type="button" onClick={() => { set({ ...form, logo_square_asset_id: null }); setLogoSqDim(null) }}>제거</button>}
+              </div>
             </div>
           </div>
         </section>

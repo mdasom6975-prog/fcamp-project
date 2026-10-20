@@ -24,6 +24,12 @@ def _check_refs(b: BrandIn, db: Session) -> None:
         a = db.get(Asset, b.logo_asset_id)
         if not a or a.kind != "logo":
             raise HTTPException(400, "logo_asset_id 가 로고 파일이 아닙니다")
+    if b.logo_square_asset_id is not None:
+        a = db.get(Asset, b.logo_square_asset_id)
+        if not a or a.kind != "logo":
+            raise HTTPException(400, "logo_square_asset_id 가 로고 파일이 아닙니다")
+        if a.width and a.height and (abs(a.width / a.height - 1) > 0.05 or min(a.width, a.height) < 128):
+            raise HTTPException(400, f"정사각 로고는 1:1 이고 128×128 이상이어야 합니다 (현재 {a.width}×{a.height})")
     provided = {f["name"] for f in PROVIDED_FONTS}
     for f in b.fonts:
         if f.source == "provided" and f.name not in provided:
@@ -43,6 +49,7 @@ def _version_from(b: BrandIn, brand_id: int, version_no: int) -> BrandVersion:
     return BrandVersion(
         brand_id=brand_id, version_no=version_no,
         logo_asset_id=b.logo_asset_id,
+        logo_square_asset_id=b.logo_square_asset_id,
         logo_margin=({"percent": b.logo_margin_percent} if b.logo_margin_percent is not None else None),
         levels=levels,
         colors=[c.model_dump() for c in b.colors],
@@ -70,7 +77,8 @@ def _warnings(b: BrandIn) -> list[str]:
 def _version_out(v: BrandVersion) -> dict:
     return {
         "id": v.id, "version_no": v.version_no, "created_at": v.created_at.isoformat(),
-        "logo_asset_id": v.logo_asset_id, "logo_margin": v.logo_margin, "levels": v.levels,
+        "logo_asset_id": v.logo_asset_id, "logo_square_asset_id": v.logo_square_asset_id,
+        "logo_margin": v.logo_margin, "levels": v.levels,
         "colors": v.colors, "fonts": v.fonts, "icon_style": v.icon_style,
         "image_tone": v.image_tone, "voice": v.voice,
         "required_phrases": v.required_phrases, "forbidden_phrases": v.forbidden_phrases,

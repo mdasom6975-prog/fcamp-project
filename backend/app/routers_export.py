@@ -77,6 +77,11 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
         if bv.logo_asset_id:
             a = db.get(Asset, bv.logo_asset_id)
             logo_path = a.file_path if a and Path(a.file_path).exists() else None
+        logo_square_path = None
+        if bv.logo_square_asset_id:      # PMax 등 1:1 로고 자산을 요구하는 지면 폴더에 함께 담는다
+            a = db.get(Asset, bv.logo_square_asset_id)
+            logo_square_path = a.file_path if a and Path(a.file_path).exists() else None
+        text_assets = (d.brief or {}).get("text_assets") or {}
         for pid in targets:
             pv = db.get(PresetVersion, pid)
             g = gather(db, d, pv, brand)
@@ -84,6 +89,8 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
                 skipped.append({"preset": pv.placement.name, "reason": "생성된 이미지가 없습니다"})
                 continue
             g["logo_path"] = logo_path
+            g["logo_square_path"] = logo_square_path
+            g["assets"] = text_assets
             fields = copyfields.fields_for(pv.text_limits or [], g["texts"], brand_row.name)
             info = exporter.ad_preset_folder(pack, pv, g, fields, csv_rows)
             grp = by_pid.get(pid)

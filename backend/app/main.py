@@ -28,6 +28,9 @@ async def lifespan(app: FastAPI):
     if "description" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE brands ADD COLUMN description VARCHAR(300) NOT NULL DEFAULT ''"))
+    if "logo_square_asset_id" not in {c["name"] for c in inspect(engine).get_columns("brand_versions")}:
+        with engine.begin() as conn:      # 정사각 로고 자산(PMax 등 1:1 로고 조건)
+            conn.execute(text("ALTER TABLE brand_versions ADD COLUMN logo_square_asset_id INTEGER"))
     icon_cols = {c["name"] for c in inspect(engine).get_columns("icon_assets")}
     for col, ddl in (("prompt", "TEXT"), ("source_path", "VARCHAR(500)")):   # 3D 아이콘 전환으로 추가된 컬럼
         if col not in icon_cols:

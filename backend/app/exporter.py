@@ -55,6 +55,9 @@ def ad_preset_folder(pack: Pack, pv, g: dict, fields: list[dict], rows_csv: list
     pack.add(f"{folder}/image.{ext}", enc["bytes"], "이미지", folder)
     if g["sep"] and g["logo_path"]:
         pack.add(f"{folder}/logo{Path(g['logo_path']).suffix.lower()}", Path(g["logo_path"]).read_bytes(), "로고 원본", folder)
+    if g.get("logo_square_path") and exporting.cond(conds, "정사각 로고"):
+        pack.add(f"{folder}/logo_square{Path(g['logo_square_path']).suffix.lower()}",
+                 Path(g["logo_square_path"]).read_bytes(), "정사각 로고(1:1)", folder)
     lines = []
     for f in fields:
         n = count_len(f["value"], f.get("count_method"))
@@ -64,6 +67,22 @@ def ad_preset_folder(pack: Pack, pv, g: dict, fields: list[dict], rows_csv: list
                          f["max_chars"] if f["max_chars"] is not None else "", f["source"]])
     txt = "\n\n".join(lines) or "(문구 없음)"
     pack.add(f"{folder}/copy.txt", ("﻿" + txt + "\n").encode("utf-8"), "카피(TXT)", folder)
+    # 추가 문구 자산('문구 수량' 조건 지면): 필드별 여러 문구를 따로 담고 CSV 에도 행으로 넣는다
+    cnt = exporting.cond(conds, "문구 수량")
+    if cnt and g.get("assets"):
+        from .copyfields import parse_asset_counts
+        by_field = {t["field"]: t for t in (pv.text_limits or [])}
+        alines = []
+        for r in parse_asset_counts(cnt.get("value")):
+            vals = [str(t).strip() for t in (g["assets"].get(r["field"]) or []) if str(t).strip()]
+            t = by_field.get(r["field"], {})
+            alines.append(f"[{r['field']}] 요구 {r['min']}~{r['max']}개 · {len(vals)}개")
+            for i, v in enumerate(vals, 1):
+                n = count_len(v, t.get("count_method"))
+                alines.append(f"  {i}. {v}  ({n}자 / 최대 {t.get('max_chars') if t.get('max_chars') is not None else '정보 없음'})")
+                rows_csv.append([f"{pv.placement.platform.name} · {pv.placement.name}", f"{r['field']} {i}", v, n,
+                                 t.get("max_chars") if t.get("max_chars") is not None else "", "추가 문구 자산(카피 생성)"])
+        pack.add(f"{folder}/text_assets.txt", ("﻿" + "\n".join(alines) + "\n").encode("utf-8"), "추가 문구 자산(TXT)", folder)
     return {"folder": folder, "image": f"{folder}/image.{ext}", "format": enc["format"], "bytes": enc["size"],
             "size": [img.width, img.height]}
 
