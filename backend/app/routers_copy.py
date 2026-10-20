@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import calllog, copywriter, phrases
+from . import calllog, copyfields, copywriter, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
 from .routers_assets import get_db
 from .routers_review import invalidate_reviews
@@ -65,6 +65,9 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
         raise HTTPException(400, "선택한 규격이 없습니다")
     per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
     merged = copywriter.merge_limits(per)
+    spec = copyfields.asset_spec(presets)      # PMax 등 '문구 수량' 조건 지면의 추가 문구 요구 (같은 호출에서 함께 받는다)
+    if spec:
+        merged["assets"] = spec
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
@@ -73,9 +76,16 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
     except Exception as e:  # 키 값 등 민감 정보는 메시지에 포함하지 않는다
         return {"groups": _group(d, db), "failures": [f"카피 생성: {type(e).__name__}"]}
     icon_candidates = rest[0] if rest else []
+    text_assets = rest[1] if len(rest) > 1 else {}
+    extra = {}
     if icon_candidates:
         # 같은 호출에서 받은 아이콘 기능명 후보를 브리프에 두면 아이콘 세트 생성이 기능명 제안 호출 없이 이것을 쓴다
-        d.brief = {**(d.brief or {}), "icon_candidates": icon_candidates}
+        extra["icon_candidates"] = icon_candidates
+    if spec:
+        # 추가 문구 자산(필드 → 문구 목록)은 검수('문구 수량')와 내보내기(text_assets.txt)가 쓴다. 카피를 다시 만들면 교체된다
+        extra["text_assets"] = text_assets
+    if extra:
+        d.brief = {**(d.brief or {}), **extra}
     for pv, (_, limits) in zip(presets, per):
         last = db.scalar(select(func.max(CopyVariant.batch_no)).where(
             CopyVariant.design_id == d.id, CopyVariant.preset_version_id == pv.id)) or 0
@@ -87,7 +97,100 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
                 violations=copywriter.check(v, limits, rules), attempts=attempts))
     invalidate_reviews(db, d.id)
     db.commit()
-    return {"groups": _group(d, db), "failures": [], "merged_limits": merged, "icon_candidates": len(icon_candidates)}
+    return {"groups": _group(d, db), "failures": [], "merged_limits": {k: v for k, v in merged.items() if k != "assets"},
+            "icon_candidates": len(icon_candidates),
+            "text_assets": {k: len(v) for k, v in (text_assets or {}).items()}}
+
+
+@router.post("/designs/{design_id}/copy/assets")
+def create_text_assets(design_id: int, db: Session = Depends(get_db)):
+    """문구를 여러 개 요구하는 지면(PMax 등)의 추가 문구 자산만 새로 받는다(채팅 1회). 카피 시안·선택은 그대로 둔다.
+    카피를 추가 문구 지원 전에 만들었거나, 자산만 다시 받고 싶을 때 쓴다."""
+    d = _design(design_id, db)
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand_name = db.get(Brand, d.brand_id).name
+    rules = _brand_rules(bv, d.brief)
+    presets = [pv for pid in d.preset_version_ids if (pv := db.get(PresetVersion, pid))]
+    spec = copyfields.asset_spec(presets)
+    if not spec:
+        raise HTTPException(400, "문구를 여러 개 요구하는 지면이 선택되어 있지 않습니다")
+    per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
+    merged = {**copywriter.merge_limits(per), "assets": spec}
+    names = [a["placements"][0] for a in spec]
+    placement = {"platform": "추가 문구 자산", "name": ", ".join(dict.fromkeys(names))}
+    got: dict = {}
+    try:
+        copywriter.generate(brand_name, rules, d.brief, placement, merged, assets_out=got)
+    except Exception as e:
+        raise HTTPException(502, f"추가 문구 생성에 실패했습니다 ({type(e).__name__})")
+    if not any(got.values()):
+        raise HTTPException(502, "추가 문구를 받지 못했습니다")
+    d.brief = {**(d.brief or {}), "text_assets": got}
+    invalidate_reviews(db, d.id)
+    db.commit()
+    return {"text_assets": {k: len(v) for k, v in got.items()}, "fields": [a["field"] for a in spec]}
+
+
+@router.post("/designs/{design_id}/presets/{preset_id}/copy/fit")
+def fit_copy_to_preset(design_id: int, preset_id: int, db: Session = Depends(get_db)):
+    """한 지면의 선택 카피 중 글자 수 제한을 넘는 필드만 그 지면 제한에 맞게 고쳐 쓴다(채팅 1회). 다른 지면·시안 선택은 그대로.
+    고친 뒤 코드로 다시 검사해 위반을 갱신하고 그 지면의 검수 결과를 무효화한다."""
+    d = _design(design_id, db)
+    if preset_id not in d.preset_version_ids:
+        raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
+    pv = db.get(PresetVersion, preset_id)
+    sel = db.scalar(select(CopyVariant).where(CopyVariant.design_id == d.id, CopyVariant.preset_version_id == preset_id,
+                                              CopyVariant.selected.is_(True)))
+    if sel is None:
+        raise HTTPException(400, "이 지면에 선택된 카피가 없습니다")
+    bv = db.get(BrandVersion, d.brand_version_id)
+    rules = _brand_rules(bv, d.brief)
+    limits = copywriter.limits_for(pv.text_limits or [])
+    cur = {"headline": sel.headline, "body": sel.body, "cta": sel.cta}
+    viol = copywriter.check(cur, limits, rules)
+    slots = {}
+    for v in viol:
+        if v["type"] in ("length", "min_length"):
+            slot = "headline" if v["field"].startswith("제목") else "body" if v["field"].startswith("본문") else "cta"
+            slots[slot] = v
+    if not slots:
+        raise HTTPException(400, "이 지면에서 글자 수를 넘는 필드가 없습니다")
+    def rule_line(slot: str) -> str:
+        l = limits[slot]
+        rng = []
+        if l.get("min") is not None:
+            rng.append(f"{l['min']}자 이상")
+        if l.get("max") is not None:
+            rng.append(f"{l['max']}자 이하")
+        how = ("한글 등 전각 문자는 글자당 2자로 계산(한글 한 글자=2), 영문·숫자·공백은 1자"
+               if l.get("method") == "전각 2자 계산" else "공백 포함")
+        return f"- {slot}: {', '.join(rng)} ({how}, 매체 필드명 '{l['field']}') — 현재 {slots[slot]['detail']}"
+    from . import llm, prompts
+    system = prompts.render("copy/fit_system")
+    user = prompts.render("copy/fit_user", brand_name=db.get(Brand, d.brand_id).name,
+                          required=", ".join(rules.get("required_phrases", [])) or "없음",
+                          forbidden=", ".join(rules.get("forbidden_phrases", [])) or "없음",
+                          platform=pv.placement.platform.name, placement=pv.placement.name,
+                          headline=cur["headline"], body=cur["body"], cta=cur["cta"],
+                          fixes="\n".join(rule_line(s) for s in slots))
+    try:
+        data = llm.chat_json(system, user, "copy_fit", llm._obj({"headline": llm.STR, "body": llm.STR, "cta": llm.STR}))
+    except Exception as e:
+        raise HTTPException(502, f"문구 줄이기에 실패했습니다 ({type(e).__name__})")
+    new = dict(cur)
+    for slot in slots:                     # 고치라고 한 필드만 받아들인다
+        t = str(data.get(slot) or "").strip()
+        if t:
+            new[slot] = t
+    new_viol = copywriter.check(new, limits, rules)
+    sel.headline, sel.body, sel.cta = new["headline"], new["body"], new["cta"]
+    sel.violations = new_viol
+    invalidate_reviews(db, d.id, preset_id)
+    db.commit()
+    remaining = [v for v in new_viol if v["type"] in ("length", "min_length")]
+    return {"preset_id": preset_id, "variant_no": sel.variant_no, "changed": sorted(slots),
+            "headline": sel.headline, "body": sel.body, "cta": sel.cta, "violations": new_viol,
+            "fits": not remaining, "note": None if not remaining else "줄였지만 아직 제한을 넘습니다. 다시 누르거나 편집하세요"}
 
 
 @router.post("/designs/{design_id}/copy/select-variant")

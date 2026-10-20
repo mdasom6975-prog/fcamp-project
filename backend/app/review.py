@@ -6,6 +6,7 @@
 - 공식 기준이 확인되지 않았거나 충돌인 '강제' 조건 → 확인 필요(차단)
 - 자동 판정이 어려운 항목(px 길이, 톤·어조, 광고주체 표기 등) → 확인 필요 + 사람이 '확인함' 표시 가능
 """
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -41,9 +42,60 @@ def _font_matches(font: dict, brand_fonts: list[dict]) -> bool:
     return False
 
 
+_RATIO = re.compile(r"(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)")
+_RANGE = re.compile(r"(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?)\s*[~\-–]\s*(\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?)")
+
+
+def _ratio(s: str) -> float:
+    a, b = _RATIO.search(s).groups()
+    return float(a) / float(b)
+
+
+def ratio_readings(*texts: str | None) -> list[tuple[str, float, float]]:
+    """문자열들에서 비율 표기를 모두 뽑는다. 범위 'a:b~c:d' 는 (표기, 하한, 상한), 단일 'a:b' 는 (표기, r, r)."""
+    out: list[tuple[str, float, float]] = []
+    for t in texts:
+        if not t:
+            continue
+        rest = t
+        for m in _RANGE.finditer(t):
+            lo, hi = sorted((_ratio(m.group(1)), _ratio(m.group(2))))
+            out.append((m.group(0).replace(" ", ""), lo, hi))
+            rest = rest.replace(m.group(0), " ")
+        for m in _RATIO.finditer(rest):
+            r = float(m.group(1)) / float(m.group(2))
+            out.append((m.group(0).replace(" ", ""), r, r))
+    seen, uniq = set(), []
+    for x in out:
+        if x[0] not in seen:
+            seen.add(x[0]); uniq.append(x)
+    return uniq
+
+
+def conflict_satisfied(name: str, val, note: str | None, W: int, H: int, conds: list[dict]) -> tuple[bool | None, str]:
+    """출처마다 표기가 다른(충돌) 조건을 모든 표기로 검사한다. 비율 조건이면 값·메모의 모든 비율 표기(단일·범위)를 실제
+    비율과 대조해 전부 만족하면 (True, 설명), 하나라도 어긋나면 (False, 설명). 자동으로 볼 수 없는 조건은 (None, 메모)."""
+    if "비율" in name:
+        readings = ratio_readings(str(val), note)
+        if readings:
+            tol_c = next((x for x in conds if x["name"] == "비율 허용 오차" and x.get("value")), None)
+            try:
+                tol = float(str(tol_c["value"]).replace("%", "")) / 100 if tol_c else 0.01
+            except ValueError:
+                tol = 0.01
+            actual = W / H
+            bad = [lbl for lbl, lo, hi in readings if not (lo * (1 - tol) <= actual <= hi * (1 + tol))]
+            labels = ", ".join(lbl for lbl, _, _ in readings)
+            if not bad:
+                return True, f"{W}×{H} = {actual:.3f} — 출처별 표기({labels})를 모두 만족 (오차 {tol * 100:g}%)"
+            return False, f"{W}×{H} = {actual:.3f} — 표기 {', '.join(bad)} 와 어긋남 (출처 충돌: {labels}). 사람이 확인"
+    return None, (note or "출처마다 표기가 달라 자동 판정하지 않습니다") + " — 사람이 확인"
+
+
 def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scrim_hex, font_ref,
-                  brand: dict, logo_aspect, separate: bool) -> list[dict]:
-    """한 지면의 검수 항목을 만든다. texts = {headline, body, cta} (내보낼 카피)."""
+                  brand: dict, logo_aspect, separate: bool, assets: dict | None = None) -> list[dict]:
+    """한 지면의 검수 항목을 만든다. texts = {headline, body, cta} (내보낼 카피).
+    assets = {필드명: [문구...]} — PMax 처럼 문구를 여러 개 요구하는 지면의 추가 문구 자산(카피 생성 때 함께 받음)."""
     out: list[dict] = []
     W, H = pv.production_width, pv.production_height
     conds = pv.conditions or []
@@ -95,8 +147,17 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
         name, val, lv = c["name"], c.get("value"), c.get("level")
         if name in handled:
             continue
-        # 공식 기준이 확인되지 않았거나 충돌이면 통과로 표시하지 않는다
-        if c.get("status") in ("충돌", "확인 필요") or val is None:
+        # 공식 기준이 충돌(출처마다 표기가 다름)이면: 모든 표기를 만족할 때는 통과, 아니면 사람이 확인하는 항목으로
+        if c.get("status") == "충돌" and val is not None:
+            ok, msg = conflict_satisfied(name, val, c.get("note"), W, H, conds)
+            if ok is True:
+                out.append(item("규격", name, "통과", msg, lv))
+            else:
+                blocking = lv == "강제"
+                out.append(item("규격", name, "확인 필요", msg, lv, blocking, True))
+            continue
+        # 공식 기준이 확인되지 않았으면 통과로 표시하지 않는다
+        if c.get("status") == "확인 필요" or val is None:
             blocking = lv == "강제"
             out.append(item("규격", name, "확인 필요", c.get("note") or "공식 기준이 확인되지 않았습니다", lv, blocking))
             continue
@@ -157,13 +218,24 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
         elif name == "필수 여부":
             continue
         elif name == "문구 수량":
-            st, bl = _spec_fail(lv)
-            out.append(item("문구", "문구 수량", st, f"요구: {val} — 현재는 문구를 1세트(제목 1개·설명 1개)만 만듭니다", lv, bl))
+            out += review_text_assets(val, lv, assets, pv.text_limits or [])
         elif name == "정사각 로고":
-            dims = brand.get("logo_dims")
-            if not dims:
+            # 브랜드에 정사각 로고 자산이 따로 있으면 그것으로, 없으면 기본 로고가 1:1 인지로 판정한다
+            sq, dims = brand.get("logo_square_dims"), brand.get("logo_dims")
+            if sq:
+                w_, h_ = sq
+                if abs(w_ / h_ - 1) <= 0.05 and min(w_, h_) >= 128:
+                    out.append(item("브랜드", "정사각 로고", "통과", f"정사각 로고 자산 {w_}×{h_} (1:1, 최소 128×128 이상)", lv))
+                else:
+                    st, bl = _spec_fail(lv)
+                    out.append(item("브랜드", "정사각 로고", st, f"정사각 로고 자산 {w_}×{h_} — 1:1 이고 128×128 이상이어야 합니다", lv, bl))
+            elif brand.get("latest_has_square_logo"):
                 st, bl = _spec_fail(lv)
-                out.append(item("브랜드", "정사각 로고", st, f"{val} — 브랜드에 로고가 없습니다", lv, bl))
+                out.append(item("브랜드", "정사각 로고", st, "브랜드의 최신 규칙 버전에는 정사각 로고가 있지만 이 시안은 이전 버전을 씁니다. "
+                                                        "캠페인의 '브랜드 설정 → 최신 규칙 적용'을 누른 뒤 다시 검수하세요", lv, bl))
+            elif not dims:
+                st, bl = _spec_fail(lv)
+                out.append(item("브랜드", "정사각 로고", st, f"{val} — 브랜드에 로고가 없습니다. 브랜드 설정에서 정사각 로고 파일을 등록하세요", lv, bl))
             else:
                 w_, h_ = dims
                 if abs(w_ / h_ - 1) <= 0.05 and min(w_, h_) >= 128:
@@ -171,7 +243,8 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
                 else:
                     st, bl = _spec_fail(lv)
                     out.append(item("브랜드", "정사각 로고", st,
-                                    f"로고 {w_}×{h_} — 1:1 이고 128×128 이상이어야 합니다. 로고는 변형하지 않으므로 정사각 로고 파일을 따로 등록해야 합니다",
+                                    f"기본 로고 {w_}×{h_} 는 1:1 이 아닙니다. 로고는 변형하지 않으므로 브랜드 설정의 '정사각 로고'에 "
+                                    f"1:1·128px 이상 파일을 따로 등록하세요",
                                     lv, bl))
         else:
             # 광고주체 표기·AD 마크 영역·폰트 스타일 등 자동 판정이 어려운 조건은 사람이 확인한다
@@ -296,6 +369,40 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
                     lv.get("image_tone"), lv.get("image_tone") == "필수", True))
     out.append(item("브랜드", "문구 어조", "확인 필요", "브랜드 어조·예시 문구와 비교해 확인해 주세요",
                     lv.get("voice"), lv.get("voice") == "필수", True))
+    return out
+
+
+def review_text_assets(val: str, lv: str | None, assets: dict | None, text_limits: list[dict]) -> list[dict]:
+    """'문구 수량' 조건(예: '광고 제목 3~15개, 긴 광고 제목 1~5개, 설명 2~5개')을 추가 문구 자산으로 판정한다.
+    필드마다 글자 수 제한(text_limits)을 지킨 문구만 세어 최소 수량 이상이면 통과. 제한을 넘는 문구는 경고로 따로 적는다."""
+    from .copyfields import parse_asset_counts
+    reqs = parse_asset_counts(val)
+    if not reqs:
+        return [item("문구", "문구 수량", "확인 필요", f"요구 '{val}' 를 해석하지 못했습니다", lv, False, True)]
+    if not assets:
+        st, bl = _spec_fail(lv)
+        return [item("문구", "문구 수량", st, f"요구: {val} — 추가 문구 자산이 없습니다. ③ 카피의 '추가 문구 자산 생성'(채팅 1회, 시안 유지) 또는 '카피 다시 생성'으로 만듭니다", lv, bl)]
+    by_field = {t["field"]: t for t in text_limits}
+    out, bad_all, short = [], [], []
+    for r in reqs:
+        lim = by_field.get(r["field"], {})
+        mx, method = lim.get("max_chars"), lim.get("count_method", "글자 수")
+        texts = [str(t).strip() for t in (assets.get(r["field"]) or []) if str(t).strip()]
+        ok = [t for t in texts if mx is None or count_len(t, method) <= mx]
+        bad = [t for t in texts if t not in ok]
+        bad_all += [f"{r['field']} '{t[:20]}…' {count_len(t, method)}자/{mx}자" for t in bad]
+        if len(ok) < r["min"]:
+            short.append(f"{r['field']} {len(ok)}개/최소 {r['min']}개")
+        elif len(ok) > r["max"]:
+            short.append(f"{r['field']} {len(ok)}개/최대 {r['max']}개")
+    if short:
+        st, bl = _spec_fail(lv)
+        out.append(item("문구", "문구 수량", st, f"요구: {val} — 부족: {', '.join(short)}", lv, bl))
+    else:
+        got = ", ".join(f"{r['field']} {len([t for t in (assets.get(r['field']) or []) if str(t).strip()])}개" for r in reqs)
+        out.append(item("문구", "문구 수량", "통과", f"{got} (요구: {val})", lv))
+    if bad_all:
+        out.append(item("문구", "추가 문구 글자 수", "경고", "제한을 넘어 제외한 문구: " + "; ".join(bad_all)))
     return out
 
 

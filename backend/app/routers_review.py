@@ -142,6 +142,14 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
         la = db.get(Asset, bv.logo_asset_id)
         if la and la.width and la.height:
             brand["logo_dims"] = (la.width, la.height)
+    if bv.logo_square_asset_id:       # 정사각 로고 자산(있으면 '정사각 로고' 조건은 이것으로 판정)
+        sa = db.get(Asset, bv.logo_square_asset_id)
+        if sa and sa.width and sa.height:
+            brand["logo_square_dims"] = (sa.width, sa.height)
+    # 시안은 예전 규칙 버전인데 브랜드의 최신 버전에는 정사각 로고가 있으면 '최신 규칙 적용'을 안내한다
+    latest_bv = db.get(BrandVersion, cur.current_version_id) if cur and cur.current_version_id else None
+    brand["latest_has_square_logo"] = bool(latest_bv and latest_bv.id != bv.id and latest_bv.logo_square_asset_id)
+    text_assets = (d.brief or {}).get("text_assets") or None     # PMax 등 복수 문구 자산(카피 생성 때 함께 받음)
     results: list[tuple[int | None, dict]] = []
 
     meta_items = []
@@ -171,7 +179,7 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
                                      f"초안 품질({bg.layout.get('quality')})로 만든 배경입니다. 내보내기 전에 "
                                      f"'확정 품질로 배경 생성'을 실행하세요 (확정: {imagegen.OPENAI_QUALITY})"))
         items += review.review_preset(pv, comp, texts, text_el, logo_el["box"] if logo_el else None,
-                                      scrim, font_ref, brand, logo_aspect, sep)
+                                      scrim, font_ref, brand, logo_aspect, sep, assets=text_assets)
         results += [(pid, it) for it in items]
     # 이 캠페인의 브랜드 규칙 버전에 아이콘 세트가 있으면 지면 없는 항목(preset_version_id=None)으로 함께 검수한다
     icons = version_icon_set(db, d.brand_version_id)

@@ -20,7 +20,7 @@ from . import pricing
 from .db import BASE_DIR
 
 LOG_FILE = BASE_DIR / "data" / "api_calls.jsonl"
-KINDS = ("background", "variant", "icon", "copy", "icon_names", "icon_redraw")
+KINDS = ("background", "variant", "icon", "copy", "copy_fit", "icon_names", "icon_redraw")
 _design: ContextVar[int | None] = ContextVar("calllog_design", default=None)
 _lock = threading.Lock()
 
