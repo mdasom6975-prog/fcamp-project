@@ -12,11 +12,12 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from xml.sax.saxutils import escape
 
 from PIL import Image
 
-from . import imagegen, prompts
+from . import calllog, imagegen, prompts
 from .copywriter import CHAT_MODEL, client
 
 COUNT = 10
@@ -129,10 +130,11 @@ def to_png(svg: str, w: int, h: int) -> bytes:
 
 
 # ---- 모델 호출 ---- (문장은 prompts/icons/*.md, 공통 출력 규격은 prompts/icons/_output_spec.md)
-def _ask(system: str, user: str) -> dict:
-    r = client().chat.completions.create(
-        model=CHAT_MODEL, response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+def _ask(system: str, user: str, kind: str = "icon_names") -> dict:
+    with calllog.timed("chat", kind, "openai", CHAT_MODEL):
+        r = client().chat.completions.create(
+            model=CHAT_MODEL, response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
     return json.loads(r.choices[0].message.content or "{}")
 
 
@@ -150,7 +152,7 @@ def redraw_one(brand_name: str, brief: dict, name: str, concept: str, style: dic
     system = prompts.render("icons/redraw_system")
     user = prompts.render("icons/redraw_user", brand_name=brand_name, product_name=brief.get("product_name"),
                           name=name, concept=concept)
-    data = _ask(system, user)
+    data = _ask(system, user, "icon_redraw")
     items = data.get("icons") or []
     return items[0].get("elements", []) if items else []
 
@@ -203,7 +205,7 @@ def render_prompt(name: str, concept: str, vars: dict) -> str:
 
 
 def render3d(prompt: str) -> Image.Image:
-    return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D)
+    return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D, kind="icon")
 
 
 def render_many(prompt_list: list[str]) -> list[Image.Image | Exception]:
@@ -213,8 +215,9 @@ def render_many(prompt_list: list[str]) -> list[Image.Image | Exception]:
             return render3d(pr)
         except Exception as e:  # noqa: BLE001 — 개별 실패가 세트 전체를 막지 않게
             return e
+    ctx = copy_context()     # 호출 기록의 시안 id(ContextVar)가 작업 스레드에도 보이게
     with ThreadPoolExecutor(max_workers=WORKERS_3D) as ex:
-        return list(ex.map(one, prompt_list))
+        return list(ex.map(lambda pr: ctx.copy().run(one, pr), prompt_list))
 
 
 def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:

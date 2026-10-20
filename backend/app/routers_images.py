@@ -8,14 +8,14 @@ from PIL import Image
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from . import compose, imagegen
+from . import calllog, compose, imagegen
 from .db import BASE_DIR, STORAGE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
                      IconAsset, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db
 from .routers_review import invalidate_icon_reviews, invalidate_reviews
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 log = logging.getLogger("app.images")
 
 
@@ -74,7 +74,18 @@ def _design(db: Session, design_id: int) -> Design:
 
 @router.get("/image-usage")
 def image_usage():
-    return imagegen.usage()
+    """일일 한도 현황 + 오늘 호출 내역(종류별). 한도는 이미지 호출만 세고, calls 는 채팅까지 포함한다."""
+    u = imagegen.usage()
+    return {**u, "calls": calllog.summary(date=u["date"]),
+            "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}}
+
+
+@router.get("/designs/{design_id}/api-calls")
+def design_api_calls(design_id: int, db: Session = Depends(get_db)):
+    """이 시안이 지금까지 부른 모델 호출 집계와 최근 내역. 어느 단계에서 호출이 몰리는지 보기 위한 것."""
+    if not db.get(Design, design_id):
+        raise HTTPException(404, "시안을 찾을 수 없습니다")
+    return {**calllog.summary(design_id=design_id), "recent": calllog.recent(design_id)}
 
 
 @router.get("/designs/{design_id}/images")
@@ -120,14 +131,16 @@ def _gen_error(e: Exception) -> str:
 
 
 def _generate_one(db: Session, d: Design, template: str,
-                  reference: GeneratedImage | None = None) -> tuple[Path, Image.Image, str, dict]:
+                  reference: GeneratedImage | None = None, final: bool = False) -> tuple[Path, Image.Image, str, dict]:
     """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
+    final=False 면 초안 품질(IMAGE_QUALITY_DRAFT), True 면 확정 품질(IMAGE_QUALITY). layout.quality 에 남긴다.
     생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
     reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다."""
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
     gw, gh = imagegen.size_for(template)
+    quality = imagegen.quality_for(final)
     ref_img = None
     if reference is not None and imagegen.can_vary() and Path(reference.file_path).exists():
         ref_img = Image.open(reference.file_path)
@@ -135,9 +148,9 @@ def _generate_one(db: Session, d: Design, template: str,
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style)
         if ref_img is not None:
             prompt = imagegen.build_variant_prompt(prompt)
-            bg = imagegen.generate_variant(prompt, gw, gh, ref_img)
+            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality)
         else:
-            bg = imagegen.generate_background(prompt, gw, gh)
+            bg = imagegen.generate_background(prompt, gw, gh, quality)
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except Exception as e:
@@ -146,6 +159,7 @@ def _generate_one(db: Session, d: Design, template: str,
     path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
+              "quality": quality, "draft": imagegen.is_draft(quality),
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
@@ -159,8 +173,9 @@ def _bg_row(d: Design, pid: int, path: Path | str, bg_w: int, bg_h: int, prompt:
                           width=bg_w, height=bg_h, prompt=prompt, brand_version_id=bv_id, layout=dict(layout))
 
 
-def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage]:
+def create_shared_background(db: Session, d: Design, final: bool = False) -> dict[int, GeneratedImage]:
     """배경을 비율군(가로형/정사각/세로형)마다 1장씩 만들고, 같은 비율군의 규격은 같은 파일로 연결한다. {preset_id: 배경 행}.
+    final=False(기본)면 초안 품질로 만든다. 형태·구도가 정해지면 final=True 로 한 번만 확정 품질로 다시 만든다.
     첫 비율군(시안의 첫 규격 기준)은 프롬프트로 생성하고, 나머지 비율군은 그 이미지를 참조로 붙여 **같은 장면**을
     각 비율의 구도로 다시 만든다(images.edit, IMAGE_BG_VARIANT=0 이면 독립 생성). 비용은 비율군 수(1~3장)만큼 든다.
     IMAGE_BG_PER_RATIO=0 이면 정사각 1장을 모두가 공유."""
@@ -178,7 +193,7 @@ def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage
     master: GeneratedImage | None = None
     for template, pids in groups.items():
         try:
-            path, bg, prompt, layout = _generate_one(db, d, template, reference=master)
+            path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final)
         except HTTPException as e:
             if master is None:
                 raise
@@ -200,9 +215,11 @@ def create_shared_background(db: Session, d: Design) -> dict[int, GeneratedImage
 
 
 @router.post("/designs/{design_id}/background/regenerate")
-def regenerate_background(design_id: int, style: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
+def regenerate_background(design_id: int, style: str | None = Body(None, embed=True),
+                          final: bool = Body(False, embed=True), db: Session = Depends(get_db)):
     """시안 전체의 배경을 비율군마다 새로 생성하고, 같은 비율군 매체가 같은 원본을 공유하도록 연결한다.
-    style 을 주면 브리프의 배경 형태(image_style)를 그 값으로 바꾼 뒤 생성한다."""
+    style 을 주면 브리프의 배경 형태(image_style)를 그 값으로 바꾼 뒤 생성한다.
+    final=True 면 확정 품질(IMAGE_QUALITY)로, 아니면 초안 품질(IMAGE_QUALITY_DRAFT)로 만든다."""
     d = _design(db, design_id)
     if style is not None:
         style = style.strip() or imagegen.AUTO_STYLE
@@ -210,12 +227,13 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
             raise HTTPException(400, f"배경 형태는 {[imagegen.AUTO_STYLE, *imagegen.STYLES]} 중 하나")
         d.brief = {**(d.brief or {}), "image_style": style}
         db.flush()
-    rows = create_shared_background(db, d)
+    rows = create_shared_background(db, d, final=final)
     db.commit()
     first = next(iter(rows.values()))
     fallbacks = sorted({r.layout.get("fallback") for r in rows.values() if r.layout.get("fallback")})
     return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}),
             "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
+            "quality": first.layout.get("quality"), "draft": bool(first.layout.get("draft")),
             "warnings": [f"일부 비율군은 변형 생성에 실패해 첫 배경을 잘라 썼습니다: {m}" for m in fallbacks]}
 
 
@@ -314,8 +332,10 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     if bg_row is None:
         # 새로 만들 때 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다. 변형이 실패하면 그 배경을 잘라 쓴다(폴백)
         ref = _latest_design_bg(db, design_id)
+        final = ref is not None and not imagegen.is_draft((ref.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
         try:
-            path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None)
+            path, bg, prompt, layout = _generate_one(db, d, tpl, reference=ref if ref and ref.file_path else None,
+                                                     final=final)
             bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
         except HTTPException as e:
             if ref is None or regenerate_background or not Path(ref.file_path).exists():

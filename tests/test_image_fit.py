@@ -158,15 +158,18 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(imagegen, "PER_RATIO", True)
     monkeypatch.setattr(imagegen, "PROVIDER", "openai")
     monkeypatch.setattr(imagegen, "VARIANT", True)
+    monkeypatch.setattr(imagegen, "OPENAI_QUALITY", "medium")
+    monkeypatch.setattr(imagegen, "DRAFT_QUALITY", "low")
     calls: list[tuple[int, int]] = []
     variants: list[dict] = []     # 참조 이미지로 만든 변형 호출 기록
+    qualities: list[str] = []     # 호출마다 넘어온 품질(초안 low / 확정 medium)
 
-    def fake_generate(prompt, w, h):
-        calls.append((w, h))
+    def fake_generate(prompt, w, h, quality="medium"):
+        calls.append((w, h)); qualities.append(quality)
         return _scene(w, h)
 
-    def fake_variant(prompt, w, h, reference):
-        calls.append((w, h))
+    def fake_variant(prompt, w, h, reference, quality="medium"):
+        calls.append((w, h)); qualities.append(quality)
         variants.append({"size": (w, h), "ref_size": reference.size, "prompt": prompt})
         return _scene(w, h)
     monkeypatch.setattr(imagegen, "generate_background", fake_generate)
@@ -202,7 +205,8 @@ def env(tmp_path, monkeypatch):
 
     client = TestClient(app)
     try:
-        yield {"client": client, "ids": ids, "Local": Local, "calls": calls, "variants": variants, "models": models}
+        yield {"client": client, "ids": ids, "Local": Local, "calls": calls, "variants": variants, "models": models,
+               "qualities": qualities}
     finally:
         app.dependency_overrides.clear()
 
@@ -235,6 +239,50 @@ def test_regenerate_makes_one_background_per_ratio_group(env):
         land = next(g for g in bgs if g.preset_version_id == p["네이티브 2:1"])
         assert land.layout["reference"]["background_id"] == feed.id and land.layout["reference"]["template"] == "세로형"
         assert land.layout["prompts"][0].startswith("image/same_scene@")
+
+def test_regenerate_uses_draft_quality_unless_final(env):
+    """기본은 초안 품질(low), final=True 면 확정 품질(medium). layout 에 품질·초안 여부가 남고 응답에도 나온다."""
+    c, ids, q = env["client"], env["ids"], env["qualities"]
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
+    assert out["quality"] == "low" and out["draft"] is True and q == ["low"] * 3
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    assert all(r["background"]["layout"]["draft"] and r["background"]["layout"]["quality"] == "low" for r in rows)
+    q.clear()
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True}).json()
+    assert out["quality"] == "medium" and out["draft"] is False and q == ["medium"] * 3
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    assert all(not r["background"]["layout"]["draft"] for r in rows)
+
+
+def test_new_ratio_group_matches_reference_quality(env):
+    """지면 합성이 새 비율군 배경을 만들 때: 시안의 기존 배경이 확정 품질이면 같은 품질로, 없으면 초안으로."""
+    from sqlalchemy import select
+    c, ids, q, Local, models = env["client"], env["ids"], env["qualities"], env["Local"], env["models"]
+    pid = ids["presets"]["네이티브 2:1"]
+    # 배경이 하나도 없을 때 첫 합성 → 초안
+    with Local() as db:
+        v = models.CopyVariant(design_id=ids["design"], preset_version_id=pid, batch_no=1, variant_no=1,
+                               headline="제목", body="", cta="", selected=True)
+        db.add(v); db.commit()
+    assert c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    assert q == ["low"]
+    # 확정 품질로 전체 재생성 후, 배경이 지워진 다른 비율군을 합성하면 참조 품질(medium)을 따른다
+    q.clear()
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True})
+    q.clear()
+    with Local() as db:
+        for g in db.scalars(select(models.GeneratedImage).where(models.GeneratedImage.design_id == ids["design"],
+                                                                models.GeneratedImage.kind == "background")).all():
+            if (g.layout or {}).get("template") == "정사각":
+                db.delete(g)
+        db.commit()
+    sq = ids["presets"]["정사각 1:1"]
+    with Local() as db:
+        db.add(models.CopyVariant(design_id=ids["design"], preset_version_id=sq, batch_no=1, variant_no=1,
+                                  headline="제목", body="", cta="", selected=True)); db.commit()
+    assert c.post(f"/api/designs/{ids['design']}/presets/{sq}/image", json={"regenerate_background": False}).status_code == 200
+    assert q == ["medium"]
+
 
 
 def test_variant_disabled_generates_independently(env, monkeypatch):
@@ -419,7 +467,7 @@ def test_variant_failure_falls_back_to_master(env, monkeypatch):
     """두 번째 비율군의 변형 생성이 실패해도(모델 파라미터 거절 등) 첫 배경은 버리지 않고 나머지 비율군이 그 파일을 쓴다."""
     from fastapi import HTTPException
     from app import imagegen
-    def boom(prompt, w, h, reference):
+    def boom(prompt, w, h, reference, quality=None):
         raise RuntimeError("model rejected")
     monkeypatch.setattr(imagegen, "generate_variant", boom)
     c, ids, calls = env["client"], env["ids"], env["calls"]

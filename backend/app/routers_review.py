@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import phrases, review
+from . import imagegen, phrases, review
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, IconAsset,
                      PresetVersion, ReviewResult)
 from .routers_assets import get_db
@@ -163,6 +163,13 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
         font_ref, texts, logo_aspect = g["font_ref"], g["texts"], g["logo_aspect"]
         if sel is None:
             items.append(review.item("문구", "사용할 카피", "수정 필요", "내보낼 카피가 선택되지 않았습니다", "강제", True))
+        bg = db.scalar(select(GeneratedImage).where(
+            GeneratedImage.design_id == d.id, GeneratedImage.preset_version_id == pid,
+            GeneratedImage.kind == "background").order_by(GeneratedImage.id.desc()).limit(1))
+        if bg is not None and (bg.layout or {}).get("draft"):
+            items.append(review.item("이미지", "배경 품질", "경고",
+                                     f"초안 품질({bg.layout.get('quality')})로 만든 배경입니다. 내보내기 전에 "
+                                     f"'확정 품질로 배경 생성'을 실행하세요 (확정: {imagegen.OPENAI_QUALITY})"))
         items += review.review_preset(pv, comp, texts, text_el, logo_el["box"] if logo_el else None,
                                       scrim, font_ref, brand, logo_aspect, sep)
         results += [(pid, it) for it in items]

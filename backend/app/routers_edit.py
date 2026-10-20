@@ -8,14 +8,14 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import compose, copywriter, editing, phrases
+from . import calllog, compose, copywriter, editing, phrases
 from .db import STORAGE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
 from .routers_images import _color, _img_out, create_shared_background
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 PREVIEW_MAX = 900
 
 

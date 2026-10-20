@@ -6,13 +6,13 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import icons, imagegen, phrases, prompts
+from . import calllog, icons, imagegen, phrases, prompts
 from .db import STORAGE_DIR
 from .models import Brand, BrandVersion, Design, GeneratedImage, IconAsset
 from .routers_assets import get_db
 from .routers_review import invalidate_icon_reviews, version_icon_set
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 WEB_SIZE = (256, 256)   # 웹용 아이콘 기본 크기 (사용자 결정)
 
 

@@ -37,7 +37,10 @@ type Violation = { type: string; field: string; detail: string; severity: string
 type Variant = { id: number; variant_no: number; headline: string; body: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
 // 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
-type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean }
+type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
+  calls?: { total: number; images: number; chats: number; by_kind: Record<string, number> }
+  quality?: { draft: string; final: string } }
+const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', icon: '아이콘', copy: '카피', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
 type Limit = { field: string; min: number | null; max: number | null; level: string | null } | null
 type CopyGroup = {
   preset_id: number; platform: string; name: string; batch_no: number | null
@@ -65,6 +68,8 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   const [imgTab, setImgTab] = useState<number | null>(null)
   const [bgBusy, setBgBusy] = useState(false)
   const [bgMsg, setBgMsg] = useState<string | null>(null)
+  const hasDraftBg = Object.values(imgs).some((r) => r?.background?.layout.draft)   // 초안 품질 배경이 하나라도 있는가
+  const qualitySplit = !usage?.quality || usage.quality.draft !== usage.quality.final   // 초안/확정 품질이 다르게 설정돼 있는가
   const [imgErr, setImgErr] = useState<Record<number, string>>({})
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
@@ -128,11 +133,13 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   }
 
   // 배경은 비율군(가로형/정사각/세로형)마다 1장 새로 만들고, 이미 합성된 매체는 새 배경으로 다시 합성한다(합성은 추가 생성 비용 없음).
-  const regenBackground = () => overlay.run('배경 새로 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner())
-  const regenBackgroundInner = async () => {
+  // final=false: 초안 품질(싸게, 형태·구도를 고르는 동안) / true: 확정 품질(내보낼 배경, 마음에 들 때 1회)
+  const regenBackground = (final: boolean) => overlay.run(
+    `${final ? '확정 품질로' : '초안 품질로'} 배경 새로 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)`, () => regenBackgroundInner(final))
+  const regenBackgroundInner = async (final: boolean) => {
     setBgBusy(true); setBgMsg(null)
     try {
-      await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle })
+      await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final })
       onDesignChange()
       const failed: string[] = []
       for (const g of withCopy) {
@@ -263,6 +270,9 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
               <p className={usage.exhausted ? 'notice err' : 'muted'}>
                 오늘 이미지 생성{usage.provider ? `(${usage.provider})` : ''} {usage.used}/{usage.limit}회 사용 · 남은 횟수 약 {usage.remaining}회
                 {usage.exhausted ? ' · 오늘 설정한 생성 한도를 모두 사용했습니다' : ''}
+                {usage.calls && usage.calls.total > 0 && (
+                  <> · 오늘 호출 내역: {Object.entries(usage.calls.by_kind).map(([k, n]) => `${CALL_KIND[k] ?? k} ${n}`).join(', ')} (이미지 {usage.calls.images}, 채팅 {usage.calls.chats})</>
+                )}
                 {' '}(호출 횟수 기준, UTC 0시 초기화) · 배경은 첫 비율군 1장을 만든 뒤 나머지 비율군(세로형·정사각·가로형)은 같은 장면을 그 비율 구도로 변형해 모든 매체가 한 장면을 씁니다.
               </p>
             )}
@@ -272,13 +282,21 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
                   {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
-              <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={regenBackground}>
-                배경 새로 생성 (비율군마다 1장, 모든 매체에 적용)
+              <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={() => regenBackground(false)}
+                title="형태·구도를 고르는 동안은 초안 품질로 만듭니다 (비용 약 1/4)">
+                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}비율군마다 1장, 모든 매체에 적용)
               </button>
+              {qualitySplit && <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background) || !hasDraftBg} onClick={() => regenBackground(true)}
+                title="지금 형태·구도가 마음에 들면 한 번만 확정 품질로 다시 만듭니다. 내보내기 전에 실행하세요">
+                확정 품질로 배경 생성{usage?.quality ? ` (${usage.quality.final})` : ''}
+              </button>}
               <button disabled={bgBusy || imgBusy !== null} onClick={resetGenerated}>시안 이미지 초기화</button>
               {bgBusy && <span className="muted">배경 생성 후 합성된 매체를 다시 합성하는 중… 1~2분 걸릴 수 있습니다.</span>}
             </div>
             {bgMsg && <div className="notice err">{bgMsg}</div>}
+            {qualitySplit && hasDraftBg && !bgBusy && (
+              <p className="muted">현재 배경은 초안 품질입니다. 형태·구도가 정해지면 '확정 품질로 배경 생성'을 한 번 실행한 뒤 내보내세요. 검수에서도 경고로 표시됩니다.</p>
+            )}
             {(() => {
               const cur = withCopy.find((x) => x.preset_id === imgTab) ?? withCopy[0]
               if (!cur) return null

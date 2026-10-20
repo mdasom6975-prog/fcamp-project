@@ -7,6 +7,7 @@ export type ImgOut = {
   layout: {
     warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean
     style?: string; style_reason?: string; logo_placement?: { corner: string }
+    quality?: string; draft?: boolean    // 배경 행: 생성 품질과 초안 여부(확정 품질보다 낮게 만들었는가)
   }
 } | null
 export type ImgRow = { preset_id: number; background: ImgOut; composite: ImgOut }
@@ -46,6 +47,7 @@ export default function ImageGrid({ items, rows, selected, onSelect, badge, dimm
                 ? <img src={thumbUrl(comp)} alt={`${it.platform} ${it.name} 합성본`} loading="lazy" />
                 : <span className="muted">미생성</span>}
               {it.content_kind === '분리 자산형' && <span className="img-tag">분리 자산형</span>}
+              {row?.background?.layout.draft && <span className="img-tag" title={`배경을 초안 품질(${row.background.layout.quality})로 만들었습니다. 내보내기 전에 '확정 품질로 배경 생성'을 실행하세요`}>초안 배경</span>}
               {warns > 0 && <span className="img-warn" title={comp?.layout.warnings?.join('\n')}>경고 {warns}</span>}
             </div>
             <div className="img-meta">

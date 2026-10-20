@@ -2,12 +2,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import copywriter, phrases
+from . import calllog, copywriter, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
 from .routers_assets import get_db
 from .routers_review import invalidate_reviews
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 
 
 def _brand_rules(bv: BrandVersion, brief: dict | None = None) -> dict:

@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from . import prompts
+from . import calllog, prompts
 from .db import BASE_DIR
 from .textcount import METHODS, count_len
 
@@ -150,11 +150,12 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
 
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict) -> list[dict]:
     system, user = _prompt(brand_name, brand, brief, placement, limits)
-    r = client().chat.completions.create(
-        model=CHAT_MODEL,
-        response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-    )
+    with calllog.timed("chat", "copy", "openai", CHAT_MODEL):
+        r = client().chat.completions.create(
+            model=CHAT_MODEL,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        )
     data = json.loads(r.choices[0].message.content or "{}")
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
