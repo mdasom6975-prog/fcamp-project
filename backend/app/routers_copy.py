@@ -69,9 +69,13 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
     try:
-        variants, attempts = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged)
+        variants, attempts, *rest = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged)
     except Exception as e:  # 키 값 등 민감 정보는 메시지에 포함하지 않는다
         return {"groups": _group(d, db), "failures": [f"카피 생성: {type(e).__name__}"]}
+    icon_candidates = rest[0] if rest else []
+    if icon_candidates:
+        # 같은 호출에서 받은 아이콘 기능명 후보를 브리프에 두면 아이콘 세트 생성이 기능명 제안 호출 없이 이것을 쓴다
+        d.brief = {**(d.brief or {}), "icon_candidates": icon_candidates}
     for pv, (_, limits) in zip(presets, per):
         last = db.scalar(select(func.max(CopyVariant.batch_no)).where(
             CopyVariant.design_id == d.id, CopyVariant.preset_version_id == pv.id)) or 0
@@ -83,7 +87,7 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
                 violations=copywriter.check(v, limits, rules), attempts=attempts))
     invalidate_reviews(db, d.id)
     db.commit()
-    return {"groups": _group(d, db), "failures": [], "merged_limits": merged}
+    return {"groups": _group(d, db), "failures": [], "merged_limits": merged, "icon_candidates": len(icon_candidates)}
 
 
 @router.post("/designs/{design_id}/copy/select-variant")

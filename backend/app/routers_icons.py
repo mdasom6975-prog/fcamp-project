@@ -173,11 +173,20 @@ def _create_svg(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dic
     return _draw_save_svg(db, d, bv, brand, items, style, w, h, forbidden)
 
 
+def _candidates_from_brief(d, forbidden) -> list[dict]:
+    """카피 생성 때 같은 호출로 받아 둔 기능명 후보(brief.icon_candidates). 금지 표현이 든 이름은 뺀다.
+    세트 크기(COUNT) 이상 남으면 기능명 제안 호출을 건너뛴다."""
+    cands = [c for c in ((d.brief or {}).get("icon_candidates") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    return [c for c in cands if not any(f and f in c["name"] for f in forbidden)]
+
+
 def _create_3d(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dict]]:
-    try:
-        items = icons.propose3d(brand.name, d.brief, forbidden)
-    except Exception as e:
-        raise HTTPException(502, f"기능명 제안에 실패했습니다 ({type(e).__name__})")
+    items = _candidates_from_brief(d, forbidden)
+    if len(_dedupe(items)) < icons.COUNT:      # 후보가 모자라면(카피 생성 전, 예전 시안) 전처럼 제안 호출
+        try:
+            items = icons.propose3d(brand.name, d.brief, forbidden)
+        except Exception as e:
+            raise HTTPException(502, f"기능명 제안에 실패했습니다 ({type(e).__name__})")
     items = _fill(items, lambda names, need: icons.propose3d_more(brand.name, d.brief, forbidden, names, need))
     items = [it for it in items if str(it.get("name") or "").strip()]
     if not items:

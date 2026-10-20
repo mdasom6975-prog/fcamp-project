@@ -124,3 +124,35 @@ def test_select_variant_applies_to_all_placements_and_clears_old_batches(env):
     with env["Local"]() as db:
         sel = db.query(models.CopyVariant).filter_by(design_id=ids["design"], selected=True).all()
         assert len(sel) == 3 and {(s.batch_no, s.variant_no) for s in sel} == {(2, 1)}
+
+
+def test_copy_call_also_stores_icon_candidates(env, monkeypatch):
+    """카피 호출이 (변형, 시도, 아이콘 후보) 를 돌려주면 후보를 브리프 icon_candidates 에 둔다 (아이콘 세트의 제안 호출 대체)."""
+    from app import copywriter
+    cands = [{"name": f"기능{i}", "concept": f"오브젝트 {i}"} for i in range(1, 16)]
+
+    def fake3(brand_name, brand, brief, placement, limits):
+        vs = [{"headline": "제목", "body": "본문", "cta": "보기", "violations": []}] * 3
+        return vs, 1, cands
+    monkeypatch.setattr(copywriter, "generate_checked", fake3)
+    c, ids = env["client"], env["ids"]
+    out = c.post(f"/api/designs/{ids['design']}/copy").json()
+    assert out["failures"] == [] and out["icon_candidates"] == 15
+    brief = c.get(f"/api/designs/{ids['design']}").json()["brief"]
+    assert brief["icon_candidates"] == cands and brief["product_name"] == "리빙 창고 대방출"
+
+
+def test_parse_icons_and_generate_checked_returns_candidates(monkeypatch):
+    from app import copywriter
+    data = {"icons": [{"name": "정기배송", "concept": "상자"}, {"name": " ", "concept": "x"}, {"name": "정기배송", "concept": "중복"},
+                      {"name": "빠른도착"}] + [{"name": f"n{i}", "concept": ""} for i in range(20)]}
+    got = copywriter.parse_icons(data)
+    assert got[:2] == [{"name": "정기배송", "concept": "상자"}, {"name": "빠른도착", "concept": ""}] and len(got) == 15
+
+    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None):
+        if icons_out is not None:
+            icons_out[:] = [{"name": "기능", "concept": "c"}]
+        return [{"headline": "h", "body": "b", "cta": "c"}]
+    monkeypatch.setattr(copywriter, "generate", fake_generate)
+    variants, attempts, icons = copywriter.generate_checked("b", {}, {}, {}, copywriter.limits_for([]))
+    assert attempts == 1 and icons == [{"name": "기능", "concept": "c"}] and variants[0]["violations"] == []

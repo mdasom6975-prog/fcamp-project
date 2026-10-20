@@ -18,9 +18,10 @@ from xml.sax.saxutils import escape
 from PIL import Image
 
 from . import calllog, imagegen, prompts
-from .copywriter import CHAT_MODEL, client
+from .copywriter import CHAT_MODEL, ICON_CANDIDATES, client
 
 COUNT = 10
+CANDIDATES = ICON_CANDIDATES   # 제안 호출 1회에 받는 기능명 수(여유분 포함). 중복·오류 제거 뒤 COUNT 개를 쓴다
 LIVE = 20.0          # 24 단위 중 그림이 차지하는 크기
 VIEW = 24
 RENDER = os.getenv("ICON_RENDER", "3d").strip().lower()          # 3d | svg
@@ -140,13 +141,13 @@ def _ask(system: str, user: str, kind: str = "icon_names") -> dict:
 
 
 def propose_and_draw(brand_name: str, brief: dict, style: dict, forbidden: list[str]) -> list[dict]:
-    system = prompts.render("icons/propose_system", count=COUNT)
+    system = prompts.render("icons/propose_system", count=CANDIDATES)
     user = prompts.render("icons/propose_user", brand_name=brand_name, product_name=brief.get("product_name"),
                           description=brief.get("description") or "없음", key_message=brief.get("key_message") or "없음",
                           target=brief.get("target") or "없음", stroke_width=style["stroke_width"], corner=style["corner"],
-                          fill=style["fill"], forbidden=", ".join(forbidden) or "없음", count=COUNT)
+                          fill=style["fill"], forbidden=", ".join(forbidden) or "없음", count=CANDIDATES)
     data = _ask(system, user)
-    return list(data.get("icons") or [])[:COUNT]
+    return list(data.get("icons") or [])[:CANDIDATES]
 
 
 def redraw_one(brand_name: str, brief: dict, name: str, concept: str, style: dict) -> list[dict]:
@@ -185,11 +186,11 @@ def style_vars(style: dict, palette: list[dict], tone: dict) -> dict:
 
 def propose3d(brand_name: str, brief: dict, forbidden: list[str]) -> list[dict]:
     """기능명 COUNT 개 + 렌더할 오브젝트 묘사(concept). 도형은 받지 않는다."""
-    system = prompts.render("icons/propose3d_system", count=COUNT)
+    system = prompts.render("icons/propose3d_system", count=CANDIDATES)
     user = prompts.render("icons/propose3d_user", brand_name=brand_name, product_name=brief.get("product_name"),
                           description=brief.get("description") or "없음", key_message=brief.get("key_message") or "없음",
-                          target=brief.get("target") or "없음", forbidden=", ".join(forbidden) or "없음", count=COUNT)
-    return list(_ask(system, user).get("icons") or [])[:COUNT]
+                          target=brief.get("target") or "없음", forbidden=", ".join(forbidden) or "없음", count=CANDIDATES)
+    return list(_ask(system, user).get("icons") or [])[:CANDIDATES]
 
 
 def propose3d_more(brand_name: str, brief: dict, forbidden: list[str], existing: list[str], need: int) -> list[dict]:

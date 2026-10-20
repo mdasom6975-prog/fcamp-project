@@ -162,3 +162,34 @@ def test_fill_invalidates_only_icon_review_items(env, monkeypatch):
         rows = db.scalars(select(models.ReviewResult).where(models.ReviewResult.design_id == did)).all()
         assert all(not r.valid for r in rows if r.preset_version_id is None)
         assert all(r.valid for r in rows if r.preset_version_id == 12345), "지면 결과는 유지"
+
+
+def test_icon_set_uses_candidates_from_copy_call_without_proposal(env, monkeypatch):
+    """브리프에 기능명 후보(카피 호출에서 받은 것)가 세트 크기 이상 있으면 제안 호출 없이 그대로 렌더한다.
+    금지 표현이 든 이름은 빼고, 여유분(15개)에서 10개를 쓴다."""
+    from app import icons, models
+    c, did, Local = env["client"], env["ids"]["design"], env["Local"]
+    cands = [{"name": "최저가보장", "concept": "x"}] + [{"name": f"후보{i}", "concept": f"오브젝트 {i}"} for i in range(1, 15)]
+    with Local() as db:
+        d = db.get(models.Design, did); d.kind = "아이콘 세트"; d.brief = {**d.brief, "icon_candidates": cands}; db.commit()   # 아이콘 세트 캠페인: 합성본 없이 생성 가능
+    monkeypatch.setattr(icons, "propose3d", lambda *a, **k: (_ for _ in ()).throw(AssertionError("제안 호출이 있으면 안 된다")))
+    rendered: list[str] = []
+    monkeypatch.setattr(icons, "render_many", lambda plist: (rendered.extend(plist), [_blob() for _ in plist])[1])
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    out = c.post(f"/api/designs/{did}/icons").json()
+    assert out["made"] == 10 and len(rendered) == 10
+    names = [a["name"] for a in out["icons"]]
+    assert names == [f"후보{i}" for i in range(1, 11)], "금지 표현 이름은 빠지고 순서대로 10개"
+
+
+def test_icon_set_falls_back_to_proposal_when_candidates_short(env, monkeypatch):
+    from app import icons, models
+    c, did, Local = env["client"], env["ids"]["design"], env["Local"]
+    with Local() as db:
+        d = db.get(models.Design, did); d.kind = "아이콘 세트"; d.brief = {**d.brief, "icon_candidates": [{"name": "하나", "concept": "x"}]}; db.commit()
+    called: list[int] = []
+    monkeypatch.setattr(icons, "propose3d", lambda *a, **k: (called.append(1), [{"name": f"제안{i}", "concept": "o"} for i in range(15)])[1])
+    monkeypatch.setattr(icons, "render_many", lambda plist: [_blob() for _ in plist])
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    out = c.post(f"/api/designs/{did}/icons").json()
+    assert called == [1] and out["made"] == 10 and out["icons"][0]["name"] == "제안0"

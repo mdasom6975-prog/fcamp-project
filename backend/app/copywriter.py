@@ -13,6 +13,8 @@ load_dotenv(BASE_DIR / ".env")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-5.4-mini")
 VARIANTS = 3
 MAX_ATTEMPTS = 2  # 최초 1회 + 위반 시 자동 재생성 1회
+ICON_COUNT = 10            # 아이콘 세트 크기
+ICON_CANDIDATES = 15       # 카피 호출에서 함께 받는 기능명 후보 수 (여유분 5개 → 중복·금지 표현 제외 뒤에도 추가 요청이 거의 없다)
 
 # 시드된 문구 제한 필드명을 제목/본문/CTA 로 연결한다. 목록에 없는 필드는 이번 단계에서 생성하지 않는다.
 HEADLINE_FIELDS = {"제목", "광고 제목", "타이틀"}
@@ -126,7 +128,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
 
     # 문장은 prompts/copy/system.md · user.md 에 있다. 여기서는 분기(없음/지정 없음)와 제한 줄만 계산해 넘긴다.
     voice = brand.get("voice", {})
-    system = prompts.render("copy/system", variants=VARIANTS)
+    system = prompts.render("copy/system", variants=VARIANTS, icon_count=ICON_CANDIDATES)
     user = prompts.render(
         "copy/user",
         brand_name=brand_name,
@@ -148,7 +150,21 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
     return system, user
 
 
-def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict) -> list[dict]:
+def parse_icons(data: dict) -> list[dict]:
+    """카피 응답에 같이 온 아이콘 기능명 후보 [{name, concept}]. 이름이 비었거나 겹치면 뺀다."""
+    out, seen = [], set()
+    for it in data.get("icons") or []:
+        name = str((it or {}).get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append({"name": name, "concept": str(it.get("concept") or "").strip()})
+    return out[:ICON_CANDIDATES]
+
+
+def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
+             icons_out: list | None = None) -> list[dict]:
+    """카피 변형을 만든다. icons_out 리스트를 주면 같은 응답의 아이콘 기능명 후보를 거기에 채운다(추가 호출 없음)."""
     system, user = _prompt(brand_name, brand, brief, placement, limits)
     with calllog.timed("chat", "copy", "openai", CHAT_MODEL) as info:
         r = client().chat.completions.create(
@@ -158,18 +174,23 @@ def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits:
         )
         calllog.note_usage(info, r)
     data = json.loads(r.choices[0].message.content or "{}")
+    if icons_out is not None:
+        icons_out[:] = parse_icons(data)
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
         out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta")})
     return out
 
 
-def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int]:
-    """생성 → 코드 검사 → 위반이 있으면 1회 재생성 → 위반이 적은 쪽을 채택."""
-    best, best_bad, attempts = None, 10**9, 0
+def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int, list[dict]]:
+    """생성 → 코드 검사 → 위반이 있으면 1회 재생성 → 위반이 적은 쪽을 채택. 반환: (변형, 시도 수, 아이콘 기능명 후보).
+    아이콘 후보는 마지막 응답의 것을 쓴다(아이콘 세트 생성 때 기능명 제안 호출을 대신한다)."""
+    best, best_bad, attempts, icons = None, 10**9, 0, []
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
-        variants = generate(brand_name, brand, brief, placement, limits)
+        got: list = []
+        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got)
+        icons = got or icons
         for v in variants:
             v["violations"] = check(v, limits, brand)
         bad = sum(1 for v in variants if v["violations"])
@@ -177,4 +198,4 @@ def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[
             best, best_bad = variants, bad
         if best is not None and best_bad == 0:
             break
-    return best or [], attempts
+    return best or [], attempts, icons

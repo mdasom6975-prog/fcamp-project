@@ -341,7 +341,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         rules = phrases.rules(bv, d.brief)
         limits = copywriter.limits_for(pv.text_limits)
         try:
-            variants, attempts = copywriter.generate_checked(
+            variants, attempts, *_ = copywriter.generate_checked(
                 brand.name, rules, d.brief, {"platform": pv.placement.platform.name, "name": pv.placement.name}, limits)
         except Exception as e:
             raise HTTPException(502, f"문구 생성에 실패했습니다 ({type(e).__name__})")
