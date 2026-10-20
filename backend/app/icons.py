@@ -28,6 +28,9 @@ RENDER = os.getenv("ICON_RENDER", "3d").strip().lower()          # 3d | svg
 MODEL_3D = os.getenv("ICON_IMAGE_MODEL", imagegen.OPENAI_MODEL)    # 3D 아이콘 이미지 모델 (기본: 배경과 같은 모델)
 QUALITY_3D = os.getenv("ICON_IMAGE_QUALITY", "medium")             # low | medium | high
 WORKERS_3D = 3                                                     # 동시 렌더 수 (세트 10개 → 약 2~3분)
+# 격자 렌더(ICON_GRID=n): 한 장에 n×n 개를 그려 잘라 쓴다. 0/1 이면 아이콘마다 1장. 2 면 10개가 3장(4+4+2)으로 줄고
+# 아이콘당 512px(출력 256px 이상)이라 화질은 충분하지만, 모델이 격자를 어기면 칸이 잘려 '다시 그리기'가 필요할 수 있다.
+GRID = max(0, int(os.getenv("ICON_GRID", "0") or 0))
 ALLOWED = {
     "path": {"d"}, "circle": {"cx", "cy", "r"}, "ellipse": {"cx", "cy", "rx", "ry"},
     "rect": {"x", "y", "width", "height", "rx", "ry"}, "line": {"x1", "y1", "x2", "y2"},
@@ -208,6 +211,25 @@ def render_prompt(name: str, concept: str, vars: dict) -> str:
 
 def render3d(prompt: str) -> Image.Image:
     return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D, kind="icon")
+
+
+def render_grid_prompt(cells: list[tuple[str, str]], vars: dict, n: int) -> str:
+    """격자 1장의 프롬프트. cells = [(기능명, 오브젝트 묘사)] (최대 n*n). 빈 칸은 모델에게 비워 두라고 한다."""
+    lines = [f"{i}. \"{name}\": {concept or name}" for i, (name, concept) in enumerate(cells, 1)]
+    return prompts.render("icons/render3d_grid", count=len(cells), n=n, cells="\n".join(lines), **vars)
+
+
+def split_grid(im: Image.Image, n: int) -> list[Image.Image]:
+    """n×n 격자 이미지를 칸 순서(왼쪽 위 → 오른쪽 → 다음 줄)대로 잘라 돌려준다. 칸 경계 2% 는 이웃 번짐을 피해 버린다."""
+    im = im.convert("RGBA")
+    cw, ch = im.width / n, im.height / n
+    pad_x, pad_y = cw * 0.02, ch * 0.02
+    out = []
+    for r in range(n):
+        for c in range(n):
+            box = (round(c * cw + pad_x), round(r * ch + pad_y), round((c + 1) * cw - pad_x), round((r + 1) * ch - pad_y))
+            out.append(im.crop(box))
+    return out
 
 
 def render_many(prompt_list: list[str]) -> list[Image.Image | Exception]:

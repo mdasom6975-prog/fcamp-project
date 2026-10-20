@@ -252,3 +252,43 @@ def test_render_only_picked_names_then_append_more(env, monkeypatch):
     assert r.status_code == 400 and "넘칩니다" in r.json()["detail"]
     cj = c.get(f"/api/designs/{did}/icons/candidates").json()
     assert cj["rendered"] == 10 and sum(x["rendered"] for x in cj["candidates"]) == 10
+
+
+def _grid_image(k: int, n: int = 2, side: int = 1024):
+    """n×n 격자에 k 개의 불투명 원을 칸 중앙에 둔 투명 이미지 (모델이 격자를 지킨 결과를 흉내)."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (side, side), (0, 0, 0, 0)); dr = ImageDraw.Draw(im)
+    cw = side / n
+    for i in range(k):
+        r, c = divmod(i, n)
+        cx, cy = (c + 0.5) * cw, (r + 0.5) * cw
+        dr.ellipse((cx - cw * 0.3, cy - cw * 0.3, cx + cw * 0.3, cy + cw * 0.3), fill=(40, 90, 200, 255))
+    return im
+
+
+def test_grid_render_uses_fewer_calls(env, monkeypatch):
+    """ICON_GRID=2: 10개를 2×2 격자 3장(4+4+2)으로 렌더해 잘라 저장한다. 각 아이콘은 투명·정상 크기로 맞춰진다."""
+    from app import icons
+    c = env["client"]
+    did = _icon_set_design(env)
+    monkeypatch.setattr(icons, "RENDER", "3d")
+    monkeypatch.setattr(icons, "GRID", 2)
+    prompts_seen: list[str] = []
+    def fake_many(plist):
+        prompts_seen.extend(plist)
+        return [_grid_image(min(4, 10 - 4 * i)) for i, _ in enumerate(plist)]
+    monkeypatch.setattr(icons, "render_many", fake_many)
+    j = c.post(f"/api/designs/{did}/icons", json={}).json()
+    assert j["made"] == 10 and j["complete"] and len(prompts_seen) == 3, "10개 → 격자 3장"
+    assert "2×2 격자" in prompts_seen[0] and '1. "후보1"' in prompts_seen[0] and '4. "후보4"' in prompts_seen[0]
+    assert '2. "후보10"' in prompts_seen[2] and "3." not in prompts_seen[2].split("[배치]")[0]
+    assert all(not a["violations"] for a in j["icons"]), "칸 모서리가 비어 투명 배경으로 판정"
+    assert all(abs(a["style"]["bbox"][2] - a["style"]["bbox"][0] - 20) < 0.6 for a in j["icons"]), "live area 에 맞춰짐"
+
+
+def test_split_grid_cells_in_order():
+    from app import icons
+    im = _grid_image(4)
+    cells = icons.split_grid(im, 2)
+    assert len(cells) == 4 and all(cell.size == (492, 492) for cell in cells), "칸 512px 에서 경계 2%(10px)씩 뺀 크기"
+    assert all(cell.getchannel("A").getbbox() for cell in cells)

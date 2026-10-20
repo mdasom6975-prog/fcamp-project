@@ -166,7 +166,7 @@ def env(tmp_path, monkeypatch):
     used: list[str | None] = []    # 호출마다 넘어온 모델
     prompts: list[str] = []        # 호출마다 넘어온 프롬프트
 
-    def fake_generate(prompt, w, h, quality="medium", model=None):
+    def fake_generate(prompt, w, h, quality="medium", model=None, provider=None):
         calls.append((w, h)); qualities.append(quality); used.append(model); prompts.append(prompt)
         return _scene(w, h)
 
@@ -294,6 +294,9 @@ def test_variant_disabled_generates_independently(env, monkeypatch):
     c, ids, calls, variants = env["client"], env["ids"], env["calls"], env["variants"]
     c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
     assert len(calls) == 3 and variants == []
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    assert all(r["background"] for r in rows) and len({r["background"]["layout"]["scene"] for r in rows}) == 1, \
+        "독립 생성이어도 한 번의 재생성은 같은 장면 — 목록에서 숨겨지지 않는다"
 
 
 def test_single_preset_regenerate_references_existing_background(env):
@@ -765,3 +768,54 @@ def test_model_choice_is_saved_and_used(env):
     assert r.status_code == 200, r.text
     b = c.get(f"/api/designs/{did}").json()["brief"]
     assert b["image_model"] == "gpt-image-1" and b["key_message"] == "바꾼 메시지"
+
+
+def test_flux_draft_provider_keeps_openai_for_final_only(env, monkeypatch):
+    """IMAGE_PROVIDER_DRAFT=cloudflare: 초안은 비율군마다 FLUX 로 독립 생성(변형 없음, OpenAI 0회), 확정은 초안을 참조해
+    OpenAI 로 승격하고 나머지 비율군은 그 결과를 참조한다."""
+    from app import imagegen
+    c, ids, variants, q, Local, models = env["client"], env["ids"], env["variants"], env["qualities"], env["Local"], env["models"]
+    did = ids["design"]
+    monkeypatch.setattr(imagegen, "DRAFT_PROVIDER", "cloudflare")
+    flux: list[str] = []
+    openai_calls: list[tuple] = []
+    # 픽스처의 가짜 generate_background 대신 공급자 인자로 갈리는 가짜(라우터가 provider 를 바르게 넘기는지 본다)
+    def by_provider(prompt, w, h, quality="medium", model=None, provider=None):
+        if provider == "cloudflare":
+            flux.append(prompt); return _scene(1024, 1024)
+        openai_calls.append((w, h, quality)); return _scene(w, h)
+    monkeypatch.setattr(imagegen, "generate_background", by_provider)
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
+    assert out["generated"] == 3 and len(flux) == 3 and openai_calls == [] and variants == []
+    rows = c.get(f"/api/designs/{did}/images").json()
+    assert all(r["background"]["layout"]["provider"] == "cloudflare" and r["background"]["layout"]["draft"] for r in rows)
+    assert rows[0]["background"]["width"] == 1024 and rows[0]["background"]["height"] == 1024, "FLUX 는 정사각"
+    # 합성은 초안 단계 변형이 없으므로 추가 호출 없이 최신 배경을 잘라 쓴다
+    _select_copy(env, ids["presets"].values())
+    pid = ids["presets"]["네이티브 2:1"]
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    assert len(flux) == 3 and openai_calls == []
+    # 확정: 합성본이 있는 비율군(가로형)만 초안(정사각 FLUX)을 참조해 OpenAI 로 승격, 나머지 비율군은 미룬다
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
+    assert out["upgraded"] is True and out["generated"] == 1 and sorted(out["deferred"]) == ["세로형", "정사각"]
+    assert len(variants) == 1 and variants[0]["ref_size"] == (1024, 1024) and variants[0]["size"] == (1536, 1024)
+    assert len(flux) == 3 and openai_calls == [] and q[-1] == "medium"
+    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
+    land = rows[pid]["background"]["layout"]
+    assert land["provider"] == "openai" and not land["draft"] and land["reference"]["upgraded_from_quality"] == "low"
+    # 미룬 비율군은 합성할 때 확정 배경을 참조해 OpenAI 변형으로 만든다(확정 품질 유지)
+    feed = ids["presets"]["피드 4:5"]
+    assert c.post(f"/api/designs/{did}/presets/{feed}/image", json={"regenerate_background": False}).status_code == 200
+    assert len(variants) == 2 and variants[-1]["size"] == (1024, 1536) and q[-1] == "medium" and len(flux) == 3
+
+
+def test_generate_background_dispatches_by_provider(monkeypatch):
+    from app import imagegen
+    monkeypatch.setattr(imagegen, "usage", lambda provider=None: {"exhausted": False})
+    monkeypatch.setattr(imagegen, "_generate_cloudflare", lambda prompt: _scene(1024, 1024))
+    monkeypatch.setattr(imagegen, "_generate_openai", lambda prompt, size, quality, model: _scene(*map(int, size.split("x"))))
+    assert imagegen.generate_background("p", 1536, 1024, provider="cloudflare").size == (1024, 1024)
+    assert imagegen.generate_background("p", 1536, 1024, provider="openai").size == (1536, 1024)
+    monkeypatch.setattr(imagegen, "PROVIDER", "openai"); monkeypatch.setattr(imagegen, "DRAFT_PROVIDER", "cloudflare")
+    assert imagegen.provider_for(True) == "openai" and imagegen.provider_for(False) == "cloudflare"
+    assert not imagegen.can_vary("per_ratio", final=False) and imagegen.can_vary("per_ratio", final=True)

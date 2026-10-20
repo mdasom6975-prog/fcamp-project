@@ -108,7 +108,7 @@ def image_settings():
     """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 초안/확정 추정 비용)과 배경 방식, 기본값."""
     return {"models": imagegen.model_options(), "modes": list(imagegen.BG_MODES), "default_mode": imagegen.default_bg_mode(),
             "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}, "provider": imagegen.PROVIDER,
-            "usd_krw": imagegen.pricing_rate()}
+            "draft_provider": imagegen.DRAFT_PROVIDER, "usd_krw": imagegen.pricing_rate()}
 
 
 @router.put("/designs/{design_id}/image-settings")
@@ -193,8 +193,11 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     single = st["bg_mode"] == "single"           # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등)
     gw, gh = imagegen.size_for(template, per_ratio=True if single else None)
     quality = imagegen.quality_for(final)
+    provider = imagegen.provider_for(final)       # 초안 공급자가 FLUX 면 초안은 무료 구간에서, 확정만 OpenAI
     ref_img = None
-    if reference is not None and imagegen.can_vary() and Path(reference.file_path).exists():
+    # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 초안→확정 승격(upgrade)은 can_edit
+    if reference is not None and Path(reference.file_path).exists() and provider == "openai" \
+            and (imagegen.can_edit() if upgrade else imagegen.can_vary(st["bg_mode"], final)):
         ref_img = Image.open(reference.file_path)
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single)
@@ -203,7 +206,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
             prompt = imagegen.build_upgrade_prompt(prompt) if upgrade else imagegen.build_variant_prompt(prompt)
             bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"])
         else:
-            bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"])
+            bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider)
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except Exception as e:
@@ -212,7 +215,8 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
-              "quality": quality, "draft": imagegen.is_draft(quality), "model": st["model"], "mode": st["bg_mode"],
+              "quality": quality, "draft": imagegen.is_draft(quality), "mode": st["bg_mode"], "provider": provider,
+              "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or path.stem) if (ref_img is not None and not upgrade) else path.stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade, single=single)}
@@ -266,7 +270,8 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
         try:
             if master is None and final:
                 # 확정 품질: 같은 비율군의 현재 초안이 있으면 그 장면을 참조해 승격한다(초안으로 고른 구도가 유지된다).
-                draft = _latest_design_bg(db, d.id, template)
+                # 같은 비율군 초안이 없으면(FLUX 초안은 정사각뿐, 1장 방식 등) 현재 장면의 최신 초안을 참조한다.
+                draft = _latest_design_bg(db, d.id, template) or _latest_design_bg(db, d.id)
                 if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_edit() \
                         and Path(draft.file_path).exists():
                     try:
@@ -289,6 +294,10 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
                 db.add(rows[pid])
             db.flush()
             continue
+        if master is not None:
+            # 한 번의 재생성에서 만든 배경은 참조 변형이든 독립 생성(FLUX 초안, IMAGE_BG_VARIANT=0)이든 같은 장면으로 묶는다.
+            # 그래야 목록·합성이 마지막 비율군만 '현재 장면'으로 보고 나머지를 숨기지 않는다.
+            layout = {**layout, "scene": _scene(master) or layout.get("scene")}
         for pid in pids:
             rows[pid] = _bg_row(d, pid, path, bg.width, bg.height, prompt, bv.id, layout)
             db.add(rows[pid])
@@ -415,7 +424,11 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
         same = _latest_design_bg(db, design_id) if single else _latest_design_bg(db, design_id, tpl)
         # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
         # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
-        src = same or (None if imagegen.can_vary(st["bg_mode"]) else _latest_design_bg(db, design_id))
+        # 변형 가능 여부는 현재 배경의 단계로 판단한다: 최신 배경이 확정이면 확정 공급자(OpenAI) 기준, 초안이면 초안 공급자 기준
+        # (FLUX 초안이면 변형 없이 잘라 쓴다). 변형이 불가능하면 비율군이 달라도 최신 배경을 잘라 쓴다.
+        latest = _latest_design_bg(db, design_id)
+        stage_final = latest is not None and not imagegen.is_draft((latest.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
+        src = same or (None if imagegen.can_vary(st["bg_mode"], final=stage_final) else latest)
         if src is not None and Path(src.file_path).exists():
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)

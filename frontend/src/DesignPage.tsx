@@ -44,7 +44,7 @@ type ImgUsage = { date: string; provider?: string; used: number; limit: number; 
 const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', icon: '아이콘', copy: '카피', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
 type ImgSettings = {
   models: { model: string; default: boolean; draft_usd: number | null; final_usd: number | null; estimated: boolean; input_fidelity: boolean }[]
-  modes: string[]; default_mode: string; quality: { draft: string; final: string }; provider: string; usd_krw: number
+  modes: string[]; default_mode: string; quality: { draft: string; final: string }; provider: string; draft_provider?: string; usd_krw: number
 }
 const MODE_LABEL: Record<string, string> = { per_ratio: '비율군마다 1장 (1~3회, 변형은 images.edit)', single: '1장을 모든 지면이 잘라 씀 (1회, edit 없음)' }
 const usdKrw = (v: number | null | undefined, rate: number) => (v == null ? '요율 없음' : `$${v.toFixed(3)} (약 ${Math.round(v * rate).toLocaleString()}원)`)
@@ -325,6 +325,9 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, on
                 {(() => { const m = imgSettings.models.find((x) => x.model === curModel); return m ? (
                   <span className="muted">정사각 1장 초안 {usdKrw(m.draft_usd, imgSettings.usd_krw)} · 확정 {usdKrw(m.final_usd, imgSettings.usd_krw)}{m.estimated ? ' · 요금표에 없어 추정' : ''}{m.input_fidelity ? '' : ' · input_fidelity 미지원'}</span>
                 ) : null })()}
+                {imgSettings.draft_provider && imgSettings.draft_provider !== imgSettings.provider && (
+                  <span className="muted">초안은 {imgSettings.draft_provider === 'cloudflare' ? 'FLUX(Workers AI, 무료 구간)' : imgSettings.draft_provider} · 확정만 {imgSettings.provider}</span>
+                )}
                 <label className="muted">배경 방식{' '}
                   <select value={curMode} disabled={bgBusy} onChange={(e) => saveSettings({ bg_mode: e.target.value })}>
                     {imgSettings.modes.map((m) => <option key={m} value={m}>{MODE_LABEL[m] ?? m}</option>)}

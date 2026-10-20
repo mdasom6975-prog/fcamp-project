@@ -13,7 +13,14 @@ from PIL import Image
 from . import calllog, prompts
 from .copywriter import BASE_DIR, client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
-PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare
+PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare — 확정(내보낼) 배경의 공급자
+# 초안 배경의 공급자. cloudflare(FLUX.1 schnell, 무료 구간)로 두면 형태·구도를 고르는 동안은 OpenAI 호출이 0 이고,
+# '확정 품질로 배경 생성'이 그 초안을 참조해 OpenAI 로 한 번 만든다. 기본은 PROVIDER 와 같다.
+DRAFT_PROVIDER = os.getenv("IMAGE_PROVIDER_DRAFT", PROVIDER).strip().lower()
+
+
+def provider_for(final: bool) -> str:
+    return PROVIDER if final else DRAFT_PROVIDER
 # OpenAI 기본값: gpt-image-1.5 + medium 품질(비교 테스트 결과 반영, 정사각 장당 약 60원)
 OPENAI_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1.5")
 OPENAI_QUALITY = os.getenv("IMAGE_QUALITY", "medium")                 # low | medium | high | auto — 확정 품질(내보낼 배경)
@@ -286,11 +293,11 @@ def can_edit() -> bool:
     return PROVIDER == "openai"
 
 
-def can_vary(bg_mode: str | None = None) -> bool:
-    """다른 비율군을 참조 변형(images.edit)으로 만들 수 있는가. OpenAI + 비율군별 방식 + 변형 켜짐.
-    1장 방식(single)은 비율군 변형이 없다(잘라 쓴다)."""
+def can_vary(bg_mode: str | None = None, final: bool = True) -> bool:
+    """다른 비율군을 참조 변형(images.edit)으로 만들 수 있는가. 그 단계의 공급자가 OpenAI + 비율군별 방식 + 변형 켜짐.
+    1장 방식(single)은 비율군 변형이 없다(잘라 쓴다). 초안 공급자가 FLUX 면 초안 단계에는 변형이 없다(비율군마다 독립 생성)."""
     mode = bg_mode or default_bg_mode()
-    return VARIANT and mode == "per_ratio" and can_edit()
+    return VARIANT and mode == "per_ratio" and provider_for(final) == "openai"
 
 
 # 모델이 input_fidelity 를 거절한 사실을 모델별로 파일에 기억한다. 메모리 플래그만 쓰면 서버를 재시작할 때마다
@@ -379,13 +386,14 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
 
 
 def generate_background(prompt: str, w: int, h: int, quality: str = OPENAI_QUALITY,
-                        model: str | None = None) -> Image.Image:
+                        model: str | None = None, provider: str | None = None) -> Image.Image:
     """공급자별 생성. (w, h) 는 생성 크기(size_for 결과). 지면 비율의 나머지 차이는 compose.cover_crop 이 맞춘다.
-    quality·model 은 OpenAI 에만 적용된다(FLUX 는 품질 단계가 없다)."""
-    if PROVIDER not in ("openai", "cloudflare"):
-        raise RuntimeError(f"IMAGE_PROVIDER 값이 올바르지 않습니다 ({PROVIDER}). openai 또는 cloudflare")
-    if usage()["exhausted"]:
+    quality·model 은 OpenAI 에만 적용된다(FLUX 는 품질 단계·크기 지정이 없어 정사각으로 나온다). provider 기본은 PROVIDER."""
+    provider = (provider or PROVIDER).strip().lower()
+    if provider not in ("openai", "cloudflare"):
+        raise RuntimeError(f"이미지 공급자 값이 올바르지 않습니다 ({provider}). openai 또는 cloudflare")
+    if usage(provider)["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
                             "한도를 올리려면 IMAGE_DAILY_LIMIT 을 조정하세요")
-    return (_generate_openai(prompt, f"{w}x{h}", quality, model or OPENAI_MODEL) if PROVIDER == "openai"
+    return (_generate_openai(prompt, f"{w}x{h}", quality, model or OPENAI_MODEL) if provider == "openai"
             else _generate_cloudflare(prompt))
