@@ -157,6 +157,31 @@ def _bg_row(db, did, pid) -> GeneratedImage:
     return bg
 
 
+def rerender_edited(db, d: Design, exclude: int | None = None, note_unedited: bool = False) -> tuple[list[int], list[dict]]:
+    """편집 요소가 있는 지면들을 요소를 유지한 채 현재 배경으로 다시 그린다(배경 재생성 뒤 호출). 잠긴 배경은 건너뛴다.
+    반환: (다시 그린 preset_id 들, 건너뛴 {preset_id, name, reason} 들). note_unedited 면 편집 전 지면도 사유와 함께 돌려준다."""
+    applied, skipped = [], []
+    for pid in d.preset_version_ids:
+        if pid == exclude:
+            continue
+        opv = db.get(PresetVersion, pid)
+        orows = _els(db, d.id, pid)
+        name = opv.placement.name if opv else str(pid)
+        if not orows:
+            if note_unedited:
+                skipped.append({"preset_id": pid, "name": name, "reason": "편집 전 상태입니다. '문구 다시 합성'으로 새 배경을 반영하세요"})
+            continue
+        oimg = next((r for r in orows if r.type == "image"), None)
+        if oimg is None or oimg.locked:
+            skipped.append({"preset_id": pid, "name": name, "reason": "배경이 잠겨 있어 이전 배경을 유지합니다"})
+            continue
+        oimg.props = {**oimg.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}      # 새 이미지는 자르기 초기화
+        _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
+        applied.append(pid)
+    db.flush()
+    return applied, skipped
+
+
 # ---------- 조회 ----------
 @router.get("/designs/{design_id}/presets/{preset_id}/edit")
 def get_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
@@ -307,23 +332,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         _, deferred = create_shared_background(db, d, in_use=editing_pids)
         img_el.props = {**img_el.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}   # 새 이미지는 자르기 초기화
         db.flush()
-        applied, skipped = [], []
-        for pid in d.preset_version_ids:
-            if pid == preset_id:
-                continue
-            opv = db.get(PresetVersion, pid)
-            orows = _els(db, d.id, pid)
-            name = opv.placement.name if opv else str(pid)
-            if not orows:
-                skipped.append({"preset_id": pid, "name": name, "reason": "편집 전 상태입니다. '문구 다시 합성'으로 새 배경을 반영하세요"})
-                continue
-            oimg = next((r for r in orows if r.type == "image"), None)
-            if oimg is None or oimg.locked:
-                skipped.append({"preset_id": pid, "name": name, "reason": "배경이 잠겨 있어 이전 배경을 유지합니다"})
-                continue
-            oimg.props = {**oimg.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}
-            _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
-            applied.append(pid)
+        applied, skipped = rerender_edited(db, d, exclude=preset_id, note_unedited=True)
         extra = {"applied": applied, "skipped": skipped, "deferred": deferred}
     elif element == "text":
         t = next((r for r in rows if r.type == "text"), None)

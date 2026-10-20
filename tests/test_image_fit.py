@@ -634,3 +634,53 @@ def test_editor_background_regenerate_makes_only_editing_ratio_groups(env):
     assert calls == [(1536, 1024)] and sorted(r.json()["deferred"]) == ["세로형", "정사각"]
     rows = {x["preset_id"]: x for x in c.get(f"/api/designs/{did}/images").json()}
     assert rows[pid]["background"] is not None and rows[p["피드 4:5"]]["background"] is None
+
+
+def test_final_quality_upgrades_from_current_draft_scene(env):
+    """확정 품질 생성은 같은 비율군의 현재 초안을 참조해(승격 프롬프트) 장면·구도를 유지하고, 나머지 비율군은 그 결과를 참조한다."""
+    c, ids, calls, variants, q = env["client"], env["ids"], env["calls"], env["variants"], env["qualities"]
+    did = ids["design"]
+    c.post(f"/api/designs/{did}/background/regenerate", json={})
+    calls.clear(); variants.clear(); q.clear()
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
+    assert out["upgraded"] is True and out["generated"] == 3 and len(calls) == 3 and q == ["medium"] * 3
+    assert len(variants) == 3, "첫 비율군도 초안을 참조한 변형(승격)으로 만든다"
+    up = variants[0]
+    assert up["size"] == (1024, 1536) and up["ref_size"] == (1024, 1536)
+    assert up["prompt"].startswith("[참조 이미지] 첨부한 이미지는 이 지면의 초안 배경") and "[구도]" in up["prompt"]
+    assert all(v["prompt"].startswith("[참조 이미지] 첨부한 이미지는 같은 캠페인") for v in variants[1:])
+    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
+    feed = rows[ids["presets"]["피드 4:5"]]["background"]["layout"]
+    assert feed["reference"]["upgraded_from_quality"] == "low" and feed["prompts"][0].startswith("image/upgrade@")
+    assert not feed["draft"] and all(not r["background"]["layout"]["draft"] for r in rows.values())
+    # 승격본은 새 장면: 다른 비율군이 모두 그 장면을 따른다
+    assert len({r["background"]["layout"]["scene"] for r in rows.values()}) == 1
+
+
+def test_final_quality_without_draft_generates_fresh(env):
+    c, ids, variants = env["client"], env["ids"], env["variants"]
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True}).json()
+    assert out["upgraded"] is False and len(variants) == 2
+
+
+def test_regenerate_rerenders_presets_with_saved_edits(env):
+    """편집 화면에서 저장한 지면은 자동 합성이 막히므로, 배경 재생성이 편집 요소를 유지한 채 새 배경으로 다시 그린다."""
+    c, ids = env["client"], env["ids"]
+    did, pid = ids["design"], ids["presets"]["피드 4:5"]
+    _select_copy(env, [pid])
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    j = c.get(f"/api/designs/{did}/presets/{pid}/edit").json()
+    text = next(e for e in j["elements"] if e["type"] == "text")
+    assert c.put(f"/api/designs/{did}/presets/{pid}/edit",
+                 json={"elements": [{"id": text["id"], "props": {**text["props"], "text": "바꾼 제목"}}]}).status_code == 200
+    before = c.get(f"/api/designs/{did}/images").json()[0]["composite"]
+    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
+    assert out["applied"] == [pid] and out["skipped"] == []
+    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
+    after = rows[pid]["composite"]
+    assert after["file"] != before["file"] and after["layout"]["edited"] is True, "편집 내용을 유지한 새 합성본"
+    assert rows[pid]["background"]["file"] != before["file"]
+    j = c.get(f"/api/designs/{did}/presets/{pid}/edit").json()
+    assert next(e for e in j["elements"] if e["type"] == "text")["props"]["text"] == "바꾼 제목"
+    # 자동 합성은 여전히 저장된 편집을 보호한다
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 409

@@ -141,10 +141,18 @@ def build_variant_prompt(base_prompt: str) -> str:
     return prompts.render("image/same_scene", base=base_prompt)
 
 
-def prompt_refs(template: str, style: str, variant: bool = False) -> list[str]:
+def build_upgrade_prompt(base_prompt: str) -> str:
+    """초안 배경(참조 이미지)을 붙여 같은 장면을 확정 품질로 다시 만드는 프롬프트. 문장은 prompts/image/upgrade.md.
+    초안과 확정의 느낌 차이를 줄이기 위해 장면·구도를 고정하고 질감·디테일만 높이게 한다."""
+    return prompts.render("image/upgrade", base=base_prompt)
+
+
+def prompt_refs(template: str, style: str, variant: bool = False, upgrade: bool = False) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{template}"),
             prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common")]
+    if upgrade:
+        return [prompts.ref("image/upgrade")] + refs
     return ([prompts.ref("image/same_scene")] + refs) if variant else refs
 
 

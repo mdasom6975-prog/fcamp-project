@@ -24,6 +24,7 @@ const API_LABEL: Record<string, string> = { 'images.generate': 'generate', 'imag
 
 const usd = (v: number | null | undefined) => (v == null ? '—' : `$${v.toFixed(v < 0.1 ? 4 : 3)}`)
 const krw = (v: number | null | undefined) => (v == null ? '' : ` (약 ${v.toLocaleString()}원)`)
+const hhmmss = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso.slice(11, 19) : d.toLocaleTimeString('ko-KR', { hour12: false }) }
 const sec = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}초` : `${ms}ms`)
 const tok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
@@ -102,7 +103,7 @@ export default function DevStats({ designId, kinds, label, refreshKey }: {
               <tbody>
                 {rows.slice(0, 20).map((r, i) => (
                   <tr key={i} className={r.ok ? '' : 'bad'}>
-                    <td>{r.ts.slice(11, 19)}</td>
+                    <td title={r.ts}>{hhmmss(r.ts)}</td>
                     <td>{KIND_LABEL[r.kind] ?? r.kind}</td>
                     <td>{API_LABEL[r.api] ?? r.api}</td>
                     <td>{r.model}</td>

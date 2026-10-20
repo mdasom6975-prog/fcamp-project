@@ -138,16 +138,24 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
   // 아직 합성하지 않은 비율군은 나중에 그 매체를 합성할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
   // final=false: 초안 품질(싸게, 형태·구도를 고르는 동안) / true: 확정 품질(내보낼 배경, 마음에 들 때 1회)
   const regenBackground = (final: boolean) => overlay.run(
-    `${final ? '확정 품질로' : '초안 품질로'} 배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)`, () => regenBackgroundInner(final))
+    final ? '초안 배경의 장면을 참조해 확정 품질로 다시 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)'
+      : '초안 품질로 배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner(final))
   const regenBackgroundInner = async (final: boolean) => {
     setBgBusy(true); setBgMsg(null); setBgNote(null)
     try {
-      const out = await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final }) as { deferred?: string[] }
-      if (out.deferred?.length) setBgNote(`아직 합성본이 없는 비율군(${out.deferred.join(', ')})은 그 지면을 합성할 때 같은 장면으로 만듭니다.`)
+      const out = await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final }) as {
+        deferred?: string[]; applied?: number[]; skipped?: { name: string; reason: string }[]; upgraded?: boolean }
+      const notes: string[] = []
+      if (out.upgraded) notes.push('초안 배경의 장면·구도를 참조해 확정 품질로 다시 그렸습니다.')
+      if (out.applied?.length) notes.push(`편집 저장한 지면 ${out.applied.length}개는 편집 내용을 유지한 채 새 배경으로 다시 그렸습니다.`)
+      if (out.skipped?.length) notes.push(`유지됨: ${out.skipped.map((x) => `${x.name}(${x.reason})`).join(' / ')}`)
+      if (out.deferred?.length) notes.push(`아직 합성본이 없는 비율군(${out.deferred.join(', ')})은 그 지면을 합성할 때 같은 장면으로 만듭니다.`)
+      if (notes.length) setBgNote(notes.join(' '))
       onDesignChange()
       const failed: string[] = []
       for (const g of withCopy) {
         if (!imgs[g.preset_id]?.composite) continue
+        if (out.applied?.includes(g.preset_id)) continue   // 편집 저장한 지면은 서버가 요소를 유지한 채 이미 다시 그렸다 (자동 합성은 409)
         try {
           await post(`/api/designs/${designId}/presets/${g.preset_id}/image`, { regenerate_background: false })
         } catch (e) {
@@ -293,7 +301,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
                 배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}합성한 비율군마다 1장, 모든 매체에 적용)
               </button>
               {qualitySplit && <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background) || !hasDraftBg} onClick={() => regenBackground(true)}
-                title="지금 형태·구도가 마음에 들면 한 번만 확정 품질로 다시 만듭니다. 내보내기 전에 실행하세요">
+                title="지금 초안의 장면·구도를 참조해 한 번만 확정 품질로 다시 그립니다. 내보내기 전에 실행하세요">
                 확정 품질로 배경 생성{usage?.quality ? ` (${usage.quality.final})` : ''}
               </button>}
               <button disabled={bgBusy || imgBusy !== null} onClick={resetGenerated}>시안 이미지 초기화</button>

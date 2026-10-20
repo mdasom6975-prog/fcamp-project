@@ -153,8 +153,8 @@ def _gen_error(e: Exception) -> str:
     return f"이미지 생성에 실패했습니다 ({type(e).__name__})"
 
 
-def _generate_one(db: Session, d: Design, template: str,
-                  reference: GeneratedImage | None = None, final: bool = False) -> tuple[Path, Image.Image, str, dict]:
+def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
+                  final: bool = False, upgrade: bool = False) -> tuple[Path, Image.Image, str, dict]:
     """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
     final=False 면 초안 품질(IMAGE_QUALITY_DRAFT), True 면 확정 품질(IMAGE_QUALITY). layout.quality 에 남긴다.
     생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
@@ -170,7 +170,8 @@ def _generate_one(db: Session, d: Design, template: str,
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style)
         if ref_img is not None:
-            prompt = imagegen.build_variant_prompt(prompt)
+            # upgrade: 참조가 같은 비율군의 초안 → 장면·구도를 고정하고 확정 품질로 다시 그린다(새 장면의 시작)
+            prompt = imagegen.build_upgrade_prompt(prompt) if upgrade else imagegen.build_variant_prompt(prompt)
             bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality)
         else:
             bg = imagegen.generate_background(prompt, gw, gh, quality)
@@ -183,12 +184,13 @@ def _generate_one(db: Session, d: Design, template: str,
     bg.save(path)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "draft": imagegen.is_draft(quality),
-              # 장면 id: 참조로 만들면 참조의 장면(같은 장면), 아니면 이 파일이 새 장면의 시작
-              "scene": (_scene(reference) or path.stem) if ref_img is not None else path.stem,
-              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None)}
+              # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
+              "scene": (_scene(reference) or path.stem) if (ref_img is not None and not upgrade) else path.stem,
+              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
-                               "template": (reference.layout or {}).get("template")}
+                               "template": (reference.layout or {}).get("template"),
+                               **({"upgraded_from_quality": (reference.layout or {}).get("quality")} if upgrade else {})}
     return path, bg, prompt, layout
 
 
@@ -231,7 +233,20 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
     master: GeneratedImage | None = None
     for template, pids in groups.items():
         try:
-            path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final)
+            if master is None and final:
+                # 확정 품질: 같은 비율군의 현재 초안이 있으면 그 장면을 참조해 승격한다(초안으로 고른 구도가 유지된다).
+                draft = _latest_design_bg(db, d.id, template)
+                if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_vary() \
+                        and Path(draft.file_path).exists():
+                    try:
+                        path, bg, prompt, layout = _generate_one(db, d, template, reference=draft, final=True, upgrade=True)
+                    except HTTPException as e:
+                        log.warning("초안 참조 승격 실패 → 새로 생성: %s", e.detail)
+                        path, bg, prompt, layout = _generate_one(db, d, template, final=True)
+                else:
+                    path, bg, prompt, layout = _generate_one(db, d, template, final=True)
+            else:
+                path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final)
         except HTTPException as e:
             if master is None:
                 raise
@@ -269,10 +284,14 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
         db.flush()
     composed = [pid for pid in d.preset_version_ids if _latest(db, design_id, pid, "composite") is not None]
     rows, deferred = create_shared_background(db, d, final=final, in_use=composed or None)
+    # 편집 화면에서 저장한 지면은 자동 합성(make_image)이 409 로 막히므로, 편집 요소를 유지한 채 새 배경으로 여기서 다시 그린다
+    from .routers_edit import rerender_edited     # 순환 import 회피 (routers_edit 가 이 모듈을 import 한다)
+    applied, skipped = rerender_edited(db, d)
     db.commit()
     first = next(iter(rows.values()))
     fallbacks = sorted({r.layout.get("fallback") for r in rows.values() if r.layout.get("fallback")})
     return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}), "deferred": deferred,
+            "applied": applied, "skipped": skipped, "upgraded": bool(first.layout.get("reference", {}).get("upgraded_from_quality")),
             "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
             "quality": first.layout.get("quality"), "draft": bool(first.layout.get("draft")),
             "warnings": [f"일부 비율군은 변형 생성에 실패해 첫 배경을 잘라 썼습니다: {m}" for m in fallbacks]}
