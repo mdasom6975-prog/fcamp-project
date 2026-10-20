@@ -4,6 +4,7 @@ import EditPanel from './EditPanel'
 import ReviewPanel from './ReviewPanel'
 import { PhraseBox } from './BrandPage'
 import ImageGrid, { fileUrl, type ImgRow } from './ImageGrid'
+import DevStats from './DevStats'
 import { busy as overlay } from './Busy'
 
 type PresetLite = {
@@ -38,7 +39,7 @@ type Variant = { id: number; variant_no: number; headline: string; body: string;
 // 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
-  calls?: { total: number; images: number; chats: number; by_kind: Record<string, number> }
+  calls?: { total: number; images: number; chats: number; by_kind: Record<string, { count: number }> }
   quality?: { draft: string; final: string } }
 const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', icon: '아이콘', copy: '카피', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
 type Limit = { field: string; min: number | null; max: number | null; level: string | null } | null
@@ -225,6 +226,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
         </div>
       </div>
       {err && <div className="notice err">{err}</div>}
+      <DevStats designId={designId} kinds={['copy']} label="카피 생성" refreshKey={`${busy}-${groups.length}-${count}`} />
 
       {!has && <p className="muted gen-empty">카피 생성을 누르면 선택한 규격의 글자 수 제한에 맞춰 시안 문구를 만듭니다.</p>}
 
@@ -269,12 +271,13 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, onDesignChange,
 
           <div id="sec-images" className="gen-images">
             <h4 className="gen-h"><span className="step-no">④</span> 이미지 생성·편집</h4>
+            <DevStats designId={designId} kinds={['background', 'variant']} label="배경 생성" refreshKey={`${imgBusy}-${bgBusy}-${usage?.used}`} />
             {usage && (
               <p className={usage.exhausted ? 'notice err' : 'muted'}>
                 오늘 이미지 생성{usage.provider ? `(${usage.provider})` : ''} {usage.used}/{usage.limit}회 사용 · 남은 횟수 약 {usage.remaining}회
                 {usage.exhausted ? ' · 오늘 설정한 생성 한도를 모두 사용했습니다' : ''}
                 {usage.calls && usage.calls.total > 0 && (
-                  <> · 오늘 호출 내역: {Object.entries(usage.calls.by_kind).map(([k, n]) => `${CALL_KIND[k] ?? k} ${n}`).join(', ')} (이미지 {usage.calls.images}, 채팅 {usage.calls.chats})</>
+                  <> · 오늘 호출 내역: {Object.entries(usage.calls.by_kind).map(([k, n]) => `${CALL_KIND[k] ?? k} ${n.count}`).join(', ')} (이미지 {usage.calls.images}, 채팅 {usage.calls.chats})</>
                 )}
                 {' '}(호출 횟수 기준, UTC 0시 초기화) · 배경은 첫 비율군 1장을 만든 뒤 나머지 비율군(세로형·정사각·가로형)은 같은 장면을 그 비율 구도로 변형해 모든 매체가 한 장면을 씁니다.
               </p>
@@ -536,6 +539,7 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
               ? <span className={`badge ${cur?.id === it.preset_id ? 'b-ok' : 'b-warn'}`}>{cur?.id === it.preset_id ? '편집 중' : '편집 가능'}</span>
               : null} />
           <p className="muted">카드를 누르면 그 지면을 편집합니다. 잠긴 요소(로고)는 바꿀 수 없고, 저장하면 검수 결과가 무효화되어 다시 검수해야 합니다.</p>
+          <DevStats designId={design.id} kinds={['background', 'variant', 'copy']} label="편집 화면 재생성" refreshKey={Object.values(imgs).map((r) => r?.composite?.file ?? '').join(',')} />
           {cur && <EditPanel key={cur.id} designId={design.id} presetId={cur.id} onClose={onBack} onSaved={load} />}
         </>
       )}
@@ -626,6 +630,7 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     return (
       <div className="imgblock icon-step">
         <strong>아이콘 세트</strong>
+        <DevStats designId={designId} kinds={['icon', 'icon_names', 'icon_redraw']} label="아이콘 생성" refreshKey={`${busy}-${filling}-${one}-${items.length}-${ver}`} />
         <label className="icon-ask">
           <input type="checkbox" checked={want} disabled={busy} onChange={(e) => setWant(e.target.checked)} />
           {vLabel}의 아이콘 세트도 함께 만들기
@@ -649,6 +654,7 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   return (
     <div className="imgblock icon-step">
       <strong>아이콘 세트 · {vLabel}</strong>
+      <DevStats designId={designId} kinds={['icon', 'icon_names', 'icon_redraw']} label="아이콘 생성" refreshKey={`${busy}-${filling}-${one}-${items.length}-${ver}`} />
       <p className="muted">
         이 규칙 버전의 아이콘 세트는 한 세트만 사용합니다. 마음에 들지 않는 아이콘은 개별로 다시 그릴 수 있습니다.
         {ask ? '' : ' 기능명 10개는 상품 설명을 바탕으로 AI가 정했으며 추가·삭제할 수 없습니다.'}

@@ -131,10 +131,11 @@ def to_png(svg: str, w: int, h: int) -> bytes:
 
 # ---- 모델 호출 ---- (문장은 prompts/icons/*.md, 공통 출력 규격은 prompts/icons/_output_spec.md)
 def _ask(system: str, user: str, kind: str = "icon_names") -> dict:
-    with calllog.timed("chat", kind, "openai", CHAT_MODEL):
+    with calllog.timed("chat", kind, "openai", CHAT_MODEL) as info:
         r = client().chat.completions.create(
             model=CHAT_MODEL, response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+        calllog.note_usage(info, r)
     return json.loads(r.choices[0].message.content or "{}")
 
 

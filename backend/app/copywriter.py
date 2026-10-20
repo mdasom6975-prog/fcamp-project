@@ -150,12 +150,13 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
 
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict) -> list[dict]:
     system, user = _prompt(brand_name, brand, brief, placement, limits)
-    with calllog.timed("chat", "copy", "openai", CHAT_MODEL):
+    with calllog.timed("chat", "copy", "openai", CHAT_MODEL) as info:
         r = client().chat.completions.create(
             model=CHAT_MODEL,
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
+        calllog.note_usage(info, r)
     data = json.loads(r.choices[0].message.content or "{}")
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
