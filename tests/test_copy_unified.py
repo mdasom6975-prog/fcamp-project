@@ -166,7 +166,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
 
     def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None):
         calls.append(1)
-        return [{"headline": "너무너무긴제목입니다", "body": "", "cta": ""}, {"headline": "짧다", "body": "", "cta": ""}]
+        return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}, {"headline": "짧다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", fake_generate)
     monkeypatch.setattr(copywriter, "MAX_ATTEMPTS", 2)
     variants, attempts, _ = copywriter.generate_checked("b", {}, {}, {}, limits)
@@ -174,7 +174,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
 
     def all_bad(brand_name, brand, brief, placement, limits, icons_out=None):
         calls.append(1)
-        return [{"headline": "너무너무긴제목입니다", "body": "", "cta": ""}]
+        return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", all_bad)
     calls.clear()
     _, attempts, _ = copywriter.generate_checked("b", {}, {}, {}, limits)
