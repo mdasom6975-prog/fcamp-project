@@ -82,8 +82,9 @@ def _old_files(a: IconAsset | None) -> list[Path]:
     return [Path(p) for p in ((a.png_path, a.source_path) if a else ()) if p]
 
 
-def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w, h, forbidden, existing=None):
-    """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 1024 원본은 source_path 에 따로 둔다."""
+def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w, h, forbidden, existing=None, origin=None):
+    """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 원본(1장 렌더 1024 또는 격자에서 잘라낸 조각)은 source_path 에 따로 둔다.
+    origin: 격자에서 온 아이콘이면 {"grid": "4x3", "cell": k, "method": ..., "mismatch": bool} — 분석용. 수가 안 맞은 격자는 위반으로 알린다."""
     fitted, info = icons.fit_alpha(im, w, h)
     STORAGE_DIR.mkdir(exist_ok=True)
     uid = uuid.uuid4().hex[:10]
@@ -93,11 +94,15 @@ def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w,
     viol = _forbidden_viol(name, forbidden)
     if not info["transparent"]:
         viol.append({"type": "background", "detail": "배경이 투명하지 않습니다. 다시 그려 주세요"})
-    st = {"render": "3d", "model": icons.MODEL_3D, "quality": icons.QUALITY_3D,
+    if info["clipped"]:
+        viol.append({"type": "clipped", "detail": "오브젝트가 가장자리에 잘렸습니다. 다시 그려 주세요"})
+    if origin and origin.get("mismatch"):
+        viol.append({"type": "grid", "detail": f"격자에 요청한 {origin['requested']}개 중 {origin['blobs']}개만 그려져 이름과 짝이 어긋났을 수 있습니다. 다르면 다시 그려 주세요"})
+    st = {"render": "3d", "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "origin": origin,
           "prompt_ref": prompts.ref("icons/render3d"), "style_ref": prompts.ref("icons/_3d_style"),
           "corner": style["corner"], "material": style.get("material") or "자동",
           "colors": [c["hex"] for c in palette] or [style["color"]],
-          "bbox": info["bbox"], "scale": info["scale"], "transparent": info["transparent"],
+          "bbox": info["bbox"], "scale": info["scale"], "transparent": info["transparent"], "clipped": info["clipped"],
           "viewBox": icons.VIEW, "live_area": icons.LIVE}
     fields = dict(name=name[:60], concept=(concept or "")[:200], elements=[], style=st, svg="",
                   png_path=str(path), source_path=str(src), prompt=prompt, width=w, height=h, violations=viol)
@@ -195,34 +200,62 @@ def _create_3d(db, d, bv, brand, style, w, h, forbidden) -> tuple[int, list[dict
     return _render_save_3d(db, d, bv, items, style, w, h, forbidden)
 
 
+def _grid_fillers(db, d, bv, items: list[dict], forbidden: list[str]) -> list[tuple[str, str]]:
+    """격자의 빈 칸을 메울 (기능명, 묘사). 이번에 그리지 않는 후보(세트에 없는 것)를 먼저 쓰고, 모자라면 채움 오브젝트.
+    채운 칸은 렌더만 하고 저장하지 않는다 — 마지막 줄을 비워 두면 모델이 가운데 정렬해 칸 번호가 어긋나기 때문."""
+    used = {str(it.get("name") or "").strip() for it in items} | {a.name for a in version_icon_set(db, bv.id)}
+    spare = [(c["name"], str(c.get("concept") or "")) for c in _candidates_from_brief(d, forbidden) if c["name"] not in used]
+    return spare + list(icons.GRID_FILLERS) * 2
+
+
 def _render_save_3d(db, d, bv, items, style, w, h, forbidden, batch=1, start=1) -> tuple[int, list[dict]]:
     """3d 방식: 기능명 목록을 렌더해 position=start 부터 저장한다. 세트 생성과 부족분 채우기가 같이 쓴다.
-    ICON_GRID=n 이고 2개 이상이면 n×n 격자 한 장에 여러 개를 그려 잘라 쓴다(호출 수 1/n²)."""
+    ICON_GRID 가 켜져 있고 2개 이상이면 격자 한 장에 여러 개를 그려 오브젝트 덩어리 단위로 잘라 쓴다(호출 수 1/칸 수).
+    격자 칸은 전부 채워 보내고(_grid_fillers), 덩어리를 못 찾은 칸만 아이콘 1장 렌더로 다시 그린다."""
     palette = _palette(bv)
     sv = icons.style_vars(style, palette, bv.image_tone or {})
     per = icons.GRID_CELLS
+    origins: list[dict | None] = [None] * len(items)
     if per >= 2 and len(items) >= 2:
+        fillers = _grid_fillers(db, d, bv, items, forbidden)
         chunks = [items[i:i + per] for i in range(0, len(items), per)]
-        gprompts = [icons.render_grid_prompt([(str(it["name"]).strip(), str(it.get("concept") or "")) for it in ch], sv,
-                                             icons.GRID_COLS, icons.GRID_ROWS) for ch in chunks]
+        cells_of = []
+        for ch in chunks:
+            cells = [(str(it["name"]).strip(), str(it.get("concept") or "")) for it in ch]
+            need = per - len(cells)
+            cells, fillers = cells + fillers[:need], fillers[need:]
+            cells_of.append(cells)
+        gprompts = [icons.render_grid_prompt(cells, sv, icons.GRID_COLS, icons.GRID_ROWS) for cells in cells_of]
         grids = icons.render_many(gprompts, icons.render_grid)
         plist, results = [], []
-        for ch, gp, g in zip(chunks, gprompts, grids):
-            cells = icons.split_grid(g, icons.GRID_COLS, icons.GRID_ROWS) if not isinstance(g, Exception) else [g] * len(ch)
+        for ch, cells, gp, g in zip(chunks, cells_of, gprompts, grids):
+            if isinstance(g, imagegen.QuotaExceeded):      # 한도 소진은 1장 렌더로도 못 하니 그대로 전달
+                plist += [gp] * len(ch); results += [g] * len(ch); continue
+            if isinstance(g, Exception):
+                plist += [gp] * len(ch); results += [None] * len(ch); continue
+            pieces, info = icons.split_blobs(g, icons.GRID_COLS, icons.GRID_ROWS, len(cells))
             for k, _ in enumerate(ch):
-                plist.append(gp); results.append(cells[k] if k < len(cells) else ValueError("격자 칸이 모자랍니다"))
+                plist.append(gp); results.append(pieces[k])
+                origins[len(results) - 1] = {"grid": icons.grid_label(), "cell": k + 1, "method": info["method"],
+                                             "blobs": info["blobs"], "requested": len(cells), "mismatch": info["mismatch"]}
+        retry = [i for i, r in enumerate(results) if r is None]
+        if retry:    # 격자에서 못 건진 아이콘만 1장씩 다시 그린다
+            rp = [icons.render_prompt(str(items[i]["name"]).strip(), str(items[i].get("concept") or ""), sv) for i in retry]
+            for i, pr, res in zip(retry, rp, icons.render_many(rp)):
+                plist[i], results[i] = pr, res
+                origins[i] = {**(origins[i] or {}), "retried": True, "mismatch": False}
     else:
         plist = [icons.render_prompt(str(it["name"]).strip(), str(it.get("concept") or ""), sv) for it in items]
         results = icons.render_many(plist)      # 이미지 모델 호출은 동시에, DB 저장은 이 스레드에서
     made, skipped = 0, []
-    for i, (it, pr, res) in enumerate(zip(items, plist, results), start):
+    for i, (it, pr, res, org) in enumerate(zip(items, plist, results, origins), start):
         name = str(it["name"]).strip()
         if isinstance(res, Exception):
             reason = str(res) if isinstance(res, imagegen.QuotaExceeded) else f"렌더 실패 ({type(res).__name__})"
             skipped.append({"position": i, "name": name, "reason": reason[:120]})
             continue
         try:
-            _save3d(db, d, bv, batch, i, name, str(it.get("concept") or ""), pr, res, style, palette, w, h, forbidden)
+            _save3d(db, d, bv, batch, i, name, str(it.get("concept") or ""), pr, res, style, palette, w, h, forbidden, origin=org)
             made += 1
         except Exception as e:
             skipped.append({"position": i, "name": name, "reason": str(e)[:80]})

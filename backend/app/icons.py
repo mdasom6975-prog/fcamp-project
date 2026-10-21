@@ -27,9 +27,11 @@ RENDER = os.getenv("ICON_RENDER", "3d").strip().lower()          # 3d | svg
 MODEL_3D = os.getenv("ICON_IMAGE_MODEL", imagegen.OPENAI_MODEL)    # 3D 아이콘 이미지 모델 (기본: 배경과 같은 모델)
 QUALITY_3D = os.getenv("ICON_IMAGE_QUALITY", "medium")             # low | medium | high
 WORKERS_3D = 3                                                     # 동시 렌더 수 (세트 10개 → 약 2~3분)
-# 격자 렌더(ICON_GRID="열x행" 또는 n → n×n, 0 이면 끔): 한 장에 여러 아이콘을 그려 칸 단위로 잘라 쓴다.
+# 격자 렌더(ICON_GRID="열x행" 또는 n → n×n, 0 이면 끔): 한 장에 여러 아이콘을 그려 오브젝트 단위로 잘라 쓴다.
 # 기본 4x3: 가로 캔버스(1536×1024)에 12칸 → 세트 10개가 호출 1회. 칸은 384×341px 라 출력(256px)에 충분하다.
-# 2 (2×2, 1024²) 는 10개가 3회·칸 512px 로 더 안전하다. 모델이 격자를 어기면 칸이 잘려 개별 '다시 그리기'(1장)가 필요할 수 있다.
+# 칸은 항상 전부 채운다(모자라면 남은 후보·채움 오브젝트) — 마지막 줄이 비면 모델이 가운데 정렬해 칸 번호가 어긋난다.
+# 자르기는 고정 등분이 아니라 알파 덩어리(split_blobs)를 찾아서 한다 — 모델이 칸 경계를 어겨도 오브젝트가 잘리지 않는다.
+# 덩어리를 못 찾은 칸은 호출자가 아이콘 1장 렌더로 다시 그린다. 2 (2×2, 1024²) 는 10개가 3회·칸 512px.
 def _parse_grid(v: str) -> tuple[int, int]:
     v = (v or "").strip().lower()
     if not v or v in ("0", "off", "false"):
@@ -242,17 +244,123 @@ def render_grid(prompt: str) -> Image.Image:
     return imagegen.generate_transparent(prompt, MODEL_3D, QUALITY_3D, kind="icon", size=GRID_SIZE)
 
 
-def split_grid(im: Image.Image, cols: int, rows: int) -> list[Image.Image]:
-    """cols×rows 격자 이미지를 칸 순서(왼쪽 위 → 오른쪽 → 다음 줄)대로 잘라 돌려준다. 칸 경계 2% 는 이웃 번짐을 피해 버린다."""
+# 채움 오브젝트: 격자의 빈 칸을 메우는 용도(저장하지 않는다). 후보가 모자랄 때만 쓴다
+GRID_FILLERS = [("채움 구", "매끈한 구 하나"), ("채움 정육면체", "모서리가 둥근 정육면체"), ("채움 원뿔", "낮은 원뿔 하나"),
+                ("채움 고리", "둥근 고리 하나"), ("채움 원기둥", "낮은 원기둥"), ("채움 별", "꼭짓점이 둥근 별"),
+                ("채움 하트", "통통한 하트"), ("채움 물방울", "물방울 하나"), ("채움 반구", "반구 하나"),
+                ("채움 육각기둥", "육각 기둥"), ("채움 도넛", "도넛 고리"), ("채움 캡슐", "둥근 캡슐")]
+BLOB_REDUCE = 4        # 덩어리 탐색 해상도(1/4): 1536×1024 → 384×256, 순수 파이썬 BFS 로 충분히 빠르다
+BLOB_JOIN = 0.03       # 칸 짧은 변 대비 합치기 반경: 이보다 가까운 조각(김·반짝임)은 같은 오브젝트로 본다
+BLOB_MIN_AREA = 0.02   # 칸 넓이 대비 이보다 작은 조각(김·반짝임·떨어진 뚜껑)은 가장 가까운 덩어리에 붙인다
+BLOB_MARGIN = 0.04     # 자를 때 덩어리 둘레에 두는 여백(칸 짧은 변 대비)
+BLOB_MAX = 1.08        # 칸보다 이만큼 이상 큰 덩어리는 이웃과 붙은 것으로 보고 쓰지 않는다
+
+
+def _components(mask: Image.Image) -> list[tuple[int, int, int, int, int]]:
+    """0/255 L 이미지의 8방향 연결 성분 → (x0, y0, x1, y1, 픽셀 수). 작은 해상도용 순수 파이썬 BFS."""
+    w, h = mask.size
+    px = mask.load()
+    seen = bytearray(w * h)
+    out = []
+    for y in range(h):
+        for x in range(w):
+            if not px[x, y] or seen[y * w + x]:
+                continue
+            seen[y * w + x] = 1
+            stack = [(x, y)]
+            x0 = x1 = x; y0 = y1 = y; n = 0
+            while stack:
+                cx, cy = stack.pop(); n += 1
+                x0, x1, y0, y1 = min(x0, cx), max(x1, cx), min(y0, cy), max(y1, cy)
+                for nx in (cx - 1, cx, cx + 1):
+                    for ny in (cy - 1, cy, cy + 1):
+                        if 0 <= nx < w and 0 <= ny < h and px[nx, ny] and not seen[ny * w + nx]:
+                            seen[ny * w + nx] = 1; stack.append((nx, ny))
+            out.append((x0, y0, x1 + 1, y1 + 1, n))
+    return out
+
+
+def find_blobs(im: Image.Image, cols: int, rows: int) -> list[dict]:
+    """격자 이미지에서 오브젝트 덩어리를 찾는다. 알파를 1/4 로 줄여 살짝 팽창시킨 뒤 연결 성분을 구하고,
+    경계 상자는 원래 해상도의 알파로 다시 정확히 잰다. 작은 조각은 가까운 덩어리에 합친다.
+    돌려주는 각 항목: bbox(원본 px), area(px), cx, cy."""
+    from PIL import ImageFilter
+    im = im.convert("RGBA")
+    a = im.getchannel("A").point(lambda v: 255 if v > 8 else 0)
+    cw, ch = im.width / cols, im.height / rows
+    r = BLOB_REDUCE
+    small = a.reduce(r).point(lambda v: 255 if v > 0 else 0)
+    join = max(1, round(min(cw, ch) * BLOB_JOIN / r))
+    small = small.filter(ImageFilter.MaxFilter(2 * join + 1))
+    blobs = []
+    for x0, y0, x1, y1, n in _components(small):
+        box = (max(0, (x0 - join) * r), max(0, (y0 - join) * r), min(im.width, (x1 + join) * r), min(im.height, (y1 + join) * r))
+        bb = a.crop(box).getbbox()
+        if not bb:
+            continue
+        bb = (bb[0] + box[0], bb[1] + box[1], bb[2] + box[0], bb[3] + box[1])
+        area = a.crop(bb).histogram()[255]          # 팽창 전 실제 알파 픽셀 수
+        blobs.append({"bbox": bb, "area": area, "cx": (bb[0] + bb[2]) / 2, "cy": (bb[1] + bb[3]) / 2})
+    tiny = [b for b in blobs if b["area"] < BLOB_MIN_AREA * cw * ch]
+    big = [b for b in blobs if b["area"] >= BLOB_MIN_AREA * cw * ch]
+    for t in tiny:
+        if not big:
+            break
+        host = min(big, key=lambda b: (b["cx"] - t["cx"]) ** 2 + (b["cy"] - t["cy"]) ** 2)
+        hb, tb = host["bbox"], t["bbox"]
+        host["bbox"] = (min(hb[0], tb[0]), min(hb[1], tb[1]), max(hb[2], tb[2]), max(hb[3], tb[3]))
+        host["area"] += t["area"]
+        host["cx"], host["cy"] = (host["bbox"][0] + host["bbox"][2]) / 2, (host["bbox"][1] + host["bbox"][3]) / 2
+    return big
+
+
+def _reading_order(blobs: list[dict], ch: float) -> list[dict]:
+    """세로 중심이 반 칸 이내면 같은 줄로 묶고, 줄 안에서는 왼쪽부터 — 모델이 줄을 조금 어긋나게 그려도 순서가 맞는다."""
+    rows_: list[list[dict]] = []
+    for b in sorted(blobs, key=lambda b: b["cy"]):
+        if rows_ and abs(b["cy"] - sum(x["cy"] for x in rows_[-1]) / len(rows_[-1])) <= ch * 0.5:
+            rows_[-1].append(b)
+        else:
+            rows_.append([b])
+    return [b for row in rows_ for b in sorted(row, key=lambda b: b["cx"])]
+
+
+def split_blobs(im: Image.Image, cols: int, rows: int, n: int) -> tuple[list[Image.Image | None], dict]:
+    """cols×rows 격자 이미지에서 n 개의 오브젝트를 칸 순서(왼쪽 위 → 오른쪽 → 다음 줄)대로 잘라 돌려준다.
+    고정 등분으로 자르지 않고 알파 덩어리를 찾는다 — 모델이 칸 경계를 넘겨도 오브젝트가 잘리지 않는다.
+    - 덩어리 수가 n 과 같으면 읽기 순서로 짝을 맞춘다(줄이 어긋나거나 가운데 정렬돼도 맞는다).
+    - 다르면 덩어리 중심이 든 칸으로 짝을 맞춘다. 덩어리가 없거나 둘 이상인 칸, 칸보다 큰(이웃과 붙은) 덩어리,
+      캔버스 가장자리에 닿아 잘린 덩어리는 None — 호출자가 그 아이콘만 1장 렌더로 다시 그린다.
+    info: method(order|cell), blobs(찾은 수), failed(None 인 칸 번호 1부터), mismatch(수가 n 과 다른가)."""
     im = im.convert("RGBA")
     cw, ch = im.width / cols, im.height / rows
-    pad_x, pad_y = cw * 0.02, ch * 0.02
-    out = []
-    for r in range(rows):
-        for c in range(cols):
-            box = (round(c * cw + pad_x), round(r * ch + pad_y), round((c + 1) * cw - pad_x), round((r + 1) * ch - pad_y))
-            out.append(im.crop(box))
-    return out
+    blobs = find_blobs(im, cols, rows)
+    fits = [b for b in blobs if (b["bbox"][2] - b["bbox"][0]) <= cw * BLOB_MAX and (b["bbox"][3] - b["bbox"][1]) <= ch * BLOB_MAX]
+    cells: list[dict | None] = [None] * n
+    if len(blobs) == n and len(fits) == n:
+        method = "order"
+        cells = _reading_order(fits, ch)
+    else:
+        method = "cell"
+        by_cell: dict[int, list[dict]] = {}
+        for b in fits:
+            idx = min(rows - 1, int(b["cy"] // ch)) * cols + min(cols - 1, int(b["cx"] // cw))
+            by_cell.setdefault(idx, []).append(b)
+        for i in range(n):
+            lst = by_cell.get(i, [])
+            cells[i] = lst[0] if len(lst) == 1 else None
+    m = round(min(cw, ch) * BLOB_MARGIN)
+    out: list[Image.Image | None] = []
+    for b in cells:
+        if b is None:
+            out.append(None); continue
+        x0, y0, x1, y1 = b["bbox"]
+        if x0 <= 0 or y0 <= 0 or x1 >= im.width or y1 >= im.height:   # 캔버스 가장자리에 잘린 오브젝트
+            out.append(None); continue
+        out.append(im.crop((max(0, x0 - m), max(0, y0 - m), min(im.width, x1 + m), min(im.height, y1 + m))))
+    info = {"method": method, "blobs": len(blobs), "failed": [i + 1 for i, c in enumerate(out) if c is None],
+            "mismatch": len(blobs) != n}
+    return out, info
 
 
 def render_many(prompt_list: list[str], fn=None) -> list[Image.Image | Exception]:
@@ -270,7 +378,8 @@ def render_many(prompt_list: list[str], fn=None) -> list[Image.Image | Exception
 
 def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:
     """렌더된 RGBA 이미지를 알파 경계 기준으로 잘라 live area(짧은 변의 20/24)에 맞춰 중앙 정렬한다.
-    bbox 는 svg 방식과 같은 24 단위 좌표(짧은 변 기준 정사각)로 기록해 여백 검수를 같은 식으로 한다."""
+    bbox 는 svg 방식과 같은 24 단위 좌표(짧은 변 기준 정사각)로 기록해 여백 검수를 같은 식으로 한다.
+    info.transparent(배경 투명 여부)·clipped(원본 가장자리에 잘렸는가)는 저장 시 위반으로 표시한다."""
     im = im.convert("RGBA")
     a = im.getchannel("A").point(lambda v: 255 if v > 8 else 0)
     bb = a.getbbox()
@@ -280,6 +389,8 @@ def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:
     corners = [im.getpixel((x, y))[3] for x in (0, im.width - 1) for y in (0, im.height - 1)]
     cover = (bb[2] - bb[0]) * (bb[3] - bb[1]) / (im.width * im.height)
     transparent = max(corners) <= 8 and cover < 0.97
+    # 알파가 원본 가장자리에 닿으면 오브젝트가 잘린 것(여백 지시를 어김) — 저장은 하되 위반으로 표시한다
+    clipped = bb[0] <= 0 or bb[1] <= 0 or bb[2] >= im.width or bb[3] >= im.height
     crop = im.crop(bb)
     side = min(w, h)
     s = side * LIVE / VIEW / max(crop.width, crop.height)
@@ -289,7 +400,7 @@ def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:
     canvas.paste(small, ((w - nw) // 2, (h - nh) // 2), small)
     k = VIEW / side
     bbox = [VIEW / 2 - nw * k / 2, VIEW / 2 - nh * k / 2, VIEW / 2 + nw * k / 2, VIEW / 2 + nh * k / 2]
-    return canvas, {"scale": round(s, 4), "bbox": [round(v, 2) for v in bbox], "transparent": transparent}
+    return canvas, {"scale": round(s, 4), "bbox": [round(v, 2) for v in bbox], "transparent": transparent, "clipped": clipped}
 
 
 def png_bytes(im: Image.Image) -> bytes:

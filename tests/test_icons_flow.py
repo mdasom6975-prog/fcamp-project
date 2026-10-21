@@ -254,16 +254,26 @@ def test_render_only_picked_names_then_append_more(env, monkeypatch):
     assert cj["rendered"] == 10 and sum(x["rendered"] for x in cj["candidates"]) == 10
 
 
-def _grid_image(k: int, cols: int = 2, rows: int = 2, size=(1024, 1024)):
-    """cols×rows 격자에 k 개의 불투명 원을 칸 중앙에 둔 투명 이미지 (모델이 격자를 지킨 결과를 흉내)."""
+def _grid_image(k: int, cols: int = 2, rows: int = 2, size=(1024, 1024), skip=(), shift=None, center_last=False, crumbs=False):
+    """cols×rows 격자에 k 개의 불투명 원을 둔 투명 이미지 (모델 결과 흉내).
+    skip: 비워 둘 칸 번호(1부터). shift(row) → 그 줄의 세로 이동(px, 칸 경계를 넘기는 흉내). center_last: 마지막 줄을 가운데 정렬.
+    crumbs: 원 위에 떨어진 작은 조각(김·반짝임)을 하나씩 더 그린다."""
     from PIL import Image, ImageDraw
     im = Image.new("RGBA", size, (0, 0, 0, 0)); dr = ImageDraw.Draw(im)
     cw, ch = size[0] / cols, size[1] / rows
     rad = min(cw, ch) * 0.3
     for i in range(k):
+        if i + 1 in skip:
+            continue
         r, c = divmod(i, cols)
         cx, cy = (c + 0.5) * cw, (r + 0.5) * ch
+        if center_last and r == rows - 1:
+            cx += (cols - (k - r * cols)) / 2 * cw
+        if shift:
+            cy += shift(r)
         dr.ellipse((cx - rad, cy - rad, cx + rad, cy + rad), fill=(40, 90, 200, 255))
+        if crumbs:
+            dr.ellipse((cx - rad * 0.08, cy - rad * 1.45, cx + rad * 0.08, cy - rad * 1.25), fill=(40, 90, 200, 255))
     return im
 
 
@@ -275,7 +285,7 @@ def _grid_env(monkeypatch, cols, rows, size):
 
 
 def test_grid_default_renders_ten_icons_in_one_call(env, monkeypatch):
-    """기본 ICON_GRID=4x3: 가로 캔버스 1장에 10개를 그려 12칸 중 10칸을 잘라 저장한다 → 호출 1회."""
+    """기본 ICON_GRID=4x3: 가로 캔버스 1장에 12칸을 모두 채워(10개 + 남은 후보 2개) 그리고 앞 10개만 저장한다 → 호출 1회."""
     from app import icons
     c = env["client"]
     did = _icon_set_design(env)
@@ -283,20 +293,62 @@ def test_grid_default_renders_ten_icons_in_one_call(env, monkeypatch):
     seen: list[tuple[str, object]] = []
     def fake_many(plist, fn=None):
         seen.extend((p, fn) for p in plist)
-        return [_grid_image(10, 4, 3, (1536, 1024)) for _ in plist]
+        return [_grid_image(12, 4, 3, (1536, 1024), crumbs=True) for _ in plist]
     monkeypatch.setattr(icons, "render_many", fake_many)
     j = c.post(f"/api/designs/{did}/icons", json={}).json()
     assert j["made"] == 10 and j["complete"] and len(seen) == 1, "10개 → 격자 1장"
     p, fn = seen[0]
-    assert fn is icons.render_grid and "가로 4칸 × 세로 3줄" in p and '10. "후보10"' in p and "11." not in p.split("[배치]")[0]
+    head = p.split("[배치]")[0]
+    assert fn is icons.render_grid and "가로 4칸 × 세로 3줄" in p and '10. "후보10"' in head
+    assert '11. "후보11"' in head and '12. "후보12"' in head and "13." not in head, "빈 칸은 남은 후보로 채운다"
+    assert "12개의 칸에 오브젝트를 정확히 하나씩" in p
     assert all(not a["violations"] for a in j["icons"])
-    assert all(abs(a["style"]["bbox"][2] - a["style"]["bbox"][0] - 20) < 0.6 for a in j["icons"]), "live area 에 맞춰짐"
+    assert [a["name"] for a in j["icons"]] == [f"후보{i}" for i in range(1, 11)], "채움 칸(11·12)은 저장하지 않는다"
+    assert all(abs(max(b[2] - b[0], b[3] - b[1]) - 20) < 0.6 for b in (a["style"]["bbox"] for a in j["icons"])), "긴 변이 live area 에 맞춰짐"
+    assert all(a["style"]["origin"] == {"grid": "4x3", "cell": a["position"], "method": "order", "blobs": 12, "requested": 12, "mismatch": False}
+               for a in j["icons"])
     s = c.get("/api/icon-settings").json()
     assert s["grid"] == "4x3" and s["grid_cells"] == 12 and s["grid_size"] == "1536x1024"
 
 
+def test_grid_retries_failed_cells_with_single_render(env, monkeypatch):
+    """모델이 한 칸을 비우면(덩어리 11개) 그 아이콘만 1장 렌더로 다시 그린다. 수가 안 맞은 격자의 나머지는 '짝 어긋남' 경고."""
+    from app import icons
+    c = env["client"]
+    did = _icon_set_design(env)
+    _grid_env(monkeypatch, 4, 3, "1536x1024")
+    calls: list[tuple[list[str], object]] = []
+    def fake_many(plist, fn=None):
+        calls.append((list(plist), fn))
+        if fn is icons.render_grid:
+            return [_grid_image(12, 4, 3, (1536, 1024), skip=(5,)) for _ in plist]
+        return [_grid_image(1, 1, 1, (1024, 1024)) for _ in plist]
+    monkeypatch.setattr(icons, "render_many", fake_many)
+    j = c.post(f"/api/designs/{did}/icons", json={}).json()
+    assert j["made"] == 10 and j["complete"] and len(calls) == 2, "격자 1장 + 실패 칸 1장"
+    assert calls[1][1] is None and len(calls[1][0]) == 1 and '"후보5" 기능을 상징하는' in calls[1][0][0]
+    by = {a["name"]: a for a in j["icons"]}
+    assert by["후보5"]["style"]["origin"]["retried"] is True and not by["후보5"]["violations"]
+    assert all(by[f"후보{i}"]["style"]["origin"]["method"] == "cell" for i in (1, 2, 3, 4, 6))
+    assert all(any(v["type"] == "grid" for v in by[f"후보{i}"]["violations"]) for i in (1, 6, 10)), "11/12 → 짝 어긋남 경고"
+
+
+def test_grid_quota_exhausted_is_not_retried(env, monkeypatch):
+    from app import icons, imagegen
+    c = env["client"]
+    did = _icon_set_design(env)
+    _grid_env(monkeypatch, 4, 3, "1536x1024")
+    calls: list[object] = []
+    def fake_many(plist, fn=None):
+        calls.append(fn)
+        return [imagegen.QuotaExceeded("오늘 설정한 이미지 생성 한도(150회)를 모두 사용했습니다") for _ in plist]
+    monkeypatch.setattr(icons, "render_many", fake_many)
+    r = c.post(f"/api/designs/{did}/icons", json={})
+    assert r.status_code == 429 and len(calls) == 1, "한도 소진이면 1장 렌더로 재시도하지 않는다"
+
+
 def test_grid_2x2_uses_three_calls(env, monkeypatch):
-    """ICON_GRID=2: 10개를 2×2 격자 3장(4+4+2)으로 렌더한다."""
+    """ICON_GRID=2: 10개를 2×2 격자 3장(4+4+2)으로 렌더한다. 셋째 장의 빈 두 칸은 남은 후보로 채운다."""
     from app import icons
     c = env["client"]
     did = _icon_set_design(env)
@@ -304,22 +356,90 @@ def test_grid_2x2_uses_three_calls(env, monkeypatch):
     prompts_seen: list[str] = []
     def fake_many(plist, fn=None):
         prompts_seen.extend(plist)
-        return [_grid_image(min(4, 10 - 4 * i)) for i, _ in enumerate(plist)]
+        return [_grid_image(4) for _ in plist]
     monkeypatch.setattr(icons, "render_many", fake_many)
     j = c.post(f"/api/designs/{did}/icons", json={}).json()
     assert j["made"] == 10 and len(prompts_seen) == 3
-    assert "가로 2칸 × 세로 2줄" in prompts_seen[0] and '2. "후보10"' in prompts_seen[2]
+    assert "가로 2칸 × 세로 2줄" in prompts_seen[0] and '2. "후보10"' in prompts_seen[2] and '4. "후보12"' in prompts_seen[2]
+    assert all(not a["violations"] for a in j["icons"])
 
 
-def test_grid_parse_and_split():
+def test_grid_fillers_fall_back_to_generic_objects(env, monkeypatch):
+    """남은 후보가 없으면 채움 오브젝트(GRID_FILLERS)로 칸을 메운다. 저장되지는 않는다."""
+    from app import icons, models
+    c, Local = env["client"], env["Local"]
+    did = _icon_set_design(env)
+    with Local() as db:
+        d = db.get(models.Design, did); d.brief = {**d.brief, "icon_candidates": d.brief["icon_candidates"][:10]}; db.commit()
+    _grid_env(monkeypatch, 4, 3, "1536x1024")
+    prompts_seen: list[str] = []
+    monkeypatch.setattr(icons, "render_many", lambda plist, fn=None: (prompts_seen.extend(plist), [_grid_image(12, 4, 3, (1536, 1024)) for _ in plist])[1])
+    j = c.post(f"/api/designs/{did}/icons", json={}).json()
+    head = prompts_seen[0].split("[배치]")[0]
+    assert j["made"] == 10 and '11. "채움 구"' in head and '12. "채움 정육면체"' in head
+    assert not any(a["name"].startswith("채움") for a in j["icons"])
+
+
+def test_grid_parse():
     from app import icons
     assert icons._parse_grid("4x3") == (4, 3) and icons._parse_grid("2") == (2, 2) and icons._parse_grid("0") == (0, 0)
     assert icons._parse_grid("1") == (0, 0) and icons._parse_grid("") == (0, 0)
-    cells = icons.split_grid(_grid_image(4), 2, 2)
-    assert len(cells) == 4 and all(cell.size == (492, 492) for cell in cells), "칸 512px 에서 경계 2%(10px)씩 뺀 크기"
-    assert all(cell.getchannel("A").getbbox() for cell in cells)
-    wide = icons.split_grid(_grid_image(10, 4, 3, (1536, 1024)), 4, 3)
-    assert len(wide) == 12 and sum(1 for w in wide if w.getchannel("A").getbbox()) == 10
+
+
+def test_split_blobs_aligned_grid_in_reading_order():
+    """격자를 지킨 12개: 덩어리 수가 맞으니 읽기 순서로, 조각은 여백을 두고 잘려 가장자리에 닿지 않는다. 떨어진 작은 조각(김)은 합친다."""
+    from app import icons
+    pieces, info = icons.split_blobs(_grid_image(12, 4, 3, (1536, 1024), crumbs=True), 4, 3, 12)
+    assert info == {"method": "order", "blobs": 12, "failed": [], "mismatch": False}
+    assert all(p is not None for p in pieces)
+    for p in pieces:
+        bb = p.getchannel("A").getbbox()
+        assert bb[0] > 0 and bb[1] > 0 and bb[2] < p.width and bb[3] < p.height, "조각 안에서 오브젝트가 가장자리에 닿지 않는다"
+        assert p.height > p.width, "김 조각까지 한 오브젝트로 포함"
+    # 읽기 순서: 조각 k 는 칸 k 의 중심 근처에서 왔다 (칸 2 조각이 칸 1 보다 오른쪽) — 왼쪽 위 칸이 먼저
+    assert pieces[0].size == pieces[5].size
+
+
+def test_split_blobs_survives_rows_crossing_cell_borders():
+    """줄을 어긋나게 그려 1행 오브젝트가 칸 경계를 넘어도(고정 등분이면 잘림) 덩어리로 자르니 온전하다."""
+    from app import icons
+    im = _grid_image(12, 4, 3, (1536, 1024), shift=lambda r: {0: 60, 1: -30}.get(r, 0))
+    pieces, info = icons.split_blobs(im, 4, 3, 12)
+    assert info["method"] == "order" and info["failed"] == []
+    rad = int(min(1536 / 4, 1024 / 3) * 0.3)
+    assert all(abs(p.getchannel("A").getbbox()[3] - p.getchannel("A").getbbox()[1] - 2 * rad) <= 2 for p in pieces), "원이 통째로"
+
+
+def test_split_blobs_centered_last_row_matches_by_order():
+    """마지막 줄 2개가 가운데 정렬돼도 수가 맞으면 읽기 순서로 짝이 맞는다(10개 요청·10개 그림)."""
+    from app import icons
+    pieces, info = icons.split_blobs(_grid_image(10, 4, 3, (1536, 1024), center_last=True), 4, 3, 10)
+    assert info["method"] == "order" and info["failed"] == [] and all(pieces)
+
+
+def test_split_blobs_mismatch_falls_back_to_cells_and_marks_failures():
+    """수가 안 맞으면(12칸 요청·10개, 마지막 줄 가운데 정렬) 중심이 든 칸으로 짝 → 9·12 번 칸은 실패, 캔버스에 잘린 덩어리도 실패."""
+    from app import icons
+    from PIL import ImageDraw
+    im = _grid_image(10, 4, 3, (1536, 1024), center_last=True)
+    pieces, info = icons.split_blobs(im, 4, 3, 12)
+    assert info["method"] == "cell" and info["mismatch"] and info["failed"] == [9, 12] and info["blobs"] == 10
+    im2 = _grid_image(12, 4, 3, (1536, 1024))
+    ImageDraw.Draw(im2).ellipse((-120, 760, 30, 1000), fill=(40, 90, 200, 255))   # 9번 칸 왼쪽에 큰 덩어리 하나 더(캔버스 밖으로 나감)
+    pieces, info = icons.split_blobs(im2, 4, 3, 12)
+    assert info["method"] == "cell" and info["blobs"] == 13 and 9 in info["failed"], "덩어리 둘인 칸은 실패"
+    pieces, info = icons.split_blobs(_grid_image(12, 4, 3, (1536, 1024), skip=(9,)).crop((0, 0, 1536, 900)).resize((1536, 1024)), 4, 3, 12)
+    assert 9 in info["failed"] and all(k in info["failed"] for k in (10, 11, 12)), "아래가 잘린 3행 오브젝트는 실패"
+
+
+def test_split_blobs_merged_neighbours_fail():
+    """이웃과 붙어 칸보다 커진 덩어리는 쓰지 않는다(두 칸 모두 실패 → 1장 렌더)."""
+    from app import icons
+    from PIL import ImageDraw
+    im = _grid_image(12, 4, 3, (1536, 1024))
+    ImageDraw.Draw(im).rectangle((384 * 0.5, 341 * 0.4, 384 * 1.5, 341 * 0.6), fill=(40, 90, 200, 255))   # 1·2번 칸을 잇는 막대
+    pieces, info = icons.split_blobs(im, 4, 3, 12)
+    assert info["method"] == "cell" and info["failed"] == [1, 2]
 
 
 def test_icon_reset_deletes_set_and_files_but_keeps_candidates(env):

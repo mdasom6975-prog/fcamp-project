@@ -34,6 +34,14 @@ def test_fit_alpha_detects_opaque_background():
     assert info["transparent"] is False
 
 
+def test_fit_alpha_flags_clipped_when_alpha_touches_edge():
+    """알파가 원본 가장자리에 닿으면 오브젝트가 잘린 것 → clipped. 안쪽에 있으면 False."""
+    from app import icons
+    assert icons.fit_alpha(_blob(), 256, 256)[1]["clipped"] is False
+    assert icons.fit_alpha(_blob(box=(300, -200, 700, 600)), 256, 256)[1]["clipped"] is True, "위가 잘림"
+    assert icons.fit_alpha(_blob(box=(600, 200, 1100, 900)), 256, 256)[1]["clipped"] is True, "오른쪽이 잘림"
+
+
 def test_fit_alpha_empty_image_fails():
     import pytest
     from app import icons
