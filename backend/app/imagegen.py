@@ -107,7 +107,7 @@ CF_STEPS = 4              # schnell 은 1~8, 4면 충분
 CF_MAX_PROMPT_CHARS = 2000  # Workers AI 프롬프트 상한(2048) 보다 약간 작게
 
 # 하루 생성 상한(UTC 기준). Cloudflare 는 무료 한도 추정치, OpenAI 는 비용 폭주를 막는 안전장치다.
-DAILY_LIMIT = int(os.getenv("IMAGE_DAILY_LIMIT", "150"))
+DAILY_LIMIT = int(os.getenv("IMAGE_DAILY_LIMIT", "50"))
 USAGE_FILE = BASE_DIR / "data" / "image_usage.json"
 _lock = threading.Lock()
 
