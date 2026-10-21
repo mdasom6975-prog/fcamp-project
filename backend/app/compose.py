@@ -472,31 +472,32 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     #      세로형·정사각은 피사체가 위쪽에 오는 구도라 아래 모서리도 후보에 넣는다(선택되면 문구를 로고 위에 쌓는다).
     logo_plate = False
     if logo_box:
+        # 로고 모서리는 logo_corner 에 둔다. 인자 corner(CTA 버튼 모양 둥근/각진)와 섞이면 CTA 에 로고 위치가 기록된다
         lw, lh = logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]
         all_cands = {"좌상단": [cl, ct, cl + lw, ct + lh], "우상단": [cr - lw, ct, cr, ct + lh],
                      "좌하단": [cl, cb - lh, cl + lw, cb], "우하단": [cr - lw, cb - lh, cr, cb]}
         fixed = logo_position if logo_position in all_cands else None
         if fixed:
             # 브랜드 설정으로 고정: 캠페인의 모든 지면이 같은 모서리를 쓴다(지면마다 제각각이면 브랜드 인지가 흐려진다)
-            corner = fixed
-            _, score, scores = pick_logo_corner(canvas, {corner: all_cands[corner]}, pad)
-            report["logo_placement"] = {"corner": corner, "busyness": round(score, 2), "mode": "브랜드 고정"}
+            logo_corner = fixed
+            _, score, scores = pick_logo_corner(canvas, {logo_corner: all_cands[logo_corner]}, pad)
+            report["logo_placement"] = {"corner": logo_corner, "busyness": round(score, 2), "mode": "브랜드 고정"}
         else:
             cands = {k: all_cands[k] for k in ("좌상단", "우상단", "우하단")} if tpl == HORIZONTAL else dict(all_cands)
             # 가로형은 문구가 왼쪽 55%에 있어 좌하단은 후보에서 뺀다
-            corner, score, scores = pick_logo_corner(canvas, cands, pad)
+            logo_corner, score, scores = pick_logo_corner(canvas, cands, pad)
             # 세로형·정사각에서 피사체가 아래 자리를 비워 두면(위 모서리가 피사체와 안 겹치고 단순하면) 위 모서리를 우선한다 —
             # 아래 띠는 문구 자리라 로고까지 두면 문구가 피사체 위로 밀려 올라간다
             subj_box = crop.get("content_box_canvas")
-            if tpl != HORIZONTAL and subj_box and corner in ("좌하단", "우하단"):
+            if tpl != HORIZONTAL and subj_box and logo_corner in ("좌하단", "우하단"):
                 sx0, sy0, sx1, sy1 = subj_box
                 tops = {k: v for k, v in cands.items() if k in ("좌상단", "우상단")
                         and (v[3] + pad < sy0 or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
                 if tops:
-                    corner = min(tops, key=scores.get)
-                    score = scores[corner]
-            report["logo_placement"] = {"corner": corner, "busyness": round(score, 2), "mode": "자동"}
-        logo_box = all_cands[corner]
+                    logo_corner = min(tops, key=scores.get)
+                    score = scores[logo_corner]
+            report["logo_placement"] = {"corner": logo_corner, "busyness": round(score, 2), "mode": "자동"}
+        logo_box = all_cands[logo_corner]
         if score > LOGO_PLATE_BUSYNESS:
             logo_plate = True
             report["warnings"].append("로고 주변 이미지가 복잡해 반투명 판을 깔았습니다")
