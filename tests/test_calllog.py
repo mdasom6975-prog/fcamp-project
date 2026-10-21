@@ -89,17 +89,47 @@ def test_cost_estimate_and_tokens(log, monkeypatch):
     assert pricing.cost_of(rec[4]) == (1.2, False)
 
 
+def test_image_cost_uses_recorded_tokens(log, monkeypatch):
+    """토큰이 기록된 이미지 호출은 장당 추정이 아니라 토큰×단가(실제 과금 방식)로 계산한다. 표에 없는 모델은 '*' 단가·추정 표시."""
+    from types import SimpleNamespace as NS
+    from app import pricing
+    monkeypatch.setattr(pricing, "PRICING_FILE", log.LOG_FILE.parent / "none.json")
+    # OpenAI 이미지 응답의 usage 모양: input_tokens / output_tokens / input_tokens_details{text_tokens, image_tokens}
+    resp = NS(usage=NS(input_tokens=120, output_tokens=4160, input_tokens_details=NS(text_tokens=120, image_tokens=0)))
+    info: dict = {}
+    calllog.note_image_usage(info, resp)
+    assert info == {"tokens_in": 120, "tokens_out": 4160, "tokens_text_in": 120, "tokens_image_in": 0}
+    calllog.note_image_usage(info2 := {}, NS(usage=None))
+    assert info2 == {}, "usage 가 없으면 기록하지 않는다"
+    calllog.record("images.generate", "icon", "openai", "gpt-image-2.5-flare", size="1536x1024", quality="low", **info)
+    calllog.record("images.edit", "variant", "openai", "gpt-image-2.5-flare", size="1024x1024", quality="medium",
+                   tokens_in=1000, tokens_out=10000)                          # 내역 없음 → edit 은 입력을 참조 이미지로 본다
+    calllog.record("images.generate", "icon", "openai", "gpt-image-2.5-flare", size="1024x1024", quality="low")   # 예전 호출(토큰 없음)
+    calllog.record("images.generate", "icon", "openai", "gpt-image-9", size="1024x1024", quality="low", tokens_in=100, tokens_out=1000)
+    rows = calllog._rows()
+    assert pricing.cost_of(rows[0]) == ((120 * 5 + 4160 * 30) / 1_000_000, False)
+    assert pricing.cost_of(rows[1]) == ((1000 * 8 + 10000 * 30) / 1_000_000, False)
+    assert pricing.cost_of(rows[2]) == (0.011, True), "토큰이 없으면 장당 요율로 추정"
+    assert pricing.cost_of(rows[3]) == ((100 * 5 + 1000 * 30) / 1_000_000, True), "표에 없는 모델은 '*' 단가로 추정"
+    s = calllog.summary()
+    assert s["by_kind"]["icon"]["tokens_out"] == 4160 + 1000 and s["by_kind"]["variant"]["estimated"] is False
+
+
 def test_pricing_file_overrides_defaults(log, tmp_path, monkeypatch):
     import json
     from app import pricing
     f = tmp_path / "pricing.json"
-    f.write_text(json.dumps({"image": {"gpt-image-1": {"medium": {"1024x1024": 0.1}}}, "chat": {"my-model": {"in": 1, "out": 2}}}))
+    f.write_text(json.dumps({"image": {"gpt-image-1": {"medium": {"1024x1024": 0.1}}}, "chat": {"my-model": {"in": 1, "out": 2}},
+                             "image_tokens": {"gpt-image-1": {"text_in": 1, "image_in": 2, "image_out": 10}}}))
     monkeypatch.setattr(pricing, "PRICING_FILE", f)
     assert pricing.cost_of({"ok": True, "api": "images.generate", "provider": "openai", "model": "gpt-image-1",
                             "size": "1024x1024", "quality": "medium"}) == (0.1, False)
     assert pricing.cost_of({"ok": True, "api": "chat", "provider": "openai", "model": "my-model",
                             "tokens_in": 1_000_000, "tokens_out": 0}) == (1.0, False)
     assert pricing.table()["chat"]["gpt-4.1-mini"]["in"] == 0.40, "기본 항목은 유지된다"
+    assert pricing.cost_of({"ok": True, "api": "images.generate", "provider": "openai", "model": "gpt-image-1",
+                            "tokens_in": 100, "tokens_out": 1000, "tokens_text_in": 100, "tokens_image_in": 0}) == ((100 * 1 + 1000 * 10) / 1_000_000, False)
+    assert pricing.table()["image_tokens"]["gpt-image-2.5-flare"]["image_out"] == 30.0, "이미지 토큰 단가의 기본 항목도 유지된다"
 
 
 def test_prompt_text_is_saved_separately(log, tmp_path, monkeypatch):

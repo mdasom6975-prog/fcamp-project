@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// 개발자 지표: 이 시안이 부른 외부 모델 호출의 횟수·실패·소요·토큰·추정 비용. 절감 효과를 화면에서 바로 비교하기 위한 것.
-// 서버(GET /api/designs/{id}/api-calls)가 종류별로 집계하고, 비용은 backend/app/pricing.py 의 요율(추정)로 계산한다.
+// 개발자 지표: 이 시안이 부른 외부 모델 호출의 횟수·실패·소요·토큰·비용. 절감 효과를 화면에서 바로 비교하기 위한 것.
+// 서버(GET /api/designs/{id}/api-calls)가 종류별로 집계하고, 비용은 backend/app/pricing.py 로 계산한다
+// (토큰이 기록된 호출은 토큰×단가 = 실제 과금 방식, 토큰이 없는 예전 호출·요금표에 없는 모델은 기본 요율로 추정 → '*').
 export type KindAgg = {
   count: number; failed: number; ms_total: number; ms_avg: number; tokens_in: number; tokens_out: number
   cost_usd: number; cost_krw: number | null; unpriced: number; estimated: boolean
@@ -76,11 +77,11 @@ export default function DevStats({ designId, kinds, label, refreshKey }: {
   const est = t.estimated || t.unpriced > 0
   const rows = (data?.recent ?? []).filter((r) => kinds.includes(r.kind))
   return (
-    <div className="devstats" title="개발자 지표: 이 시안의 외부 모델 호출. 비용은 pricing.py 요율로 계산한 추정치입니다">
+    <div className="devstats" title="개발자 지표: 이 시안의 외부 모델 호출. 비용은 기록된 토큰×단가(pricing.py)로 계산하며, *는 추정입니다">
       <div className="devstats-line">
         <span className="devstats-tag">개발자 지표</span>
         <span><strong>{label}</strong> 누적 호출 <strong>{t.count}</strong>회{t.failed ? ` (실패 ${t.failed})` : ''}</span>
-        <span>· 추정 비용 <strong>{usd(t.cost_usd)}</strong>{krw(t.cost_krw)}{est ? ' *' : ''}</span>
+        <span>· 비용 <strong>{usd(t.cost_usd)}</strong>{krw(t.cost_krw)}{est ? ' *' : ''}</span>
         {t.count > 0 && <span>· 평균 {sec(t.ms_avg)}/회, 합계 {sec(t.ms_total)}</span>}
         {chat && (t.tokens_in || t.tokens_out) ? <span>· 토큰 입력 {tok(t.tokens_in)} / 출력 {tok(t.tokens_out)}</span> : null}
         {delta && (
@@ -96,7 +97,7 @@ export default function DevStats({ designId, kinds, label, refreshKey }: {
               return `${KIND_LABEL[k] ?? k} ${a.count}회 ${usd(a.cost_usd)}${a.failed ? ` 실패 ${a.failed}` : ''}`
             }).join(' · ') || '아직 호출이 없습니다'}
             {' '}· 시안 전체 {data?.total ?? 0}회 {usd(data?.cost_usd)}{krw(data?.cost_krw)} · 환율 {data?.usd_krw ?? '-'}원/$
-            {est && ' · * 요금표에 없는 모델·크기는 기본 요율로 추정'}
+            {est && ' · * 토큰 기록이 없거나 요금표에 없는 호출은 기본 요율로 추정'}
           </div>
           {rows.length > 0 && (
             <table className="devstats-table">

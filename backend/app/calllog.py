@@ -114,6 +114,21 @@ def note_usage(info: dict, response) -> None:
     info["tokens_out"] = getattr(u, "completion_tokens", None)
 
 
+def note_image_usage(info: dict, response) -> None:
+    """OpenAI 이미지 응답(images.generate/edit)의 토큰 사용량을 기록 dict 에 넣는다. gpt-image 계열은 장당이 아니라
+    토큰(텍스트 입력·이미지 입력·이미지 출력)으로 과금되므로, 이 값이 있어야 pricing 이 실제 비용을 계산한다.
+    tokens_in = 입력 전체, tokens_out = 이미지 출력, tokens_text_in/tokens_image_in = 입력 내역. usage 가 없으면 기록하지 않는다."""
+    u = getattr(response, "usage", None)
+    if u is None:
+        return
+    info["tokens_in"] = getattr(u, "input_tokens", None)
+    info["tokens_out"] = getattr(u, "output_tokens", None)
+    det = getattr(u, "input_tokens_details", None)
+    if det is not None:
+        info["tokens_text_in"] = getattr(det, "text_tokens", None)
+        info["tokens_image_in"] = getattr(det, "image_tokens", None)
+
+
 def _rows() -> list[dict]:
     try:
         text = LOG_FILE.read_text()

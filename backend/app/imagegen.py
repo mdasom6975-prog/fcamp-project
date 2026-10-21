@@ -233,6 +233,7 @@ def _openai_png(prompt: str, model: str, quality: str, size: str = OPENAI_SIZE, 
             info["prompt_text"] = {"prompt": prompt}
             r = client().with_options(timeout=240.0, max_retries=0).images.generate(
                 model=model, prompt=prompt, size=size, quality=quality, n=1, **extra)
+            calllog.note_image_usage(info, r)      # 토큰 사용량 → 실제 비용 계산(pricing)
     except openai.RateLimitError as e:   # 분당 제한이거나 크레딧 부족. 하루 소진으로 기록하지 않는다
         code = getattr(e, "code", None) or ""
         if "quota" in str(code) or "billing" in str(e).lower():
@@ -384,8 +385,10 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
     def _edit(**kw):
         with calllog.timed("images.edit", "variant", "openai", model, size=f"{w}x{h}", quality=quality) as info:
             info["prompt_text"] = {"prompt": prompt}
-            return client().with_options(timeout=240.0, max_retries=0).images.edit(
+            r = client().with_options(timeout=240.0, max_retries=0).images.edit(
                 model=model, image=buf, prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
+            calllog.note_image_usage(info, r)
+            return r
     try:
         try:
             r = _edit(**extra)
