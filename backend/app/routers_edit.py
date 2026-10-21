@@ -136,6 +136,15 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
             layout["elements"].append({"type": "text", "text": r.props["text"], "box": measure["text"]["box"],
                                        "font_size": r.props["font_size"], "color": r.props["color"],
                                        "locked": r.locked})
+        elif r.type == "body" and measure.get("body"):       # 본문·CTA 도 저장 레이아웃에 남긴다(편집 전 합성과 같은 모양)
+            layout["elements"].append({"type": "body", "role": "본문", "text": r.props["text"], "lines": measure["body"]["lines"],
+                                       "box": measure["body"]["box"], "font_size": r.props["font_size"],
+                                       "color": r.props["color"], "cut": measure["body"]["cut"], "locked": r.locked})
+        elif r.type == "cta" and measure.get("cta"):
+            layout["elements"].append({"type": "cta", "role": "CTA", "text": r.props["text"], "box": measure["cta"]["box"],
+                                       "font_size": r.props["font_size"], "bg_color": r.props["bg_color"],
+                                       "text_color": r.props["text_color"], "corner": r.props.get("corner"), "locked": r.locked})
+    layout["in_image"] = ["headline"] + [k for k, t in (("body", "body"), ("cta", "cta")) if any(r.type == t for r in rows)]
     g = GeneratedImage(design_id=d.id, preset_version_id=pv.id, kind="composite", file_path=str(path),
                        width=pv.production_width, height=pv.production_height,
                        copy_variant_id=comp_prev.copy_variant_id if comp_prev else None,
@@ -202,6 +211,18 @@ def get_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
 
 
 # ---------- 미리보기(저장하지 않음) ----------
+def element_boxes(rows: list[tuple[int, str]], measure: dict) -> dict[str, list[int]]:
+    """미리보기에서 끌어 옮길 수 있게, 요소 id → 캔버스 픽셀 경계 상자 [x0, y0, x1, y1]. 렌더가 잰 값(measure)을 그대로 쓴다.
+    제목·로고·본문·CTA 는 지면마다 최대 하나씩이라 종류로 짝을 맞춘다. 그려지지 않은 요소(로고 자산 없음 등)는 뺀다."""
+    out: dict[str, list[int]] = {}
+    for rid, t in rows:
+        box = (measure.get(t) or {}).get("box")
+        if t in ("text", "logo", "body", "cta") and box:
+            out[str(rid)] = [int(v) for v in box]
+    return out
+
+
+
 def _apply_payload(db, rows: list[Element], payload: list[dict], canvas) -> list[dict]:
     """payload 를 검증해 렌더용 요소 목록으로 만든다. 잠긴 요소의 값 변경은 거절한다."""
     by_id = {r.id: r for r in rows}
@@ -246,8 +267,10 @@ def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., emb
     small.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
     buf = io.BytesIO()
     small.save(buf, "JPEG", quality=85)
+    L, T, R, B, _ = compose._margins(W, H, pv.safe_area)
     return {"image": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
-            "warnings": warns, "size": [W, H]}
+            "warnings": warns, "size": [W, H], "boxes": element_boxes([(a["row"].id, a["row"].type) for a in applied], measure),
+            "margins": [L, T, R, B]}
 
 
 # ---------- 저장 ----------
