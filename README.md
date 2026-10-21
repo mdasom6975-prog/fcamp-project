@@ -1,7 +1,7 @@
 # 브랜드 마케팅 콘텐츠 제작 플랫폼
 
 RFP: 브랜드 아이덴티티를 유지하며 매체·광고 유형·지면 규격에 맞게 콘텐츠를 생성·편집·검수·내보내는 웹앱.
-설계 문서: `docs/` (00 프로젝트 정의서 · 01 데이터 구조 · 02 매체·프리셋 · 03 브랜드 등록 · 04 ERD · 05 시연 시나리오 · 06 데이터 모델 점검 · 07 Day1~4 점검표)
+설계 문서: `docs/` (00 프로젝트 정의서 · 01 데이터 구조 · 02 매체·프리셋 · 03 브랜드 등록 · 04 ERD · 05 시연 시나리오 · 06 데이터 모델 점검 · 07 Day1~4 점검표 · 10 시연 배포)
 
 ## 실행
 ```bash
@@ -10,6 +10,7 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --port 8000
+cd backend && .venv/bin/uvicorn app.main:app --port 8000 --reload --reload-dir app
 
 # 프론트엔드 (터미널 2)
 cd frontend
@@ -17,6 +18,7 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 첫 실행 시 SQLite(`backend/data/app.db`)가 만들어지고 규격 프리셋이 시드됩니다.
+클라우드 VM 1대에 올려 시연하는 절차(접근 비밀번호·터널 주소·비용)는 `docs/10_시연_배포.md`, 운영 파일은 `deploy/`.
 
 ## 기준 데이터와 검증 (워크북 Day 2~4)
 - `specs/presets.json` · `specs/sources.md`: 규격 프리셋과 출처(시드에서 생성, `tools/export_presets.py`)
