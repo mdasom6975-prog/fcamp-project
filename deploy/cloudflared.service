@@ -1,0 +1,21 @@
+# cloudflared 빠른 터널(quick tunnel): 계정·도메인 없이 https://<무작위>.trycloudflare.com 주소로 8000 번을 공개한다.
+# 설치: sudo cp deploy/cloudflared.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#       sudo systemctl enable --now cloudflared
+#
+# 공개 주소 확인 (서비스를 다시 시작할 때마다 주소가 바뀐다. 시연 직전에 확인해서 공유한다):
+#   journalctl -u cloudflared --no-pager | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+# 주소를 고정하려면 Cloudflare 계정에 도메인을 붙인 '이름 있는 터널'(cloudflared tunnel login/create/route) 로 바꾸고
+# ExecStart 를 `cloudflared tunnel run <이름>` 으로 교체한다.
+[Unit]
+Description=cloudflared quick tunnel -> http://localhost:8000
+After=network-online.target brand-studio.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --url http://localhost:8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

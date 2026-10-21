@@ -1,0 +1,22 @@
+# FastAPI 백엔드(프론트 빌드본 포함) systemd 서비스.
+# 설치: sudo cp deploy/brand-studio.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#       sudo systemctl enable --now brand-studio
+# 경로: 저장소를 /home/ubuntu/project 가 아닌 곳에 두었으면 아래 3곳(WorkingDirectory·EnvironmentFile·ExecStart)을 고친다.
+# 로그: journalctl -u brand-studio -f
+[Unit]
+Description=Brand Studio (FastAPI + frontend dist)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/project/backend
+# 환경변수(.env)는 앱도 python-dotenv 로 읽지만, systemd 에도 넘겨 APP_PASSWORD 등이 확실히 적용되게 한다
+EnvironmentFile=/home/ubuntu/project/backend/.env
+# 워커 1개: SQLite 와 파일 기반 상태(일일 한도·호출 기록)는 프로세스 하나를 가정한다. 127.0.0.1 에만 열고 cloudflared 가 중계한다
+ExecStart=/home/ubuntu/project/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
