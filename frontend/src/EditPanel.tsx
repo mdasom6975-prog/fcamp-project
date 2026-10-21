@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { busy as overlay } from './Busy'
 
 type Font = { label: string; ref: Record<string, unknown> }
-type El = { id: number; type: 'image' | 'shape' | 'logo' | 'text'; role: string; locked: boolean; props: Record<string, any> }
+type El = { id: number; type: 'image' | 'shape' | 'logo' | 'text' | 'body' | 'cta'; role: string; locked: boolean; props: Record<string, any> }
 type EditData = { canvas: [number, number]; name: string; elements: El[]; fonts: Font[]; brand_colors: { role: string; hex: string }[]; edited: boolean }
 
 async function call(method: string, url: string, body?: unknown) {

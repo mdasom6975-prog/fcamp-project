@@ -38,8 +38,14 @@ def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None, bo
             els.append({"type": "cta", "role": "CTA", "locked": False, "z_index": 5,
                         "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0, "font_size": e["font_size"],
                                   "bg_color": e["bg_color"], "text_color": e["text_color"], "font": font_ref,
-                                  "corner": e.get("corner", "둥근"), "text_override": False}})
+                                  "corner": cta_corner(e.get("corner")), "text_override": False}})
     return els
+
+
+def cta_corner(v) -> str:
+    """CTA 버튼 모서리를 둥근/각진으로 정규화한다. 예전 합성 결과는 compose 의 변수 가림으로 corner 에 로고 위치(좌상단 등)가
+    남아 있어, 각진이 아닌 값은 모두 둥근으로 본다(그때도 둥글게 그려졌다)."""
+    return "각진" if v == "각진" else "둥근"
 
 
 def _hexok(v) -> bool:
@@ -117,12 +123,10 @@ def validate_props(el_type: str, p: dict, canvas: tuple[int, int]) -> dict:
         font = p.get("font") or {}
         if font.get("source") not in ("provided", "upload"):
             raise ValueError("font 가 올바르지 않습니다")
-        if p.get("corner", "둥근") not in ("둥근", "각진"):
-            raise ValueError("corner 는 둥근 | 각진")
         return {"text": text, "x": num("x", -W, 2 * W, int), "y": num("y", -H, 2 * H, int),
                 "w": num("w", 16, 2 * W, int), "h": num("h", 12, H, int), "font_size": num("font_size", 8, 200, int),
                 "bg_color": p["bg_color"].upper(), "text_color": p["text_color"].upper(), "font": font,
-                "corner": p.get("corner", "둥근"), "text_override": bool(p.get("text_override", False))}
+                "corner": cta_corner(p.get("corner")), "text_override": bool(p.get("text_override", False))}
     raise ValueError("알 수 없는 요소 종류")
 
 
@@ -209,7 +213,7 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
         elif e["type"] == "cta":
             box = [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]), int(p["y"] + p["h"])]
             compose.draw_cta(canvas, box, p["text"], font_path_of(p["font"]), int(p["font_size"]),
-                             compose._hex(p["bg_color"]), compose._hex(p["text_color"]), p.get("corner", "둥근"))
+                             compose._hex(p["bg_color"]), compose._hex(p["text_color"]), cta_corner(p.get("corner")))
             draw = ImageDraw.Draw(canvas)
             font = ImageFont.truetype(font_path_of(p["font"]), int(p["font_size"]))
             measure["cta"] = {"box": box, "overflow_width": draw.textlength(p["text"], font=font) > int(p["w"]) - 8,

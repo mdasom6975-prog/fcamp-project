@@ -108,3 +108,29 @@ def test_editing_render_text_matches_compose_shadow_style():
                                                      "color": "#FFFFFF", "align": "왼쪽", "font": {}}}]
     out, m = editing.render(bg, 400, 200, els, lambda r: FONT, lambda a: None)
     assert m["text"]["lines"] == ["제목"] and out.size == (400, 200)
+
+
+@pytest.mark.parametrize("pos", ["좌상단", "우하단"])
+def test_cta_corner_is_button_shape_not_logo_position(pos):
+    """로고와 CTA 를 함께 합성하면 CTA 의 corner 는 버튼 모양(둥근/각진)이어야 한다.
+    예전에는 로고 모서리 변수가 인자 corner 를 덮어써 '좌상단' 같은 로고 위치가 기록됐고, 편집 미리보기가 400 으로 거절됐다."""
+    from app import compose, editing
+    for shape in ("둥근", "각진"):
+        _, rep = compose.compose(_scene(), 1440, 1800, "제목", FONT, _logo(), None, 10, "#000000", "#FFFFFF",
+                                 cta="혜택 확인하기", accent_hex="#B8860B", corner=shape, logo_position=pos)
+        assert rep["logo_placement"]["corner"] == pos
+        cta = next(e for e in rep["elements"] if e["type"] == "cta")
+        assert cta["corner"] == shape
+        # 편집기 요소로 옮겨도 검증을 통과한다
+        els = editing.default_elements(rep, {"source": "provided", "name": "Pretendard-Bold"}, 1)
+        cta_el = next(e for e in els if e["type"] == "cta")
+        assert editing.validate_props("cta", cta_el["props"], (1440, 1800))["corner"] == shape
+
+
+def test_legacy_cta_corner_with_logo_position_is_normalized():
+    """이미 저장된 예전 데이터(corner 에 로고 위치)는 둥근으로 읽어 편집 미리보기가 거절되지 않는다."""
+    from app import editing
+    props = {"text": "혜택 확인하기", "x": 86, "y": 1597, "w": 430, "h": 117, "font_size": 58, "bg_color": "#B8860B",
+             "text_color": "#000000", "font": {"source": "provided", "name": "Pretendard-Bold"}, "corner": "좌상단"}
+    assert editing.validate_props("cta", props, (1440, 1800))["corner"] == "둥근"
+    assert editing.cta_corner("각진") == "각진" and editing.cta_corner(None) == "둥근"
