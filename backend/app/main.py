@@ -1,10 +1,15 @@
+import base64
+import os
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException   # StaticFiles 가 던지는 쪽(fastapi.HTTPException 은 이것의 하위 클래스)
 from sqlalchemy import func, inspect, select, text
 
 from . import models  # noqa: F401  (테이블 등록)
-from .db import DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
+from .db import BASE_DIR, DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
 from .routers_analysis import router as analysis_router
 from .routers_assets import router as assets_router
 from .routers_brands import router as brands_router
@@ -48,7 +53,49 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="브랜드 마케팅 콘텐츠 제작 플랫폼", lifespan=lifespan)
+# APP_PUBLIC=1 (외부 공개 시연): API 문서(/docs, /redoc, /openapi.json)를 끈다
+_PUBLIC = os.getenv("APP_PUBLIC", "").strip() == "1"
+app = FastAPI(title="브랜드 마케팅 콘텐츠 제작 플랫폼", lifespan=lifespan,
+              docs_url=None if _PUBLIC else "/docs", redoc_url=None if _PUBLIC else "/redoc",
+              openapi_url=None if _PUBLIC else "/openapi.json")
+
+
+class BasicAuthMiddleware:
+    """APP_PASSWORD 가 비어 있지 않으면 모든 요청에 HTTP Basic 인증(APP_USER, 기본 demo)을 요구한다.
+    /api/health 는 예외. 값은 요청마다 환경변수에서 읽는다(테스트에서 재로드 없이 바꿀 수 있게)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] == "/api/health":
+            return await self.app(scope, receive, send)
+        password = os.getenv("APP_PASSWORD", "")
+        if not password:
+            return await self.app(scope, receive, send)
+        user = os.getenv("APP_USER", "demo")
+        header = next((v for k, v in scope["headers"] if k == b"authorization"), b"")
+        if not self._ok(header, user, password):
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"www-authenticate", b'Basic realm="brand-studio"'), (b"content-type", b"text/plain; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": "로그인이 필요합니다".encode()})
+            return
+        return await self.app(scope, receive, send)
+
+    @staticmethod
+    def _ok(header: bytes, user: str, password: str) -> bool:
+        scheme, _, token = header.partition(b" ")
+        if scheme.lower() != b"basic":
+            return False
+        try:
+            given_user, _, given_pw = base64.b64decode(token.strip(), validate=True).decode().partition(":")
+        except Exception:
+            return False
+        # 둘 다 비교해 어느 쪽이 틀렸는지 응답 시간으로 드러나지 않게 한다
+        return secrets.compare_digest(given_user.encode(), user.encode()) & secrets.compare_digest(given_pw.encode(), password.encode())
+
+
+app.add_middleware(BasicAuthMiddleware)
 app.include_router(assets_router)
 app.include_router(brands_router)
 app.include_router(copy_router)
@@ -69,3 +116,23 @@ def health():
     with SessionLocal() as db:
         n = db.scalar(select(func.count()).select_from(models.PresetVersion))
     return {"status": "ok", "presets": n}
+
+
+class _SpaFiles(StaticFiles):
+    """빌드된 프론트(frontend/dist)를 루트에서 서빙한다. 없는 경로는 index.html 로(단일 페이지 앱),
+    /api/... 와 API 문서 경로는 그대로 404 (API 오타가 HTML 200 으로 보이지 않게, APP_PUBLIC 로 끈 문서가 되살아나지 않게)."""
+
+    NO_FALLBACK = ("/api/", "/docs", "/redoc", "/openapi.json")
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as e:
+            if e.status_code != 404 or scope["path"].startswith(self.NO_FALLBACK):
+                raise
+            return await super().get_response("index.html", scope)
+
+
+DIST_DIR = BASE_DIR.parent / "frontend" / "dist"
+if (DIST_DIR / "index.html").exists():          # 라우터 등록 뒤에 mount 해야 /api 가 가려지지 않는다
+    app.mount("/", _SpaFiles(directory=DIST_DIR, html=True), name="frontend")
