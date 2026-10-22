@@ -1,4 +1,4 @@
-"""시연·QA 용 더미 브랜드와 캠페인을 실행 중인 앱에 API 로 넣는다 (brands/*/brand.json + demo/campaigns/*.json).
+"""brands/*/brand.json 의 브랜드와 demo/campaigns/*.json 의 캠페인(있을 때만)을 실행 중인 앱에 API 로 넣는다.
 
 실행: backend/.venv/bin/python tools/seed_demo.py [--base http://127.0.0.1:8000] [--brands a,b] [--campaigns x,y]
       [--category 금융·핀테크] [--svg-logo] [--list] [--dry-run]
@@ -6,7 +6,7 @@
 - 같은 이름의 브랜드, 같은 브랜드의 같은 상품명 캠페인이 이미 있으면 새로 만들지 않는다 (여러 번 실행해도 안전).
 - 카피·이미지 생성(과금)은 하지 않는다. 캠페인은 '규격 선택 + 입력 저장' 상태로 만들어지므로 화면에서 '시안 생성하기'부터 누른다.
 - 브랜드: 로고(logo.png, 없으면 로고 없이)와 정사각 로고(logo_square.png)를 올린다. 쿠챠처럼 로고 파일이 없는 브랜드는 로고 없이 등록한다.
-- 캠페인 JSON 의 brand 는 brands/ 아래 폴더 이름이다. 데이터 설명은 demo/README.md.
+- 캠페인 JSON 은 기본으로 두지 않는다(demo/ 폴더가 없으면 브랜드만 등록). 만들 때 brand 는 brands/ 아래 폴더 이름이다.
 """
 import argparse
 import json
@@ -33,7 +33,7 @@ def load_brands(only: set[str] | None = None, category: str | None = None) -> di
 
 def load_campaigns(only: set[str] | None = None, brands: set[str] | None = None) -> list[dict]:
     out = []
-    for f in sorted(CAMPAIGNS_DIR.glob("*.json")):
+    for f in sorted(CAMPAIGNS_DIR.glob("*.json")):  # 폴더가 없으면 빈 목록
         c = json.loads(f.read_text(encoding="utf-8"))
         if (not only or c["slug"] in only) and (not brands or c["brand"] in brands):
             out.append(c)
