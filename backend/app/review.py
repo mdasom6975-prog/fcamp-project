@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import compose, copywriter, exporting
+from . import compose, copywriter, exporting, storage
 from .copyfields import EXTRA
 from .textcount import count_len
 
@@ -101,9 +101,9 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
     conds = pv.conditions or []
 
     # ---- 규격: 파일 ----
-    if img_row is None or not Path(img_row.file_path).exists():
+    if img_row is None or not storage.exists(img_row.file_path):
         return [item("규격", "이미지", "수정 필요", "생성된 이미지가 없습니다", "강제", True)]
-    img = Image.open(img_row.file_path)
+    img = Image.open(storage.local(img_row.file_path))
     if img.size != (W, H):
         out.append(item("규격", "이미지 크기", "수정 필요", f"{img.size[0]}×{img.size[1]} (제작 기준 {W}×{H})", "강제", True))
     else:

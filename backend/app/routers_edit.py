@@ -8,8 +8,7 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import calllog, compose, copywriter, editing, phrases
-from .db import STORAGE_DIR
+from . import calllog, compose, copywriter, editing, phrases, storage
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
@@ -49,8 +48,8 @@ def _font_ref(bv: BrandVersion, role: str = "제목") -> dict:
 def _font_path(db: Session, ref: dict) -> str:
     if ref.get("source") == "upload" and ref.get("asset_id"):
         a = db.get(Asset, ref["asset_id"])
-        if a and Path(a.file_path).exists():
-            return a.file_path
+        if a and storage.exists(a.file_path):
+            return str(storage.local(a.file_path))      # ImageFont 는 로컬 파일이 필요하다
     if ref.get("source") == "provided":
         p = FONT_DIR / f"{ref.get('name')}.otf"
         if p.exists():
@@ -63,7 +62,7 @@ def _logo_of(db: Session):
         if not asset_id:
             return None
         a = db.get(Asset, asset_id)
-        return compose.load_logo(a.file_path, a.mime) if a and Path(a.file_path).exists() else None
+        return compose.load_logo(a.file_path, a.mime) if a and storage.exists(a.file_path) else None
     return f
 
 
@@ -109,7 +108,7 @@ def _as_render(rows: list[Element]) -> list[dict]:
 def _render_rows(db, d, pv, rows, bg_path):
     W, H = pv.production_width, pv.production_height
     bv = db.get(BrandVersion, d.brand_version_id)
-    bg = Image.open(bg_path)
+    bg = Image.open(storage.local(bg_path))
     img, measure = editing.render(bg, W, H, _as_render(rows), lambda ref: _font_path(db, ref), _logo_of(db))
     text_el = next((r for r in rows if r.type == "text"), None)
     brand_hex = {c["hex"].upper() for c in (bv.colors or []) if c.get("hex")}
@@ -121,9 +120,7 @@ def _render_rows(db, d, pv, rows, bg_path):
 
 def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
     img, measure, warns = _render_rows(db, d, pv, rows, bg_row.file_path)
-    STORAGE_DIR.mkdir(exist_ok=True)
-    path = STORAGE_DIR / f"edt_{uuid.uuid4().hex[:10]}.png"
-    img.save(path)
+    path = storage.put_image(f"edt_{uuid.uuid4().hex[:10]}.png", img)
     layout = {"template": compose.template_for(pv.production_width, pv.production_height),
               "canvas": [pv.production_width, pv.production_height], "edited": True, "warnings": warns,
               "elements": [], "margin_source": "편집됨"}
@@ -145,7 +142,7 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
                                        "font_size": r.props["font_size"], "bg_color": r.props["bg_color"],
                                        "text_color": r.props["text_color"], "corner": r.props.get("corner"), "locked": r.locked})
     layout["in_image"] = ["headline"] + [k for k, t in (("body", "body"), ("cta", "cta")) if any(r.type == t for r in rows)]
-    g = GeneratedImage(design_id=d.id, preset_version_id=pv.id, kind="composite", file_path=str(path),
+    g = GeneratedImage(design_id=d.id, preset_version_id=pv.id, kind="composite", file_path=path,
                        width=pv.production_width, height=pv.production_height,
                        copy_variant_id=comp_prev.copy_variant_id if comp_prev else None,
                        brand_version_id=d.brand_version_id, layout=layout)
@@ -161,7 +158,7 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
 
 def _bg_row(db, did, pid) -> GeneratedImage:
     bg = _latest(db, did, pid, "background")
-    if not bg or not Path(bg.file_path).exists():
+    if not bg or not storage.exists(bg.file_path):
         raise HTTPException(400, "배경 이미지가 없습니다. 먼저 이미지를 생성해 주세요")
     return bg
 

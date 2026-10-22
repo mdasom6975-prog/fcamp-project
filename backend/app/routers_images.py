@@ -3,13 +3,13 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import FileResponse
 from PIL import Image
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from . import calllog, compose, imagegen
-from .db import BASE_DIR, STORAGE_DIR
+from . import storage
+from .db import BASE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
                      IconAsset, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db
@@ -25,8 +25,8 @@ def _font_path(bv: BrandVersion, role: str, db: Session) -> str:
     f = next((x for x in fonts if x.get("role") == role), None) or (fonts[0] if fonts else None)
     if f and f.get("source") == "upload" and f.get("asset_id"):
         a = db.get(Asset, f["asset_id"])
-        if a and Path(a.file_path).exists():
-            return a.file_path
+        if a and storage.exists(a.file_path):
+            return str(storage.local(a.file_path))      # ImageFont 는 로컬 파일이 필요하다
     if f and f.get("source") == "provided" and f.get("name"):
         p = FONT_DIR / f"{f['name']}.otf"
         if p.exists():
@@ -232,8 +232,8 @@ def _gen_error(e: Exception) -> str:
 
 
 def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
-                  final: bool = False, upgrade: bool = False, force_ratio: bool = False) -> tuple[Path, Image.Image, str, dict]:
-    """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (파일 경로, 이미지, 프롬프트, 기록용 layout).
+                  final: bool = False, upgrade: bool = False, force_ratio: bool = False) -> tuple[str, Image.Image, str, dict]:
+    """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (저장소 키, 이미지, 프롬프트, 기록용 layout).
     final=False 면 초안 품질(IMAGE_QUALITY_DRAFT), True 면 확정 품질(IMAGE_QUALITY). layout.quality 에 남긴다.
     생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
     reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다."""
@@ -249,10 +249,10 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     provider = imagegen.provider_for(final)       # 초안 공급자가 FLUX 면 초안은 무료 구간에서, 확정만 OpenAI
     ref_img = None
     # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 초안→확정 승격(upgrade)은 can_edit
-    if reference is not None and Path(reference.file_path).exists() and provider == "openai" \
+    if reference is not None and storage.exists(reference.file_path) and provider == "openai" \
             and (imagegen.can_edit() if upgrade else (imagegen.VARIANT and imagegen.can_edit()) if force_ratio
                  else imagegen.can_vary(st["bg_mode"], final)):
-        ref_img = Image.open(reference.file_path)
+        ref_img = Image.open(storage.local(reference.file_path))
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single)
         if ref_img is not None:
@@ -265,15 +265,13 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         raise HTTPException(429, str(e))
     except Exception as e:
         raise HTTPException(502, _gen_error(e))
-    STORAGE_DIR.mkdir(exist_ok=True)
-    path = STORAGE_DIR / f"bg_{uuid.uuid4().hex[:10]}.png"
-    bg.save(path)
+    path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "draft": imagegen.is_draft(quality), "mode": st["bg_mode"], "provider": provider,
               **({"single_extra": True} if force_ratio else {}),
               "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
-              "scene": (_scene(reference) or path.stem) if (ref_img is not None and not upgrade) else path.stem,
+              "scene": (_scene(reference) or Path(path).stem) if (ref_img is not None and not upgrade) else Path(path).stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade, single=single)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
@@ -335,7 +333,7 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
                 # 같은 비율군 초안이 없으면(FLUX 초안은 정사각뿐, 1장 방식 등) 현재 장면의 최신 초안을 참조한다.
                 draft = _latest_design_bg(db, d.id, template) or _latest_design_bg(db, d.id)
                 if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_edit() \
-                        and Path(draft.file_path).exists():
+                        and storage.exists(draft.file_path):
                     try:
                         path, bg, prompt, layout = _generate_one(db, d, template, reference=draft, final=True, upgrade=True)
                     except HTTPException as e:
@@ -432,18 +430,14 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
             db.delete(r)
     d.status = "미검수"
     db.flush()
-    # 다른 행이 같은 파일을 쓰지 않을 때만 파일 삭제 (경로는 STORAGE_DIR 하위만)
+    # 다른 행이 같은 파일을 쓰지 않을 때만 파일 삭제 (storage 키만)
     still = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
     still |= {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
     removed = 0
     for p in paths - still:
-        fp = Path(p)
-        if STORAGE_DIR in fp.parents and fp.exists():
-            fp.unlink()
+        if storage.delete(p):
             removed += 1
-    for t in (STORAGE_DIR / "thumbs").glob("*.jpg"):      # 이 시안의 축소본 캐시(파일 이름 기준)도 정리
-        if any(t.name.startswith(Path(p).stem + "_") for p in paths):
-            t.unlink()
+        storage.delete(_thumb_key(p))                  # 이 시안의 축소본 캐시(파일 이름 기준)도 정리
     db.commit()
     return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy,
             "icons_deleted": icons_deleted}
@@ -511,7 +505,7 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
             # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
             # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
             src = same or (None if imagegen.can_vary(st["bg_mode"], final=stage_final) else latest)
-        if src is not None and Path(src.file_path).exists():
+        if src is not None and storage.exists(src.file_path):
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
                 bg_row = _bg_row(d, preset_id, src.file_path, src.width, src.height, src.prompt,
@@ -552,14 +546,14 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
                 else:
                     bg_row.layout = {**(bg_row.layout or {}), "fill": "blur"}
         except HTTPException as e:
-            if ref is None or regenerate_background or not Path(ref.file_path).exists():
+            if ref is None or regenerate_background or not storage.exists(ref.file_path):
                 raise
             log.warning("비율군 %s 변형 실패 → 기존 배경으로 대체: %s", tpl, e.detail)
             bg_row = _bg_row(d, preset_id, ref.file_path, ref.width, ref.height, ref.prompt, ref.brand_version_id,
                              {**(ref.layout or {}), "template": tpl, "fallback": str(e.detail), **({"fill": "blur"} if force_ratio else {})})
         db.add(bg_row)
         db.flush()
-    bg_img = Image.open(bg_row.file_path)
+    bg_img = Image.open(storage.local(bg_row.file_path))
     # 블러 채우기: 1장 방식에서 손실 큰 비율군의 변형을 못 만들었을 때. 전체를 넣고 남는 자리는 흐린 확대본 (피사체 손실 없음)
     fill_blur = (bg_row.layout or {}).get("fill") == "blur"
 
@@ -573,15 +567,14 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
             out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
                   "crop": crop, "warnings": [], "elements": []}
-        kind_path = STORAGE_DIR / f"sep_{uuid.uuid4().hex[:10]}.png"
-        out_img.save(kind_path)
+        kind_path = storage.put_image(f"sep_{uuid.uuid4().hex[:10]}.png", out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
-                             file_path=str(kind_path), width=w, height=h, brand_version_id=bv.id, layout=report)
+                             file_path=kind_path, width=w, height=h, brand_version_id=bv.id, layout=report)
     else:
         logo = None
         if bv.logo_asset_id:
             a = db.get(Asset, bv.logo_asset_id)
-            if a and Path(a.file_path).exists():
+            if a and storage.exists(a.file_path):
                 logo = compose.load_logo(a.file_path, a.mime)
         text_hex = _color(bv, "텍스트색")
         scrim_hex = _color(bv, "배경색")
@@ -597,10 +590,9 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
             report["warnings"].append("로고 파일을 찾지 못해 합성하지 못했습니다")
         if not bv.logo_asset_id:
             report["warnings"].append("브랜드에 로고가 등록되어 있지 않습니다")
-        path = STORAGE_DIR / f"cmp_{uuid.uuid4().hex[:10]}.png"
-        out_img.save(path)
+        path = storage.put_image(f"cmp_{uuid.uuid4().hex[:10]}.png", out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
-                             file_path=str(path), width=w, height=h, copy_variant_id=sel.id,
+                             file_path=path, width=w, height=h, copy_variant_id=sel.id,
                              brand_version_id=bv.id, layout=report)
     db.add(row)
     invalidate_reviews(db, design_id, preset_id)
@@ -611,24 +603,27 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
 @router.get("/generated/{image_id}/file")
 def image_file(image_id: int, db: Session = Depends(get_db)):
     g = db.get(GeneratedImage, image_id)
-    if not g or not Path(g.file_path).exists():
+    if not g or not storage.exists(g.file_path):
         raise HTTPException(404, "이미지를 찾을 수 없습니다")
-    return FileResponse(g.file_path, media_type="image/png")
+    return storage.response(g.file_path, "image/png")
 
 
 THUMB_SIDE = 360
+
+
+def _thumb_key(file_path: str) -> str:
+    return f"thumbs/{Path(file_path).stem}_{THUMB_SIDE}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
 
 
 @router.get("/generated/{image_id}/thumb")
 def image_thumb(image_id: int, db: Session = Depends(get_db)):
     """썸네일 그리드용 축소본(긴 변 360px JPEG). 생성 결과는 바뀌지 않으므로 id 기준으로 파일 캐시한다."""
     g = db.get(GeneratedImage, image_id)
-    if not g or not Path(g.file_path).exists():
+    if not g or not storage.exists(g.file_path):
         raise HTTPException(404, "이미지를 찾을 수 없습니다")
-    out = STORAGE_DIR / "thumbs" / f"{Path(g.file_path).stem}_{THUMB_SIDE}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
-    if not out.exists():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        im = Image.open(g.file_path).convert("RGB")
+    out = _thumb_key(g.file_path)
+    if not storage.exists(out):
+        im = Image.open(storage.local(g.file_path)).convert("RGB")
         im.thumbnail((THUMB_SIDE, THUMB_SIDE), Image.LANCZOS)
-        im.save(out, "JPEG", quality=82)
-    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        storage.put_image(out, im, "JPEG", quality=82)
+    return storage.response(out, "image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

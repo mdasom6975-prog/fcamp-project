@@ -1,0 +1,12 @@
+# Vercel 이 이 파일로 Python 함수(api/index.py)의 의존성을 설치한다. 로컬 개발은 backend/requirements.txt 를 쓴다.
+fastapi
+sqlalchemy
+psycopg[binary]
+python-dotenv
+pillow
+fonttools
+python-multipart
+openai
+anthropic
+resvg-py
+httpx

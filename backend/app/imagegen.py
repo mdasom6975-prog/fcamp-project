@@ -2,7 +2,6 @@
 텍스트·로고는 그리지 않게 하고 합성은 compose 에서 한다."""
 import base64
 import io
-import json
 import os
 import threading
 from datetime import datetime, timezone
@@ -10,8 +9,8 @@ from datetime import datetime, timezone
 import httpx
 from PIL import Image
 
-from . import calllog, prompts
-from .copywriter import BASE_DIR, client  # (load_dotenv 가 copywriter import 시점에 실행된다)
+from . import calllog, prompts, state
+from .copywriter import client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare — 확정(내보낼) 배경의 공급자
 # 초안 배경의 공급자. cloudflare(FLUX.1 schnell, 무료 구간)로 두면 형태·구도를 고르는 동안은 OpenAI 호출이 0 이고,
@@ -108,7 +107,7 @@ CF_MAX_PROMPT_CHARS = 2000  # Workers AI 프롬프트 상한(2048) 보다 약간
 
 # 하루 생성 상한(UTC 기준). Cloudflare 는 무료 한도 추정치, OpenAI 는 비용 폭주를 막는 안전장치다.
 DAILY_LIMIT = int(os.getenv("IMAGE_DAILY_LIMIT", "50"))
-USAGE_FILE = BASE_DIR / "data" / "image_usage.json"
+USAGE_KEY = "image_usage"   # KV 테이블의 키(예전 data/image_usage.json)
 _lock = threading.Lock()
 
 
@@ -122,21 +121,13 @@ def _today() -> str:
 
 def _load() -> dict:
     """{date, providers: {이름: {count, exhausted}}}. 날짜가 바뀌면 리셋하고, 옛 형식은 cloudflare 로 이관한다."""
-    try:
-        u = json.loads(USAGE_FILE.read_text())
-    except (OSError, ValueError):
-        u = {}
+    u = state.get(USAGE_KEY) or {}
     if u.get("date") != _today():
         return {"date": _today(), "providers": {}}
     if "providers" not in u:
         u = {"date": u["date"], "providers": {"cloudflare": {"count": u.get("count", 0),
                                                               "exhausted": u.get("exhausted", False)}}}
     return u
-
-
-def _save(u: dict) -> None:
-    USAGE_FILE.parent.mkdir(exist_ok=True)
-    USAGE_FILE.write_text(json.dumps(u))
 
 
 def usage(provider: str = PROVIDER) -> dict:
@@ -149,14 +140,18 @@ def usage(provider: str = PROVIDER) -> dict:
 
 
 def _bump(exhausted: bool = False, provider: str = PROVIDER) -> None:
-    with _lock:
-        u = _load()
-        p = u["providers"].setdefault(provider, {"count": 0, "exhausted": False})
+    def bump(u: dict) -> dict:
+        if u.get("date") != _today():
+            u = {"date": _today(), "providers": {}}
+        p = u.setdefault("providers", {}).setdefault(provider, {"count": 0, "exhausted": False})
         if exhausted:
             p["exhausted"] = True
         else:
             p["count"] += 1
-        _save(u)
+        return u
+
+    with _lock:
+        state.update(USAGE_KEY, bump)
 
 
 def size_for(template: str, per_ratio: bool | None = None) -> tuple[int, int]:
@@ -323,7 +318,7 @@ def can_vary(bg_mode: str | None = None, final: bool = True) -> bool:
 
 # 모델이 input_fidelity 를 거절한 사실을 모델별로 파일에 기억한다. 메모리 플래그만 쓰면 서버를 재시작할 때마다
 # 첫 변형 호출이 한 번 거절당한 뒤(과금 없음, 약 2초) 재시도하므로, 프로세스가 바뀌어도 처음부터 보내지 않게 한다.
-CAPS_FILE = BASE_DIR / "data" / "model_caps.json"
+CAPS_KEY = "model_caps"
 _caps_cache: dict | None = None
 
 
@@ -331,10 +326,7 @@ def _caps() -> dict:
     """{모델명: {"input_fidelity": bool}}. 파일이 없거나 깨졌으면 빈 dict."""
     global _caps_cache
     if _caps_cache is None:
-        try:
-            _caps_cache = json.loads(CAPS_FILE.read_text())
-        except (OSError, ValueError):
-            _caps_cache = {}
+        _caps_cache = state.get(CAPS_KEY) or {}
         if not isinstance(_caps_cache, dict):
             _caps_cache = {}
     return _caps_cache
@@ -349,9 +341,8 @@ def _remember_fidelity(model: str, supported: bool) -> None:
     caps = _caps()
     caps[model] = {**(caps.get(model) or {}), "input_fidelity": supported}
     try:
-        CAPS_FILE.parent.mkdir(exist_ok=True)
-        CAPS_FILE.write_text(json.dumps(caps, ensure_ascii=False, indent=1))
-    except OSError:
+        state.put(CAPS_KEY, caps)
+    except Exception:
         pass                      # 기록 실패는 다음 프로세스에서 한 번 더 거절당하는 것 외에 영향이 없다
 
 

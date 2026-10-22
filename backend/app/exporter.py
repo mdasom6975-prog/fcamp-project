@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import copyfields, exporting
+from . import copyfields, exporting, storage
 from .textcount import count_len
 
 
@@ -40,7 +40,7 @@ class Pack:
 def ad_preset_folder(pack: Pack, pv, g: dict, fields: list[dict], rows_csv: list[list]) -> dict:
     """한 지면의 이미지·(분리 자산형이면 로고)·카피 파일을 쓴다."""
     folder = f"{safe(pv.placement.platform.name)}_{safe(pv.placement.name)}"
-    img = Image.open(g["comp"].file_path)
+    img = Image.open(storage.local(g["comp"].file_path))
     conds = pv.conditions or []
     fmt_c, size_c = exporting.cond(conds, "파일 형식"), exporting.cond(conds, "최대 용량")
     formats = exporting.parse_formats(fmt_c["value"]) if fmt_c and fmt_c.get("value") else []
@@ -54,10 +54,10 @@ def ad_preset_folder(pack: Pack, pv, g: dict, fields: list[dict], rows_csv: list
     ext = "jpg" if enc["format"] == "JPG" else "png"
     pack.add(f"{folder}/image.{ext}", enc["bytes"], "이미지", folder)
     if g["sep"] and g["logo_path"]:
-        pack.add(f"{folder}/logo{Path(g['logo_path']).suffix.lower()}", Path(g["logo_path"]).read_bytes(), "로고 원본", folder)
+        pack.add(f"{folder}/logo{Path(g['logo_path']).suffix.lower()}", storage.read_bytes(g["logo_path"]), "로고 원본", folder)
     if g.get("logo_square_path") and exporting.cond(conds, "정사각 로고"):
         pack.add(f"{folder}/logo_square{Path(g['logo_square_path']).suffix.lower()}",
-                 Path(g["logo_square_path"]).read_bytes(), "정사각 로고(1:1)", folder)
+                 storage.read_bytes(g["logo_square_path"]), "정사각 로고(1:1)", folder)
     lines = []
     for f in fields:
         n = count_len(f["value"], f.get("count_method"))

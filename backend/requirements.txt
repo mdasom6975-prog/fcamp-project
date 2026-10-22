@@ -1,11 +1,2 @@
-fastapi
+-r ../requirements.txt
 uvicorn[standard]
-sqlalchemy
-python-dotenv
-pillow
-fonttools
-python-multipart
-openai
-anthropic
-resvg-py
-httpx

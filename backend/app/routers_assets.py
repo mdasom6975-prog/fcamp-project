@@ -3,12 +3,12 @@ import re
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
 from fontTools.ttLib import TTFont
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from .db import BASE_DIR, STORAGE_DIR, SessionLocal
+from . import storage
+from .db import BASE_DIR, SessionLocal
 from .models import Asset
 
 router = APIRouter(prefix="/api")
@@ -115,11 +115,9 @@ async def upload_asset(kind: str = Form(...), brand_id: int | None = Form(None),
             raise HTTPException(400, "이미지 파일을 읽을 수 없습니다")
         mime = {"png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
 
-    STORAGE_DIR.mkdir(exist_ok=True)
-    path = STORAGE_DIR / f"{kind}_{uuid.uuid4().hex[:10]}.{ext}"
-    path.write_bytes(data)
+    key = storage.put(f"{kind}_{uuid.uuid4().hex[:10]}.{ext}", data, mime)
     a = Asset(brand_id=brand_id, kind={"tone_ref": "reference"}.get(kind, kind),
-              file_path=str(path), mime=mime, bytes=len(data), width=width, height=height)
+              file_path=key, mime=mime, bytes=len(data), width=width, height=height)
     db.add(a)
     db.commit()
     return {"id": a.id, "kind": a.kind, "mime": mime, "bytes": a.bytes,
@@ -129,6 +127,6 @@ async def upload_asset(kind: str = Form(...), brand_id: int | None = Form(None),
 @router.get("/assets/{asset_id}/file")
 def asset_file(asset_id: int, db: Session = Depends(get_db)):
     a = db.get(Asset, asset_id)
-    if not a:
+    if not a or not storage.exists(a.file_path):
         raise HTTPException(404, "파일을 찾을 수 없습니다")
-    return FileResponse(a.file_path, media_type=a.mime)
+    return storage.response(a.file_path, a.mime)

@@ -2,18 +2,15 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import copyfields, exporter
-from .db import STORAGE_DIR
+from . import copyfields, exporter, storage
 from .models import Asset, Brand, BrandVersion, Design, Export, PresetVersion
 from .routers_assets import get_db
 from .routers_review import _brand_dict, _collect, gather, version_icon_set
 
 router = APIRouter(prefix="/api")
-EXPORT_DIR = STORAGE_DIR / "exports"
 
 
 def _out(e: Export) -> dict:
@@ -33,9 +30,9 @@ def list_exports(design_id: int, db: Session = Depends(get_db)):
 @router.get("/exports/{export_id}/download")
 def download(export_id: int, db: Session = Depends(get_db)):
     e = db.get(Export, export_id)
-    if not e or not e.zip_path or not Path(e.zip_path).exists():
+    if not e or not e.zip_path or not storage.exists(e.zip_path):
         raise HTTPException(404, "내보내기 파일을 찾을 수 없습니다")
-    return FileResponse(e.zip_path, media_type="application/zip", filename=(e.review_summary or {}).get("filename"))
+    return storage.response(e.zip_path, "application/zip", filename=(e.review_summary or {}).get("filename"))
 
 
 @router.post("/designs/{design_id}/export")
@@ -76,16 +73,16 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
         logo_path = None
         if bv.logo_asset_id:
             a = db.get(Asset, bv.logo_asset_id)
-            logo_path = a.file_path if a and Path(a.file_path).exists() else None
+            logo_path = a.file_path if a and storage.exists(a.file_path) else None
         logo_square_path = None
         if bv.logo_square_asset_id:      # PMax 등 1:1 로고 자산을 요구하는 지면 폴더에 함께 담는다
             a = db.get(Asset, bv.logo_square_asset_id)
-            logo_square_path = a.file_path if a and Path(a.file_path).exists() else None
+            logo_square_path = a.file_path if a and storage.exists(a.file_path) else None
         text_assets = (d.brief or {}).get("text_assets") or {}
         for pid in targets:
             pv = db.get(PresetVersion, pid)
             g = gather(db, d, pv, brand)
-            if g["comp"] is None or not Path(g["comp"].file_path).exists():
+            if g["comp"] is None or not storage.exists(g["comp"].file_path):
                 skipped.append({"preset": pv.placement.name, "reason": "생성된 이미지가 없습니다"})
                 continue
             g["logo_path"] = logo_path
@@ -109,9 +106,9 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
             base = f"{a.position:02d}_{exporter.safe(a.name, 30)}"
             if a.svg:   # svg 방식만 원본 SVG 가 있다
                 pack.add(f"icons/svg/{base}.svg", a.svg.encode("utf-8"), "아이콘 SVG(원본)")
-            pack.add(f"icons/png/{base}.png", Path(a.png_path).read_bytes(), "아이콘 PNG")
-            if a.source_path and Path(a.source_path).exists():   # 3d 방식: 1024 투명 원본
-                pack.add(f"icons/src/{base}.png", Path(a.source_path).read_bytes(), "아이콘 원본 PNG(1024, 투명)")
+            pack.add(f"icons/png/{base}.png", storage.read_bytes(a.png_path), "아이콘 PNG")
+            if a.source_path and storage.exists(a.source_path):   # 3d 방식: 1024 투명 원본
+                pack.add(f"icons/src/{base}.png", storage.read_bytes(a.source_path), "아이콘 원본 PNG(1024, 투명)")
         manifest_presets.append({"name": "아이콘 세트", "count": len(icons), "size": [icons[0].width, icons[0].height],
                                  "render": (icons[0].style or {}).get("render", "svg"), "style": icons[0].style,
                                  "prompts": sorted({a.prompt for a in icons if a.prompt}) if icons[0].prompt else None,
@@ -133,11 +130,9 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
     prefix = "검수완료" if status == "검수 완료" else "미검수작업본"
     stamp = exporter.now_str().replace(":", "").replace("-", "").replace(" ", "_")
     filename = f"{prefix}_{exporter.safe(brand_row.name, 20)}_{d.id}_{stamp}.zip"
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    path = EXPORT_DIR / f"exp_{d.id}_{stamp}.zip"
-    path.write_bytes(data)
+    path = storage.put(f"exports/exp_{d.id}_{stamp}.zip", data, "application/zip")
     e = Export(design_id=d.id, brand_version_id=bv.id, preset_version_ids=[p for p in targets if p is not None],
-               files=pack.files, zip_path=str(path),
+               files=pack.files, zip_path=path,
                review_summary={"status": status, "filename": filename, "unresolved": unresolved,
                                "groups": [{"name": g["name"], "summary": g["summary"]} for g in groups]})
     db.add(e)

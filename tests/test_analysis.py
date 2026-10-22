@@ -49,8 +49,6 @@ def env(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
-    monkeypatch.setattr(calllog, "PROMPT_DIR", tmp_path / "prompt_log")
-    monkeypatch.setattr(analysis, "JUDGE_DIR", tmp_path / "analysis")
 
     def override():
         with Local() as db:

@@ -11,7 +11,6 @@ from app import calllog
 
 @pytest.fixture
 def log(tmp_path, monkeypatch):
-    monkeypatch.setattr(calllog, "LOG_FILE", tmp_path / "api_calls.jsonl")
     return calllog
 
 
@@ -66,10 +65,10 @@ def test_quality_for_and_is_draft(monkeypatch):
     assert not imagegen.is_draft(imagegen.quality_for(False))
 
 
-def test_cost_estimate_and_tokens(log, monkeypatch):
+def test_cost_estimate_and_tokens(log, tmp_path, monkeypatch):
     """이미지는 모델·품질·크기 요율, 채팅은 토큰×요율. 표에 없는 모델은 '*' 요율로 추정 표시. 실패 건은 0, FLUX 는 무료."""
     from app import pricing
-    monkeypatch.setattr(pricing, "PRICING_FILE", log.LOG_FILE.parent / "none.json")
+    monkeypatch.setattr(pricing, "PRICING_FILE", tmp_path / "none.json")
     monkeypatch.setattr(pricing, "USD_KRW", 1000.0)
     calllog.record("images.generate", "background", "openai", "gpt-image-1", size="1024x1536", quality="medium")
     calllog.record("images.edit", "variant", "openai", "gpt-image-9", size="1024x1024", quality="low")   # 표에 없는 모델
@@ -89,11 +88,11 @@ def test_cost_estimate_and_tokens(log, monkeypatch):
     assert pricing.cost_of(rec[4]) == (1.2, False)
 
 
-def test_image_cost_uses_recorded_tokens(log, monkeypatch):
+def test_image_cost_uses_recorded_tokens(log, tmp_path, monkeypatch):
     """토큰이 기록된 이미지 호출은 장당 추정이 아니라 토큰×단가(실제 과금 방식)로 계산한다. 표에 없는 모델은 '*' 단가·추정 표시."""
     from types import SimpleNamespace as NS
     from app import pricing
-    monkeypatch.setattr(pricing, "PRICING_FILE", log.LOG_FILE.parent / "none.json")
+    monkeypatch.setattr(pricing, "PRICING_FILE", tmp_path / "none.json")
     # OpenAI 이미지 응답의 usage 모양: input_tokens / output_tokens / input_tokens_details{text_tokens, image_tokens}
     resp = NS(usage=NS(input_tokens=120, output_tokens=4160, input_tokens_details=NS(text_tokens=120, image_tokens=0)))
     info: dict = {}
@@ -134,7 +133,6 @@ def test_pricing_file_overrides_defaults(log, tmp_path, monkeypatch):
 
 def test_prompt_text_is_saved_separately(log, tmp_path, monkeypatch):
     """보낸 프롬프트 전문은 data/prompt_log/<id>.json 에 두고 행에는 prompt_id 만 남는다. 실패 호출도 전문을 남긴다."""
-    monkeypatch.setattr(calllog, "PROMPT_DIR", tmp_path / "prompt_log")
     with calllog.timed("chat", "copy", "anthropic", "m") as info:
         info["prompt_text"] = {"system": "S", "user": "U"}
     with pytest.raises(RuntimeError):

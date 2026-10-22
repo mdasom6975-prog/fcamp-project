@@ -101,7 +101,7 @@ def client(tmp_path, monkeypatch):
     Local = sessionmaker(bind=engine, autoflush=False)
     with Local() as db:
         seed.seed(db)
-    monkeypatch.setattr(routers_assets, "STORAGE_DIR", tmp_path / "storage")   # 업로드가 실제 backend/storage 를 건드리지 않게
+    # 저장소 폴더는 conftest 의 _isolated_state 가 임시 폴더로 바꿔 둔다
 
     def override():
         with Local() as db:
