@@ -33,7 +33,7 @@ export default function App() {
         : tab === 'preset' ? <PresetLibrary />
         : tab === 'analysis' ? <AnalysisPage workBrandId={workBrandId} />
         : <DesignPage workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} />}
-      <footer className="sunset-band" aria-hidden="true" />
+      <footer className="site-footer"><strong>브랜드 스튜디오</strong><span>브랜드 규격 기반 광고 시안 도구</span></footer>
     </>
   )
 }
