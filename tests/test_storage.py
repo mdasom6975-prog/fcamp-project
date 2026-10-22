@@ -124,3 +124,15 @@ def test_persistent_transport_error_still_raises(monkeypatch):
     monkeypatch.setattr(storage, "_client", httpx.Client(transport=httpx.MockTransport(handler)))
     with pytest.raises(httpx.ConnectError):
         storage.put("bg_8.png", b"x")
+
+
+def test_no_direct_file_open_of_stored_paths():
+    """DB 의 파일 키는 로컬 디스크에 없을 수 있다(Vercel). 이미지는 storage.local() 이나 바이트로만 연다."""
+    import re
+    from pathlib import Path
+    bad = []
+    for f in sorted((Path(__file__).resolve().parent.parent / "backend" / "app").glob("*.py")):
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"Image\.open\((?!storage\.local\(|io\.BytesIO\()", line) and not line.lstrip().startswith("#"):
+                bad.append(f"{f.name}:{n}: {line.strip()}")
+    assert not bad, "\n".join(bad)

@@ -251,7 +251,7 @@ def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., emb
         raise HTTPException(400, "편집 화면을 먼저 열어 주세요")
     applied = _apply_payload(db, rows, elements, (pv.production_width, pv.production_height))
     render_rows = [{"type": a["row"].type, "props": a["props"], "z_index": a["row"].z_index} for a in applied]
-    bg = Image.open(_bg_row(db, d.id, preset_id).file_path)
+    bg = Image.open(storage.local(_bg_row(db, d.id, preset_id).file_path))
     W, H = pv.production_width, pv.production_height
     img, measure = editing.render(bg, W, H, render_rows, lambda ref: _font_path(db, ref), _logo_of(db))
     bv = db.get(BrandVersion, d.brand_version_id)
