@@ -33,7 +33,6 @@ export default function App() {
         : tab === 'preset' ? <PresetLibrary />
         : tab === 'analysis' ? <AnalysisPage workBrandId={workBrandId} />
         : <DesignPage workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} />}
-      <footer className="sunset-band" aria-hidden="true" />
     </>
   )
 }
