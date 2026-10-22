@@ -44,7 +44,7 @@ backend/.venv/bin/python tools/migrate_to_supabase.py
 ```
 
 테이블 행(id 유지), 파일 경로 → 키 변환, `backend/storage` 파일 업로드, 호출 기록·프롬프트·채점 결과 이관, 시퀀스 보정까지 한다.
-처음부터 시작하면 건너뛴다(시연 데이터는 5번).
+처음부터 시작하면 건너뛴다(브랜드 등록은 5번).
 
 ## 4. Vercel 배포
 
@@ -58,11 +58,15 @@ backend/.venv/bin/python tools/migrate_to_supabase.py
    curl https://<프로젝트>.vercel.app/api/health     # {"status":"ok","presets":N}
    ```
 
-## 5. 시연 데이터
+## 5. 브랜드 등록
+
+프로젝트에는 더미 데이터를 두지 않는다. `brands/` 의 브랜드(현재 쿠챠)를 넣으려면:
 
 ```bash
 backend/.venv/bin/python tools/seed_demo.py --base https://demo:<APP_PASSWORD>@<프로젝트>.vercel.app
 ```
+
+캠페인은 화면에서 직접 만든다. 이 스크립트는 `demo/campaigns/*.json` 이 있을 때만 캠페인을 넣는다.
 
 ## 6. 알아 둘 제한
 
