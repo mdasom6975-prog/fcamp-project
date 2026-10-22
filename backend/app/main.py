@@ -1,7 +1,9 @@
 import base64
+import logging
 import os
 import secrets
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,8 +11,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException   # StaticFiles 가 던지는 쪽(fastapi.HTTPException 은 이것의 하위 클래스)
 from sqlalchemy import func, inspect, select, text
+from sqlalchemy.exc import SQLAlchemyError
 
-from . import models  # noqa: F401  (테이블 등록)
+from . import models, state  # noqa: F401  (models: 테이블 등록)
 from .db import BASE_DIR, DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
 from .routers_analysis import router as analysis_router
 from .routers_assets import router as assets_router
@@ -51,8 +54,40 @@ def _legacy_sqlite_columns() -> None:
                 conn.execute(text(f"ALTER TABLE icon_assets ADD COLUMN {col} {ddl}"))
 
 
+INIT_KEY = "schema_init"      # KV 키: 초기화를 마친 배포(VERCEL_GIT_COMMIT_SHA)를 적어 둔다
+LOCK_ID = 7351001
+LOCK_WAIT_SEC = 90
+log = logging.getLogger("app.init")
+
+
+def _initialized_for_deploy() -> bool:
+    """이 배포에서 스키마·시드를 이미 마쳤는가(쿼리 1번). Vercel 이 아니면(배포 ID 없음) 항상 False 라 매번 확인한다.
+    리전이 멀면 쿼리마다 왕복이 길어, 인스턴스가 켜질 때마다 테이블 확인·시드를 하면 제한 시간을 넘긴다."""
+    deploy = os.getenv("VERCEL_GIT_COMMIT_SHA", "")
+    if not deploy:
+        return False
+    try:
+        return (state.get(INIT_KEY) or {}).get("deploy") == deploy
+    except SQLAlchemyError:      # kv 테이블이 아직 없는 첫 배포
+        return False
+
+
+def _acquire_lock(conn) -> bool:
+    """다른 인스턴스가 초기화 중이면 끝날 때까지 기다린다. 기다리는 동안 그쪽이 끝냈으면(표식이 생기면) False.
+    블로킹 락 대신 try-lock 을 돌려, DB 의 statement timeout 에 걸리지 않게 한다. 락은 트랜잭션이 끝나면 풀려
+    트랜잭션 모드 풀러에서도 안전하다."""
+    deadline = time.monotonic() + LOCK_WAIT_SEC
+    while not conn.execute(text("SELECT pg_try_advisory_xact_lock(:i)"), {"i": LOCK_ID}).scalar():
+        if time.monotonic() > deadline:
+            raise TimeoutError("다른 인스턴스의 DB 초기화가 끝나지 않습니다")
+        time.sleep(1)
+        if _initialized_for_deploy():
+            return False
+    return True
+
+
 def init_app() -> None:
-    """스키마 생성 + 규격 시드. 프로세스(함수 인스턴스)당 한 번만 한다.
+    """스키마 생성 + 규격 시드. 프로세스(함수 인스턴스)당 한 번, Vercel 에서는 배포당 한 번만 한다.
     Vercel 은 ASGI lifespan 을 보장하지 않으므로 미들웨어가 첫 요청에서도 부른다. 인스턴스 여러 개가 동시에 처음 뜰 때
     시드가 겹치지 않게 Postgres 에서는 트랜잭션 advisory lock 을 잡는다."""
     global _ready
@@ -61,20 +96,25 @@ def init_app() -> None:
     with _init_lock:
         if _ready:
             return
+        if _initialized_for_deploy():
+            _ready = True
+            return
         if engine.dialect.name == "sqlite":
             DB_PATH.parent.mkdir(exist_ok=True)
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         with engine.connect() as lock_conn:
-            if engine.dialect.name == "postgresql":
-                lock_conn.execute(text("SELECT pg_advisory_xact_lock(7351001)"))   # 트랜잭션이 끝나면 풀려, 트랜잭션 모드 풀러에서도 안전
             try:
-                Base.metadata.create_all(engine)
-                if engine.dialect.name == "sqlite":
-                    _legacy_sqlite_columns()
-                with SessionLocal() as db:
-                    seed(db)
-                    sync_conditions(db)      # 시드의 조건·상태가 바뀌면 기존 지면에도 반영
-                    deactivate_excluded(db)
+                if engine.dialect.name != "postgresql" or _acquire_lock(lock_conn):
+                    if not _initialized_for_deploy():    # 락을 기다리는 사이 다른 인스턴스가 끝냈을 수 있다
+                        Base.metadata.create_all(engine)
+                        if engine.dialect.name == "sqlite":
+                            _legacy_sqlite_columns()
+                        with SessionLocal() as db:
+                            seed(db)
+                            sync_conditions(db)      # 시드의 조건·상태가 바뀌면 기존 지면에도 반영
+                            deactivate_excluded(db)
+                        if os.getenv("VERCEL_GIT_COMMIT_SHA"):
+                            state.put(INIT_KEY, {"deploy": os.environ["VERCEL_GIT_COMMIT_SHA"]})
             finally:
                 lock_conn.commit()
         _ready = True
@@ -82,7 +122,10 @@ def init_app() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_app()
+    try:
+        init_app()
+    except Exception:    # 초기화 실패가 인스턴스 전체를 죽이면 원인이 로그에만 남고 모든 요청이 500 이 된다. 다음 요청이 다시 시도한다
+        log.exception("DB 초기화 실패 (첫 요청에서 다시 시도합니다)")
     yield
 
 
@@ -138,7 +181,10 @@ class InitMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and not _ready:
-            await run_in_threadpool(init_app)
+            try:
+                await run_in_threadpool(init_app)
+            except Exception:
+                log.exception("DB 초기화 실패")      # 요청은 그대로 보내, 라우터가 DB 오류를 응답으로 돌려주게 한다
         return await self.app(scope, receive, send)
 
 
