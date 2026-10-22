@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ITEM_LABELS, type BrandForm, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition } from './api'
+import ColorPicker from './ColorPicker'
 
 const LEVELS: Level[] = ['필수', '권장']
 
@@ -340,8 +341,8 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
             const isDefault = i < defaults.color_roles.length   // 기본 역할 행은 삭제할 수 없다
             return (
               <div className="color-row" key={i}>
-                <input type="color" aria-label={`${c.role || '색상'} 색상`}
-                  value={/^#[0-9a-fA-F]{6}$/.test(c.hex) ? c.hex : '#000000'} onChange={(e) => setColor(i, { hex: e.target.value.toUpperCase() })} />
+                <ColorPicker label={`${c.role || '색상'} 색상`} value={c.hex} swatches={form.colors.map((x) => x.hex)}
+                  onChange={(hex) => setColor(i, { hex })} />
                 <input className="role" aria-label="색상 이름" placeholder="역할 이름" value={c.role} maxLength={30}
                   onChange={(e) => setColor(i, { role: e.target.value })} />
                 <input className="hex" aria-label="색상 코드" value={c.hex} maxLength={7} onChange={(e) => setColor(i, { hex: e.target.value })} />
