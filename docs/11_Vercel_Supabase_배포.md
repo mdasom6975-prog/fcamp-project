@@ -23,7 +23,7 @@
 
 ## 2. Supabase 준비
 
-1. 새 프로젝트를 만든다(리전은 Vercel 함수 리전과 가까운 곳). DB 비밀번호를 적어 둔다.
+1. 새 프로젝트를 만든다(리전은 Vercel 함수 리전과 같게. vercel.json 의 regions 를 Supabase 리전에 맞춘다: 서울 ap-northeast-2 → icn1, 뭄바이 ap-south-1 → bom1, 미국 동부 us-east-1 → iad1). DB 비밀번호를 적어 둔다.
 2. **DATABASE_URL**: 프로젝트 → Connect → *Transaction pooler* 의 URI(포트 6543). `postgresql://…` 그대로 붙이면 앱이 `postgresql+psycopg://` 로 바꾼다.
    서버리스는 요청마다 연결을 열고 닫으므로 직접 연결(5432) 대신 풀러를 써야 연결 한도를 넘지 않는다.
 3. **SUPABASE_URL / SUPABASE_SERVICE_KEY**: Project Settings → API 의 Project URL 과 `service_role` 키.
