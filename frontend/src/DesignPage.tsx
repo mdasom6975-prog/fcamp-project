@@ -8,6 +8,7 @@ import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
 import { busy as overlay } from './Busy'
+import { applyVariant } from './variants'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -126,11 +127,16 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
   }, [designId, loadImgs])
 
   // 시안 A/B/C 선택: 카피는 캠페인당 1회 생성해 모든 지면이 같은 문장을 쓰므로, 번호 하나를 모든 지면에 한 번에 적용한다
+  // 이미 만든 합성본이 있으면 새 시안 문구로 다시 합성한다(배경 유지). 직접 고친 문구가 있으면 덮어쓸지 묻는다.
+  const [pickNote, setPickNote] = useState<string | null>(null)
   const chooseNo = async (no: number) => {
-    setPicking(true); setErr(null)
+    setPicking(true); setErr(null); setPickNote(null)
     try {
-      await post(`/api/designs/${designId}/copy/select-variant`, { variant_no: no })
+      const { note } = await applyVariant(designId, no)
       setGroups((gs) => gs.map((g) => ({ ...g, variants: g.variants.map((v) => ({ ...v, selected: v.variant_no === no })) })))
+      setPickNote(note)
+      await loadImgs()
+      onDesignChange()
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -309,6 +315,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
         </div>
       </div>}
       {err && <div className="notice err">{err}</div>}
+      {pickNote && view === 'copy' && <div className="notice ok">{pickNote}</div>}
       {view === 'copy' && <DevStats designId={designId} kinds={['copy', 'copy_fit']} label="카피 생성" refreshKey={`${busy}-${groups.length}-${count}-${fitting}`} />}
 
       {!has && view === 'copy' && <p className="muted gen-empty">카피 생성을 누르면 선택한 규격의 글자 수 제한에 맞춰 시안 문구를 만듭니다.</p>}
@@ -671,6 +678,29 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
     }).finally(() => setLoaded(true)), [design.id])
   useEffect(() => { load() }, [load])
 
+  // 시안 A/B/C 선택기: 편집 화면에서도 시안을 바꿀 수 있다(모든 지면의 문구가 바뀌고 이미지가 다시 합성된다)
+  const [variants, setVariants] = useState<Variant[]>([])
+  const [switching, setSwitching] = useState(false)
+  const [switchNote, setSwitchNote] = useState<{ ok: boolean; text: string } | null>(null)
+  const [editVer, setEditVer] = useState(0)       // 다시 합성한 뒤 편집 패널을 새로 불러온다
+  const loadVariants = useCallback(() =>
+    fetch(`/api/designs/${design.id}/copy`).then((r) => r.json()).then((g: CopyGroup[]) => {
+      const first = Array.isArray(g) ? g.find((x) => x.variants.length > 0) : undefined
+      setVariants(first?.variants ?? [])
+    }).catch(() => undefined), [design.id])
+  useEffect(() => { loadVariants() }, [loadVariants])
+  const switchVariant = async (no: number) => {
+    setSwitching(true); setSwitchNote(null)
+    try {
+      const { note } = await applyVariant(design.id, no)
+      await Promise.all([load(), loadVariants()])
+      setEditVer((n) => n + 1)
+      setSwitchNote({ ok: true, text: note ?? '시안을 바꿨습니다.' })
+    } catch (e) {
+      setSwitchNote({ ok: false, text: (e as Error).message })
+    } finally { setSwitching(false) }
+  }
+
   // 편집은 완성형(로고·문구를 합성한) 지면의 합성 이미지가 있어야 가능하다
   const editable = design.presets.filter((p) => imgs[p.id]?.composite && !imgs[p.id]?.composite?.layout.separate_assets)
   const cur = editable.find((p) => p.id === presetId) ?? editable[0] ?? null
@@ -689,6 +719,21 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
         <p className="muted">편집할 합성 이미지가 없습니다. 시안 화면의 ④ 이미지 생성에서 먼저 이미지를 만들어 주세요. (분리 자산형 지면은 문구·로고를 합성하지 않아 편집 대상이 아닙니다)</p>
       ) : (
         <>
+          {variants.length > 0 && (
+            <div className="variant-switch">
+              <div className="chips">
+                <span className="muted">시안</span>
+                {variants.map((v) => (
+                  <button key={v.variant_no} type="button" className={`chip ${v.selected ? 'on' : ''}`} disabled={switching || v.selected}
+                    title={v.headline} onClick={() => switchVariant(v.variant_no)}>
+                    {LETTERS[v.variant_no - 1] ?? v.variant_no} · {v.headline}
+                  </button>
+                ))}
+              </div>
+              <p className="muted">시안을 바꾸면 모든 지면의 문구가 바뀌고 이미지가 다시 합성됩니다. 저장해 둔 위치·크기는 유지되고, 저장하지 않은 편집은 사라집니다.</p>
+              {switchNote && <div className={switchNote.ok ? 'notice ok' : 'notice err'}>{switchNote.text}</div>}
+            </div>
+          )}
           <ImageGrid
             items={design.presets.map((p) => ({ preset_id: p.id, platform: p.platform, name: p.name, width: p.width, height: p.height }))}
             rows={imgs} selected={cur?.id ?? null} onSelect={onPick}
@@ -698,7 +743,7 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
               : null} />
           <p className="muted">카드를 누르면 그 지면을 편집합니다. 잠긴 요소(로고)는 바꿀 수 없고, 저장하면 검수 결과가 무효화되어 다시 검수해야 합니다.</p>
           <DevStats designId={design.id} kinds={['background', 'variant', 'copy']} label="편집 화면 재생성" refreshKey={Object.values(imgs).map((r) => r?.composite?.file ?? '').join(',')} />
-          {cur && <EditPanel key={cur.id} designId={design.id} presetId={cur.id} onClose={onBack} onSaved={load} />}
+          {cur && <EditPanel key={`${cur.id}-${editVer}`} designId={design.id} presetId={cur.id} onClose={onBack} onSaved={load} />}
         </>
       )}
     </section>

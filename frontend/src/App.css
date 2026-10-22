@@ -708,3 +708,9 @@ mark.var { background: #fef08a; color: inherit; border-radius: 2px; padding: 0 1
 .src.stored { background: var(--accent-soft); color: var(--accent); }
 .src.reconstructed { background: var(--warn-bg); color: var(--warn-fg); }
 .src.note { background: var(--surface-2); color: var(--text-2); }
+
+/* 편집 화면의 시안 A/B/C 선택기 */
+.variant-switch { margin-bottom: 16px; }
+.variant-switch .chips { align-items: center; margin-bottom: 4px; }
+.variant-switch .chip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.variant-switch .muted { margin: 4px 0 0; }

@@ -12,7 +12,8 @@ from . import calllog, compose, copywriter, editing, phrases, storage
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
-from .routers_images import _color, _img_out, create_shared_background
+from .routers_copy import select_variant
+from .routers_images import _color, _edit_saved, _img_out, create_shared_background, make_image
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 PREVIEW_MAX = 900
@@ -118,7 +119,7 @@ def _render_rows(db, d, pv, rows, bg_path):
     return img, measure, warns
 
 
-def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
+def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None = None) -> dict:
     img, measure, warns = _render_rows(db, d, pv, rows, bg_row.file_path)
     path = storage.put_image(f"edt_{uuid.uuid4().hex[:10]}.png", img)
     layout = {"template": compose.template_for(pv.production_width, pv.production_height),
@@ -144,7 +145,7 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev) -> dict:
     layout["in_image"] = ["headline"] + [k for k, t in (("body", "body"), ("cta", "cta")) if any(r.type == t for r in rows)]
     g = GeneratedImage(design_id=d.id, preset_version_id=pv.id, kind="composite", file_path=path,
                        width=pv.production_width, height=pv.production_height,
-                       copy_variant_id=comp_prev.copy_variant_id if comp_prev else None,
+                       copy_variant_id=copy_variant_id or (comp_prev.copy_variant_id if comp_prev else None),
                        brand_version_id=d.brand_version_id, layout=layout)
     db.add(g)
     db.add(DesignSnapshot(design_id=d.id, elements=[{"preset_version_id": pv.id, **_el_out(r)} for r in rows]))
@@ -396,3 +397,100 @@ def reset_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
     db.commit()
     return {**res, "elements": [_el_out(r) for r in rows]}
+
+
+# ---------- 시안(A/B/C) 바꾸기: 만든 이미지에도 새 문구를 반영한다 ----------
+def _selected(db: Session, did: int, pid: int) -> CopyVariant | None:
+    return db.scalar(select(CopyVariant).where(CopyVariant.design_id == did, CopyVariant.preset_version_id == pid,
+                                               CopyVariant.selected.is_(True)))
+
+
+def _variant_of(db: Session, did: int, pid: int, variant_no: int) -> CopyVariant | None:
+    """지면의 최신 차수에서 해당 번호의 카피."""
+    last = max([c.batch_no for c in db.scalars(select(CopyVariant).where(
+        CopyVariant.design_id == did, CopyVariant.preset_version_id == pid)).all()] or [0])
+    return db.scalar(select(CopyVariant).where(CopyVariant.design_id == did, CopyVariant.preset_version_id == pid,
+                                               CopyVariant.batch_no == last, CopyVariant.variant_no == variant_no))
+
+
+def _variant_plan(db: Session, d: Design, variant_no: int) -> list[dict]:
+    """지면마다 시안을 바꿨을 때 이미지에 일어날 일. mode: none(합성본 없음) · plain(자동 합성이라 그대로 다시 합성) ·
+    edited(편집 화면에서 저장함: 위치·크기는 유지하고 문구만 바꾼다). custom: 직접 고친 문구가 있는가(덮어쓸지 물어야 한다)."""
+    plan = []
+    for pid in d.preset_version_ids:
+        pv = db.get(PresetVersion, pid)
+        if not pv or pv.placement.content_kind == "분리 자산형":
+            continue
+        new, old = _variant_of(db, d.id, pid, variant_no), _selected(db, d.id, pid)
+        item = {"preset_id": pid, "name": pv.placement.name, "new": new, "old": old, "mode": "none", "custom": [], "rows": []}
+        if new is None or _latest(db, d.id, pid, "composite", original_only=False) is None:
+            plan.append(item)
+            continue
+        rows = _els(db, d.id, pid)
+        if rows and _edit_saved(db, d.id, pid):
+            item["mode"], item["rows"] = "edited", rows
+            old_text = {"text": old.headline if old else None, "body": old.body if old else None, "cta": old.cta if old else None}
+            for r in rows:
+                if r.type not in old_text or r.locked:
+                    continue
+                cur = r.props.get("text")
+                if (r.type == "text" and r.props.get("text_override")) or (old and cur != old_text[r.type]):
+                    item["custom"].append({"text": "제목", "body": "본문", "cta": "CTA"}[r.type])
+        else:
+            item["mode"] = "plain"
+        plan.append(item)
+    return plan
+
+
+@router.get("/designs/{design_id}/copy/select-impact")
+def select_impact(design_id: int, variant_no: int, db: Session = Depends(get_db)):
+    """시안 번호를 바꾸면 이미지에 어떤 영향이 있는지(저장하지 않는다). 직접 고친 문구가 있으면 화면이 확인창을 띄운다."""
+    d = _design(db, design_id)
+    plan = _variant_plan(db, d, variant_no)
+    return {"recompose": [p["name"] for p in plan if p["mode"] in ("plain", "edited")],
+            "custom": [{"preset_id": p["preset_id"], "name": p["name"], "fields": p["custom"]} for p in plan if p["custom"]]}
+
+
+@router.post("/designs/{design_id}/copy/apply-variant")
+def apply_variant(design_id: int, variant_no: int = Body(..., embed=True), overwrite_custom: bool = Body(False, embed=True),
+                  db: Session = Depends(get_db)):
+    """시안 번호를 모든 지면에 적용하고, 이미 만든 합성본도 새 문구로 다시 합성한다(배경 유지, 이미지 생성 비용 없음).
+    편집 화면에서 저장한 지면은 위치·크기·잠금을 그대로 두고 문구만 바꾼다. 직접 고친 문구는 overwrite_custom 일 때만 덮어쓴다."""
+    d = _design(db, design_id)
+    plan = _variant_plan(db, d, variant_no)           # 선택을 바꾸기 전에 이전 선택과 비교해 둔다
+    select_variant(design_id, variant_no, db)         # 선택 표시 변경 + 검수 무효화 (404 처리 포함)
+    recomposed, kept_custom, skipped = [], [], []
+    for it in plan:
+        pid, name, mode = it["preset_id"], it["name"], it["mode"]
+        if mode == "none":
+            continue
+        try:
+            if mode == "plain":
+                make_image(design_id, pid, False, db)
+                recomposed.append(pid)
+                continue
+            pv = db.get(PresetVersion, pid)
+            rows = it["rows"]
+            changed = False
+            for r in rows:
+                if r.type not in ("text", "body", "cta") or r.locked:
+                    continue
+                label = {"text": "제목", "body": "본문", "cta": "CTA"}[r.type]
+                if label in it["custom"] and not overwrite_custom:
+                    kept_custom.append({"preset_id": pid, "name": name, "field": label})
+                    continue
+                new_text = {"text": it["new"].headline, "body": it["new"].body, "cta": it["new"].cta}[r.type]
+                props = {**r.props, "text": new_text}
+                if r.type == "text":
+                    props.pop("text_override", None)
+                r.props, changed = props, True
+            if changed:
+                _save_render(db, d, pv, rows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"),
+                             copy_variant_id=it["new"].id)
+                db.commit()
+                recomposed.append(pid)
+        except HTTPException as e:
+            db.rollback()
+            skipped.append({"preset_id": pid, "name": name, "reason": str(e.detail)})
+    db.commit()
+    return {"variant_no": variant_no, "recomposed": recomposed, "kept_custom": kept_custom, "skipped": skipped}
