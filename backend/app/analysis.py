@@ -9,7 +9,6 @@
    둘 다 없는 채팅 호출은 현재 규칙·입력으로 다시 렌더(reconstructed) 순으로 보여 준다. 재구성은 보낸 당시와 다를 수 있다.
 3. 비용: calllog 집계를 카피/배경/아이콘/채점 단계로 묶고 호출 내역 전체를 붙인다.
 """
-import json
 import io
 import math
 from datetime import datetime, timezone
@@ -17,13 +16,13 @@ from pathlib import Path
 
 from PIL import Image
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from . import calllog, copyfields, copywriter, icons, imagegen, llm, phrases, prompts
-from .db import BASE_DIR
-from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, PresetVersion
+from . import calllog, copyfields, copywriter, icons, imagegen, llm, phrases, prompts, storage
+from . import db as db_module
+from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
-JUDGE_DIR = BASE_DIR / "data" / "analysis"
 STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant"),
           "icon": ("icon", "icon_names", "icon_redraw"), "judge": ("judge",)}
 STAGE_OF = {k: st for st, ks in STAGES.items() for k in ks}
@@ -97,8 +96,8 @@ def color_match(pal: list[dict], brand_colors: list[dict]) -> dict:
 
 def _open(path: str | None) -> Image.Image | None:
     try:
-        return Image.open(path) if path and Path(path).exists() else None
-    except OSError:
+        return Image.open(storage.local(path)) if path else None
+    except OSError:      # FileNotFoundError 포함
         return None
 
 
@@ -272,22 +271,14 @@ JUDGE_SCHEMA = llm._obj({
 })
 
 
-def _judge_file(design_id: int) -> Path:
-    return JUDGE_DIR / f"judge_{design_id}.jsonl"
-
-
 def judgments(design_id: int) -> list[dict]:
+    """채점 결과, 최신순."""
     try:
-        lines = _judge_file(design_id).read_text(encoding="utf-8").splitlines()
-    except OSError:
+        with db_module.SessionLocal() as s:
+            rows = s.scalars(select(Judgment.result).where(Judgment.design_id == design_id).order_by(Judgment.id.desc())).all()
+    except SQLAlchemyError:
         return []
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            continue
-    return out[::-1]
+    return list(rows)
 
 
 def judge_vars(brand: Brand, bv: BrandVersion, brief: dict, style: str | None) -> dict:
@@ -298,7 +289,7 @@ def judge_vars(brand: Brand, bv: BrandVersion, brief: dict, style: str | None) -
 
 
 def judge_background(db: Session, d: Design, bv: BrandVersion, brand: Brand, g: GeneratedImage) -> dict:
-    """배경 1장을 Claude 에 보여 주고 항목별 점수를 받는다(채팅 1회). 결과는 data/analysis/judge_<design>.jsonl 에 쌓는다."""
+    """배경 1장을 Claude 에 보여 주고 항목별 점수를 받는다(채팅 1회). 결과는 judgments 테이블에 쌓는다."""
     im = _open(g.file_path)
     if im is None:
         raise FileNotFoundError("배경 파일이 없습니다")
@@ -319,10 +310,10 @@ def judge_background(db: Session, d: Design, bv: BrandVersion, brand: Brand, g: 
               "summary": str(data.get("summary") or ""), "prompt_refs": [prompts.ref("analysis/judge_system"), prompts.ref("analysis/judge_user")],
               "cost_usd": (last or {}).get("cost_usd"), "tokens_in": (last or {}).get("tokens_in"), "tokens_out": (last or {}).get("tokens_out")}
     try:
-        JUDGE_DIR.mkdir(parents=True, exist_ok=True)
-        with _judge_file(d.id).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
-    except OSError:
+        with db_module.SessionLocal() as s:
+            s.add(Judgment(design_id=d.id, result=result))
+            s.commit()
+    except SQLAlchemyError:
         pass
     return result
 

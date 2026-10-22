@@ -27,8 +27,7 @@ def env(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
-    monkeypatch.setattr(routers_icons, "STORAGE_DIR", tmp_path / "storage")
-    monkeypatch.setattr(routers_export, "EXPORT_DIR", tmp_path / "exports")
+    # 저장소 폴더는 conftest 의 _isolated_state 가 임시 폴더로 바꿔 둔다
 
     def override():
         with Local() as db:
@@ -443,17 +442,16 @@ def test_split_blobs_merged_neighbours_fail():
 
 
 def test_icon_reset_deletes_set_and_files_but_keeps_candidates(env):
-    from pathlib import Path
-    from app import models
+    from app import models, storage
     c, did, Local = env["client"], env["ids"]["design"], env["Local"]
     with Local() as db:
         d = db.get(models.Design, did); d.brief = {**d.brief, "icon_candidates": [{"name": "후보1", "concept": "x"}]}; db.commit()
     env["add_icons"](3)
     with Local() as db:
         files = [a.png_path for a in db.query(models.IconAsset).all()]
-    assert len(files) == 3 and all(Path(f).exists() for f in files)
+    assert len(files) == 3 and all(storage.exists(f) for f in files)
     r = c.post(f"/api/designs/{did}/icons/reset", json={})
     assert r.status_code == 200 and r.json() == {"icons_deleted": 3, "deleted_files": 6}, r.text
-    assert c.get(f"/api/designs/{did}/icons").json() == [] and not any(Path(f).exists() for f in files)
+    assert c.get(f"/api/designs/{did}/icons").json() == [] and not any(storage.exists(f) for f in files)
     assert c.get(f"/api/designs/{did}").json()["brief"]["icon_candidates"] == [{"name": "후보1", "concept": "x"}]
     assert c.post(f"/api/designs/{did}/icons/reset", json={}).json()["icons_deleted"] == 0

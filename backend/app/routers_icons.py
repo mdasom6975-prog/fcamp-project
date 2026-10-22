@@ -2,12 +2,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import calllog, icons, imagegen, phrases, prompts
-from .db import STORAGE_DIR
+from . import calllog, icons, imagegen, phrases, prompts, storage
 from .models import Brand, BrandVersion, Design, GeneratedImage, IconAsset
 from .routers_assets import get_db
 from .routers_review import invalidate_icon_reviews, version_icon_set
@@ -68,29 +67,25 @@ def _save(db, d, bv, batch, pos, name, concept, elements, style, w, h, forbidden
     if not clean:
         raise ValueError("유효한 도형이 없습니다")
     svg, info = icons.build_svg(clean, style)
-    STORAGE_DIR.mkdir(exist_ok=True)
-    path = STORAGE_DIR / f"icon_{uuid.uuid4().hex[:10]}.png"
-    path.write_bytes(icons.to_png(svg, w, h))
+    path = storage.put(f"icon_{uuid.uuid4().hex[:10]}.png", icons.to_png(svg, w, h))
     fields = dict(name=name[:60], concept=(concept or "")[:200], elements=clean,
                   style={**style, **info, "render": "svg", "viewBox": icons.VIEW, "live_area": icons.LIVE},
-                  svg=svg, png_path=str(path), width=w, height=h, violations=_forbidden_viol(name, forbidden),
+                  svg=svg, png_path=path, width=w, height=h, violations=_forbidden_viol(name, forbidden),
                   prompt=None, source_path=None)
     return _apply(db, d, bv, batch, pos, fields, existing)
 
 
-def _old_files(a: IconAsset | None) -> list[Path]:
-    return [Path(p) for p in ((a.png_path, a.source_path) if a else ()) if p]
+def _old_files(a: IconAsset | None) -> list[str]:
+    return [p for p in ((a.png_path, a.source_path) if a else ()) if p]
 
 
 def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w, h, forbidden, existing=None, origin=None):
     """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 원본(1장 렌더 1024 또는 격자에서 잘라낸 조각)은 source_path 에 따로 둔다.
     origin: 격자에서 온 아이콘이면 {"grid": "4x3", "cell": k, "method": ..., "mismatch": bool} — 분석용. 수가 안 맞은 격자는 위반으로 알린다."""
     fitted, info = icons.fit_alpha(im, w, h)
-    STORAGE_DIR.mkdir(exist_ok=True)
     uid = uuid.uuid4().hex[:10]
-    src, path = STORAGE_DIR / f"icon3d_{uid}_src.png", STORAGE_DIR / f"icon3d_{uid}.png"
-    im.save(src)
-    fitted.save(path)
+    src = storage.put_image(f"icon3d_{uid}_src.png", im)
+    path = storage.put_image(f"icon3d_{uid}.png", fitted)
     viol = _forbidden_viol(name, forbidden)
     if not info["transparent"]:
         viol.append({"type": "background", "detail": "배경이 투명하지 않습니다. 다시 그려 주세요"})
@@ -105,12 +100,11 @@ def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w,
           "bbox": info["bbox"], "scale": info["scale"], "transparent": info["transparent"], "clipped": info["clipped"],
           "viewBox": icons.VIEW, "live_area": icons.LIVE}
     fields = dict(name=name[:60], concept=(concept or "")[:200], elements=[], style=st, svg="",
-                  png_path=str(path), source_path=str(src), prompt=prompt, width=w, height=h, violations=viol)
+                  png_path=path, source_path=src, prompt=prompt, width=w, height=h, violations=viol)
     old = _old_files(existing)
     a = _apply(db, d, bv, batch, pos, fields, existing)
-    for f in old:   # 다시 그린 아이콘의 이전 파일은 더 참조되지 않으므로 지운다 (storage 하위만)
-        if STORAGE_DIR in f.parents and f.exists():
-            f.unlink()
+    for f in old:   # 다시 그린 아이콘의 이전 파일은 더 참조되지 않으므로 지운다 (storage 키만)
+        storage.delete(f)
     return a
 
 
@@ -385,9 +379,7 @@ def reset_icons(design_id: int, db: Session = Depends(get_db)):
     still = {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
     removed = 0
     for p in files - still:
-        fp = Path(p)
-        if STORAGE_DIR in fp.parents and fp.exists():
-            fp.unlink()
+        if storage.delete(p):
             removed += 1
     db.commit()
     return {"icons_deleted": len(rows), "deleted_files": removed}
@@ -478,15 +470,15 @@ def icon_svg(icon_id: int, db: Session = Depends(get_db)):
 @router.get("/icons/{icon_id}/png")
 def icon_png(icon_id: int, db: Session = Depends(get_db)):
     a = db.get(IconAsset, icon_id)
-    if not a or not Path(a.png_path).exists():
+    if not a or not storage.exists(a.png_path):
         raise HTTPException(404, "아이콘을 찾을 수 없습니다")
-    return FileResponse(a.png_path, media_type="image/png")
+    return storage.response(a.png_path, "image/png")
 
 
 @router.get("/icons/{icon_id}/source")
 def icon_source(icon_id: int, db: Session = Depends(get_db)):
     """3D 아이콘의 1024 원본(투명 PNG)."""
     a = db.get(IconAsset, icon_id)
-    if not a or not a.source_path or not Path(a.source_path).exists():
+    if not a or not a.source_path or not storage.exists(a.source_path):
         raise HTTPException(404, "원본 파일이 없는 아이콘입니다")
-    return FileResponse(a.source_path, media_type="image/png")
+    return storage.response(a.source_path, "image/png")

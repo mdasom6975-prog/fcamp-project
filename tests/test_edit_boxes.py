@@ -23,9 +23,8 @@ def env(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
-    store = tmp_path / "storage"
-    store.mkdir()
-    monkeypatch.setattr(routers_edit, "STORAGE_DIR", store)
+    store = tmp_path / "storage"      # conftest 의 _isolated_state 가 저장소 폴더로 쓰는 곳
+    store.mkdir(exist_ok=True)
 
     def override():
         with Local() as db:

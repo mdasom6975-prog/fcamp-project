@@ -1,16 +1,14 @@
 """외부 모델 호출 기록. 어느 시안의 어느 단계(배경·변형·아이콘·카피·기능명)에서 몇 번 호출했는지 남긴다.
 
 imagegen 의 일일 카운터(image_usage.json)는 한도 판정용 하루 합계만 세므로, 호출을 줄일 곳을 찾으려면
-시안·종류별 내역이 필요하다. 한 줄 JSON(data/api_calls.jsonl)으로 쌓고 summary 로 집계한다.
+시안·종류별 내역이 필요하다. api_calls 테이블에 한 행(row=JSON)씩 쌓고 summary 로 집계한다.
 
 시안 id 는 라우터 의존성(track_design)이 경로의 design_id 를 ContextVar 에 넣어 전달한다. 모델 호출 코드는
 시안을 몰라도 되고, 스레드로 나가는 호출(icons.render_many)은 copy_context 로 값을 넘긴다.
 
-보낸 프롬프트 전문은 한 줄 JSON 에 넣기엔 길어 data/prompt_log/<id>.json 에 따로 두고 행에는 prompt_id 만 남긴다
+보낸 프롬프트 전문은 행에 넣기엔 길어 prompt_logs 테이블에 따로 두고 행에는 prompt_id 만 남긴다
 (호출자가 timed() 의 info 에 prompt_text={"system","user"} 또는 {"prompt"} 를 넣는다). 분석 화면이 읽는다.
 """
-import json
-import threading
 import time
 import uuid
 from collections import Counter
@@ -20,14 +18,14 @@ from datetime import datetime, timezone
 
 from fastapi import Request
 
-from . import pricing
-from .db import BASE_DIR
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
-LOG_FILE = BASE_DIR / "data" / "api_calls.jsonl"
-PROMPT_DIR = BASE_DIR / "data" / "prompt_log"
+from . import db, pricing
+from .models import ApiCall, PromptLog
+
 KINDS = ("background", "variant", "icon", "copy", "copy_fit", "icon_names", "icon_redraw", "judge")
 _design: ContextVar[int | None] = ContextVar("calllog_design", default=None)
-_lock = threading.Lock()
 
 
 async def track_design(request: Request) -> None:
@@ -45,7 +43,7 @@ def current_design() -> int | None:
 
 def record(api: str, kind: str, provider: str, model: str, ok: bool = True, ms: int | None = None,
            error: str | None = None, **extra) -> None:
-    """호출 1건을 기록한다. 실패해도 남긴다(과금 여부는 ok 로 구분). 기록 실패가 생성 흐름을 막지 않게 OSError 는 삼킨다."""
+    """호출 1건을 기록한다. 실패해도 남긴다(과금 여부는 ok 로 구분). 기록 실패가 생성 흐름을 막지 않게 DB 오류는 삼킨다."""
     now = datetime.now(timezone.utc)
     prompt_text = extra.pop("prompt_text", None)
     row = {"ts": now.isoformat(timespec="seconds"), "date": now.strftime("%Y-%m-%d"), "design_id": _design.get(),
@@ -57,11 +55,10 @@ def record(api: str, kind: str, provider: str, model: str, ok: bool = True, ms: 
     if pid:
         row["prompt_id"] = pid
     try:
-        with _lock:
-            LOG_FILE.parent.mkdir(exist_ok=True)
-            with LOG_FILE.open("a") as f:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError:
+        with db.SessionLocal() as s:
+            s.add(ApiCall(design_id=row["design_id"], date=row["date"], row=row))
+            s.commit()
+    except SQLAlchemyError:
         pass
 
 
@@ -71,10 +68,10 @@ def _save_prompt(text: dict | None, now: datetime) -> str | None:
         return None
     pid = f"{now.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:8]}"
     try:
-        PROMPT_DIR.mkdir(parents=True, exist_ok=True)
-        (PROMPT_DIR / f"{pid}.json").write_text(json.dumps({k: v for k, v in text.items() if v}, ensure_ascii=False, indent=1),
-                                                encoding="utf-8")
-    except OSError:
+        with db.SessionLocal() as s:
+            s.add(PromptLog(id=pid, text={k: v for k, v in text.items() if v}))
+            s.commit()
+    except SQLAlchemyError:
         return None
     return pid
 
@@ -84,10 +81,11 @@ def prompt_text(prompt_id: str | None) -> dict | None:
     if not prompt_id or "/" in prompt_id or ".." in prompt_id:
         return None
     try:
-        data = json.loads((PROMPT_DIR / f"{prompt_id}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with db.SessionLocal() as s:
+            row = s.get(PromptLog, prompt_id)
+    except SQLAlchemyError:
         return None
-    return data if isinstance(data, dict) else None
+    return row.text if row is not None and isinstance(row.text, dict) else None
 
 
 @contextmanager
@@ -129,18 +127,19 @@ def note_image_usage(info: dict, response) -> None:
         info["tokens_image_in"] = getattr(det, "image_tokens", None)
 
 
-def _rows() -> list[dict]:
+_ALL = object()
+
+
+def _rows(design_id=_ALL) -> list[dict]:
+    """기록 순서대로. design_id 를 주면 그 시안만(None 이면 시안 없는 호출만) DB 에서 걸러 읽는다."""
+    q = select(ApiCall.row).order_by(ApiCall.id)
+    if design_id is not _ALL:
+        q = q.where(ApiCall.design_id.is_(None) if design_id is None else ApiCall.design_id == design_id)
     try:
-        text = LOG_FILE.read_text()
-    except OSError:
+        with db.SessionLocal() as s:
+            return list(s.scalars(q).all())
+    except SQLAlchemyError:
         return []
-    out = []
-    for line in text.splitlines():
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            continue
-    return out
 
 
 def _with_cost(r: dict) -> dict:
@@ -164,8 +163,7 @@ def _agg(rows: list[dict]) -> dict:
 def summary(design_id: int | None = None, date: str | None = None) -> dict:
     """{total, ok, failed, by_kind: {종류: 집계}, by_api: {...}, images, chats, ms_total, cost_usd, cost_krw, estimated}.
     성공 건만 종류별로 센다. 비용은 pricing 의 추정 요율."""
-    rows = [r for r in _rows()
-            if (design_id is None or r.get("design_id") == design_id) and (date is None or r.get("date") == date)]
+    rows = [r for r in (_rows() if design_id is None else _rows(design_id)) if date is None or r.get("date") == date]
     ok = [r for r in rows if r.get("ok")]
     by_api = Counter(r.get("api") for r in ok)
     kinds = {k: _agg([r for r in rows if r.get("kind") == k]) for k in KINDS if any(r.get("kind") == k for r in rows)}
@@ -181,15 +179,15 @@ def summary(design_id: int | None = None, date: str | None = None) -> dict:
 
 def stage_summary(design_id: int, stages: dict[str, tuple[str, ...]]) -> dict:
     """{단계: 집계}. stages 는 {단계 이름: (종류, ...)} — 분석 화면이 카피/배경/아이콘/채점으로 묶어 본다."""
-    rows = [r for r in _rows() if r.get("design_id") == design_id]
+    rows = _rows(design_id)
     return {name: _agg([r for r in rows if r.get("kind") in kinds]) for name, kinds in stages.items()}
 
 
 def recent(design_id: int, limit: int = 50) -> list[dict]:
-    rows = [r for r in _rows() if r.get("design_id") == design_id]
+    rows = _rows(design_id)
     return [_with_cost(r) for r in rows[-limit:][::-1]]
 
 
 def calls(design_id: int) -> list[dict]:
     """시안의 모든 호출(시간순)에 비용을 붙여 돌려준다. 분석 화면용(최근 n건 제한 없음)."""
-    return [_with_cost(r) for r in _rows() if r.get("design_id") == design_id]
+    return [_with_cost(r) for r in _rows(design_id)]

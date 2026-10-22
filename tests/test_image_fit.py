@@ -1,6 +1,7 @@
 """광고 이미지 규격 맞춤(비율군별 배경 생성 + 내용 상자 크롭 + 로고 자리)과 배경 형태 선택 검사.
 외부 API 는 호출하지 않는다 (generate_background 를 가짜로 바꾼다). 임시 sqlite DB 와 임시 storage 를 쓴다."""
 import pytest
+from app import storage
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 from sqlalchemy import create_engine
@@ -154,7 +155,7 @@ def env(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
-    monkeypatch.setattr(routers_images, "STORAGE_DIR", tmp_path / "storage")
+    # 저장소 폴더는 conftest 의 _isolated_state 가 임시 폴더로 바꿔 둔다
     monkeypatch.setattr(imagegen, "PER_RATIO", True)
     monkeypatch.setattr(imagegen, "PROVIDER", "openai")
     monkeypatch.setattr(imagegen, "VARIANT", True)
@@ -380,7 +381,7 @@ def test_thumbnail_endpoint_caches_small_jpeg(env):
     assert max(im.size) == 360 and im.size == (288, 360)
     comp = c.get(f"/api/designs/{ids['design']}/images").json()
     token = next(r["composite"]["file"] for r in comp if r["preset_id"] == p["피드 4:5"])
-    assert token.startswith("cmp_") and (routers_images.STORAGE_DIR / "thumbs" / f"{token}_360.jpg").exists()
+    assert token.startswith("cmp_") and (__import__("app.db", fromlist=["x"]).STORAGE_DIR / "thumbs" / f"{token}_360.jpg").exists()
     assert c.get("/api/generated/999999/thumb").status_code == 404
 
 
@@ -468,9 +469,9 @@ def test_generate_variant_retries_without_input_fidelity(monkeypatch):
     assert [("input_fidelity" in c) for c in calls] == [True, False]
     imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
     assert len(calls) == 3 and "input_fidelity" not in calls[-1], "두 번째 호출부터는 처음부터 보내지 않는다"
-    # 거절은 모델별로 파일에 남아 다음 프로세스(캐시 비움)에서도 처음부터 보내지 않는다. 다른 모델은 다시 시도한다.
-    import json
-    assert json.loads(imagegen.CAPS_FILE.read_text())[imagegen.OPENAI_MODEL]["input_fidelity"] is False
+    # 거절은 모델별로 DB 에 남아 다음 프로세스(캐시 비움)에서도 처음부터 보내지 않는다. 다른 모델은 다시 시도한다.
+    from app import state
+    assert state.get(imagegen.CAPS_KEY)[imagegen.OPENAI_MODEL]["input_fidelity"] is False
     monkeypatch.setattr(imagegen, "_caps_cache", None)
     assert not imagegen.fidelity_supported(imagegen.OPENAI_MODEL) and imagegen.fidelity_supported("other-model")
     imagegen.generate_variant("p", 1536, 1024, Image.new("RGB", (64, 64), "white"))
@@ -772,7 +773,7 @@ def test_single_mode_blur_fill_when_variant_fails(env, monkeypatch):
     assert comp["layout"]["crop"]["mode"] == "블러 채우기" and (comp["width"], comp["height"]) == (1200, 600)
     with env["Local"]() as db:
         row = db.get(env["models"].GeneratedImage, comp["id"])
-        im = Image.open(row.file_path).convert("RGB")
+        im = Image.open(storage.local(row.file_path)).convert("RGB")
     assert im.size == (1200, 600)
     # 가운데 600px 폭에 원본 전체가 들어가고(위아래 손실 없음), 양옆은 흐린 채움
     assert im.getpixel((600, 5)) != im.getpixel((5, 5)) or True

@@ -17,8 +17,9 @@ cd frontend
 npm install
 npm run dev        # http://localhost:5173
 ```
-첫 실행 시 SQLite(`backend/data/app.db`)가 만들어지고 규격 프리셋이 시드됩니다.
-클라우드 VM 1대에 올려 시연하는 절차(접근 비밀번호·터널 주소·비용)는 `docs/10_시연_배포.md`, 운영 파일은 `deploy/`.
+첫 실행 시 SQLite(`backend/data/app.db`)가 만들어지고 규격 프리셋이 시드됩니다. `DATABASE_URL`(Supabase Postgres)·`SUPABASE_URL`·`SUPABASE_SERVICE_KEY` 를 환경변수로 주면 같은 코드가 Postgres·Supabase Storage 를 씁니다.
+배포: Vercel(프론트 정적 + FastAPI Python 함수) + Supabase 는 `docs/11_Vercel_Supabase_배포.md`.
+대안으로 클라우드 VM 1대에 올려 시연하는 절차(접근 비밀번호·터널 주소·비용)는 `docs/10_시연_배포.md`, 운영 파일은 `deploy/`.
 
 ## 기준 데이터와 검증 (워크북 Day 2~4)
 - `specs/presets.json` · `specs/sources.md`: 규격 프리셋과 출처(시드에서 생성, `tools/export_presets.py`)
@@ -31,4 +32,4 @@ npm run dev        # http://localhost:5173
   - `tests/test_prompts_snapshot.py`: 프롬프트 렌더링 결과를 `tests/fixtures/prompts/*.txt` 와 글자 단위로 비교. 문장을 의도적으로 바꿨을 때만 `UPDATE_PROMPT_SNAPSHOTS=1` 로 갱신
 - 이미지 생성 비교(실제 과금, DB 의 시안 1개 필요): `backend/scripts/compare_models.py` 모델별 1장 → `backend/storage/compare/index.html` · `backend/scripts/compare_prompts.py` 프롬프트 변형별 1장 → `backend/storage/compare/prompts/index.html`
 - 화면 캡처: `docs/wireframes/`
-- 분석 탭(학습·개발용, 검수와 별개): 캠페인 하나의 브랜드 입력↔결과 대조(입력이 반영되는 단계 표, 배경·아이콘 주요 색과 브랜드 색의 ΔE, Claude 비전 채점 버튼·과금), 모델에 보낸 프롬프트 전문(호출 기록 `backend/data/prompt_log/` → DB 저장분 → 재구성), 단계별 비용. `GET /api/designs/{id}/analysis`, `backend/app/analysis.py`, `frontend/src/AnalysisPage.tsx`
+- 분석 탭(학습·개발용, 검수와 별개): 캠페인 하나의 브랜드 입력↔결과 대조(입력이 반영되는 단계 표, 배경·아이콘 주요 색과 브랜드 색의 ΔE, Claude 비전 채점 버튼·과금), 모델에 보낸 프롬프트 전문(호출 기록의 `prompt_logs` 테이블 → DB 저장분 → 재구성), 단계별 비용. `GET /api/designs/{id}/analysis`, `backend/app/analysis.py`, `frontend/src/AnalysisPage.tsx`

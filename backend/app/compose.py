@@ -9,6 +9,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
 
+from . import storage
+
 HORIZONTAL, SQUARE, VERTICAL = "가로형", "정사각", "세로형"
 STRIP_RATIO = 2.6      # 띠 배너(320×100 등): 가로형의 하위 배치 — 왼쪽 이미지, 가운데 문구, 오른쪽 CTA
 BODY_MAX_LINES = {VERTICAL: 2, SQUARE: 2, HORIZONTAL: 2}
@@ -152,10 +154,10 @@ def fit_blur(img: Image.Image, w: int, h: int) -> Image.Image:
 def load_logo(path: str, mime: str) -> Image.Image:
     if mime == "image/svg+xml":
         import resvg_py
-        svg = Path(path).read_text(encoding="utf-8", errors="ignore")
+        svg = storage.local(path).read_text(encoding="utf-8", errors="ignore")
         png = resvg_py.svg_to_bytes(svg_string=svg, width=1200)
         return Image.open(io.BytesIO(bytes(png))).convert("RGBA")
-    return Image.open(path).convert("RGBA")
+    return Image.open(storage.local(path)).convert("RGBA")
 
 
 def _hex(h: str) -> tuple[int, int, int]:

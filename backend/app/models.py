@@ -234,3 +234,35 @@ class SourceCheck(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 마지막으로 변경을 감지한 시각
     error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+# ---- 파일로 쌓던 운영 기록. Vercel 함수는 파일을 보존하지 못해 DB 로 옮겼다 ----
+class KV(Base):
+    """작은 상태값(일일 이미지 생성 카운터, 모델별 지원 여부 등). key 하나에 JSON 하나."""
+    __tablename__ = "kv"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ApiCall(Base):
+    """외부 모델 호출 1건(calllog). row 는 예전 api_calls.jsonl 한 줄과 같은 dict."""
+    __tablename__ = "api_calls"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    design_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)
+    row: Mapped[dict] = mapped_column(JSON)
+
+
+class PromptLog(Base):
+    """모델에 보낸 프롬프트 전문(예전 data/prompt_log/<id>.json)."""
+    __tablename__ = "prompt_logs"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    text: Mapped[dict] = mapped_column(JSON)
+
+
+class Judgment(Base):
+    """배경 채점 결과(예전 data/analysis/judge_<design>.jsonl 한 줄)."""
+    __tablename__ = "judgments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    design_id: Mapped[int] = mapped_column(Integer, index=True)
+    result: Mapped[dict] = mapped_column(JSON)
