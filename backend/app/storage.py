@@ -36,14 +36,20 @@ def remote() -> bool:
 def _http() -> httpx.Client:
     global _client
     if _client is None:
-        _client = httpx.Client(timeout=60.0)
+        # retries 는 연결을 못 여는 오류(ConnectError·ConnectTimeout)만 다시 시도한다. 서버리스에서 깨어난 인스턴스가
+        # 소켓을 못 여는 일시적 오류([Errno 16] Device or resource busy)를 넘기기 위해서다.
+        _client = httpx.Client(timeout=60.0, transport=httpx.HTTPTransport(retries=3))
     return _client
 
 
 def _call(method: str, path: str, **kw) -> httpx.Response:
     url, key, _ = _cfg()
     h = {"Authorization": f"Bearer {key}", "apikey": key, **kw.pop("headers", {})}
-    return _http().request(method, f"{url}/storage/v1/{path}", headers=h, **kw)
+    try:
+        return _http().request(method, f"{url}/storage/v1/{path}", headers=h, **kw)
+    except httpx.TransportError:
+        # 휴면 중 끊긴 연결이 풀에 남았거나 일시적 네트워크 오류: 실패한 연결은 풀에서 빠지므로 한 번 더 시도하면 새 연결을 쓴다
+        return _http().request(method, f"{url}/storage/v1/{path}", headers=h, **kw)
 
 
 def key_of(p: str | Path) -> str | None:

@@ -96,3 +96,31 @@ def test_missing_in_both_places(fake_supabase):
         storage.local("nope.png")
     with pytest.raises(FileNotFoundError):
         storage.response("nope.png", "image/png")
+
+
+def test_transient_transport_error_is_retried_once(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "k")
+    n = {"calls": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        n["calls"] += 1
+        if n["calls"] == 1:
+            raise httpx.ConnectError("[Errno 16] Device or resource busy")
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr(storage, "_client", httpx.Client(transport=httpx.MockTransport(handler)))
+    storage.put("bg_9.png", b"x")
+    assert n["calls"] == 2 and (db.STORAGE_DIR / "bg_9.png").exists()
+
+
+def test_persistent_transport_error_still_raises(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "k")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(storage, "_client", httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(httpx.ConnectError):
+        storage.put("bg_8.png", b"x")
