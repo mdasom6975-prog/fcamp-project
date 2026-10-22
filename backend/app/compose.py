@@ -201,14 +201,16 @@ def _wrap(draw, text: str, font, max_w: int) -> list[str]:
     return lines or [""]
 
 
-def apply_scrim(canvas: Image.Image, tpl: str, color_hex: str, opacity: float) -> Image.Image:
-    """가독성을 위한 그라디언트 막. 가로형은 왼쪽이, 그 외는 아래쪽이 진하다."""
+def apply_scrim(canvas: Image.Image, tpl: str, color_hex: str, opacity: float, top: bool = False) -> Image.Image:
+    """가독성을 위한 그라디언트 막. 가로형은 왼쪽이, 그 외는 아래쪽이 진하다(top=True 면 문구를 위에 둘 때 위쪽이 진하다)."""
     w, h = canvas.size
     grad = Image.new("L", (w, h), 0)
     ramp = Image.linear_gradient("L")            # 위(0) → 아래(255)
     if tpl == HORIZONTAL:
         gw = max(1, round(w * 0.75))
         grad.paste(ramp.transpose(Image.ROTATE_270).resize((gw, h), Image.BILINEAR), (0, 0))  # 왼쪽 255 → 오른쪽 0
+    elif top:
+        grad.paste(ramp.transpose(Image.FLIP_TOP_BOTTOM).resize((w, max(1, round(h * 0.6))), Image.BILINEAR), (0, 0))
     else:
         y0 = round(h * 0.4)
         grad.paste(ramp.resize((w, max(1, h - y0)), Image.BILINEAR), (0, y0))
@@ -522,6 +524,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     # 문구는 피사체(내용 상자)를 덮지 않는다: 세로형·정사각은 피사체 아래에서 시작, 가로형은 피사체 왼쪽까지만.
     # 남는 자리가 너무 작으면(세로 25%·가로 30% 미만) 무리하지 않고 크기 맞춤·경고에 맡긴다.
     min_size = max(16, round(min(w, h) * 0.035))
+    ty0_top = ty0            # 피사체 조정 전의 위쪽 끝(문구를 피사체 위에 둘 때 쓴다)
     subj = crop.get("content_box_canvas")
     if subj:
         sx0, sy0, sx1, sy1 = subj
@@ -550,10 +553,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         tx1 = cta_box[0] - gap
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
-    # 3) 스크림(가독성 보조): 문구 쪽에서 투명해지는 그라디언트
-    scrim_opacity = 0.62
-    canvas = apply_scrim(canvas, tpl, scrim_hex or "#000000", scrim_opacity)
-    report["scrim"] = {"mode": tpl, "color": (scrim_hex or "#000000").upper(), "opacity": scrim_opacity}
+    # 3) 스크림(가독성 보조)은 문구 자리(아래/위)가 정해진 뒤에 4-1)에서 깐다.
 
     # 4) 문구 블록 크기 맞춤: 제목(+본문 +CTA)을 한 덩어리로 보고 제목 크기를 줄여 가며 맞춘다. 본문은 줄 수 상한을 넘으면
     #    "…"로 줄이고, 블록이 최소 글자 크기에서도 안 들어가면 본문을 먼저 뺀다(제목·CTA 우선). 그래도 넘치면 경고만 남긴다.
@@ -561,12 +561,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     body_max_lines = 1 if strip else BODY_MAX_LINES.get(tpl, 2)
     body_min_size = 11
     inner_gap = round(h * 0.012) if not strip else round(h * 0.04)
-    size = max(24, round(min(w, h) * 0.09))      # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
-    lines: list[str] = []
-    body_lines: list[str] = []
-    body_size = 0
-    body_dropped = False
-    font = ImageFont.truetype(font_path, size)
+    size0 = max(24, round(min(w, h) * 0.09))     # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
     def body_fit(bsize: int) -> tuple[list[str], bool]:
         bf = ImageFont.truetype(body_font_path, bsize)
         bl = _wrap(draw, body, bf, avail_w)
@@ -578,29 +573,56 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                 last = last[:-1]
             bl[-1] = last + "…"
         return bl, cut
-    while True:
-        font = ImageFont.truetype(font_path, size)
-        lines = _wrap(draw, headline, font, avail_w)
-        lh_px = round(size * 1.28)
-        block_h = lh_px * len(lines)
-        if body:
-            body_size = max(body_min_size, round(size * 0.55))
-            body_lines, _cut = body_fit(body_size)
-            block_h += inner_gap + round(body_size * 1.28) * len(body_lines)
-        if cta and not strip:
-            block_h += inner_gap + cta_h
-        fits = block_h <= avail_h and all(draw.textlength(ln, font=font) <= avail_w for ln in lines)
-        if fits or size <= min_size:
-            break
-        size -= 2
-    if not fits and body:
-        body, body_lines, body_dropped = None, [], True      # 자리가 모자라면 본문을 빼고 제목·CTA 만
+    def fit_block(ah: int):
+        """주어진 높이에 제목(+본문 +CTA)을 맞춘다. 반환: 제목 크기, 제목 줄, 본문 줄, 본문 크기, 맞음, 본문 유지, 블록 높이"""
+        sz = size0
+        while True:
+            f = ImageFont.truetype(font_path, sz)
+            ls = _wrap(draw, headline, f, avail_w)
+            bh = round(sz * 1.28) * len(ls)
+            bl: list[str] = []
+            bs = 0
+            if body:
+                bs = max(body_min_size, round(sz * 0.55))
+                bl, _cut = body_fit(bs)
+                bh += inner_gap + round(bs * 1.28) * len(bl)
+            if cta and not strip:
+                bh += inner_gap + cta_h
+            ok = bh <= ah and all(draw.textlength(ln, font=f) <= avail_w for ln in ls)
+            if ok or sz <= min_size:
+                break
+            sz -= 2
+        kept = True
+        if not ok and body:      # 자리가 모자라면 본문을 빼고 제목·CTA 만
+            kept, bl, bs = False, [], 0
+            bh = round(sz * 1.28) * len(ls) + ((inner_gap + cta_h) if cta and not strip else 0)
+            ok = bh <= ah and all(draw.textlength(ln, font=f) <= avail_w for ln in ls)
+        return sz, ls, bl, bs, ok, kept, bh
+    size, lines, body_lines, body_size, fits, kept, block_h = fit_block(avail_h)
+    # 4-1) 피사체 아래 자리가 모자라면(본문이 빠지거나 넘칠 때) 피사체 위쪽 자리를 써 본다. 더 잘 들어갈 때만 옮긴다.
+    top_zone = False
+    if (not fits or not kept) and tpl != HORIZONTAL and not strip and subj:
+        above_h = (subj[1] - gap) - ty0_top
+        if above_h > avail_h:
+            alt = fit_block(above_h)
+            if (alt[4], alt[5]) > (fits, kept):
+                size, lines, body_lines, body_size, fits, kept, block_h = alt
+                avail_h, ty0 = above_h, ty0_top
+                ty1 = ty0 + block_h          # 위에서부터 쌓는다
+                top_zone = True
+                report["text_zone"] = "위"
+    body_dropped = bool(body) and not kept
+    if body_dropped:
+        body, body_lines = None, []
         report["warnings"].append("문구 자리가 좁아 본문을 이미지에서 뺐습니다 (제목·CTA 만 합성)")
-        lh_px = round(size * 1.28)
-        block_h = lh_px * len(lines) + ((inner_gap + cta_h) if cta and not strip else 0)
-        fits = block_h <= avail_h and all(draw.textlength(ln, font=font) <= avail_w for ln in lines)
+    font = ImageFont.truetype(font_path, size)
     if not fits:
         report["warnings"].append("문구가 영역을 넘칠 수 있습니다 (최소 글자 크기에서도 맞지 않음)")
+    scrim_opacity = 0.62
+    canvas = apply_scrim(canvas, tpl, scrim_hex or "#000000", scrim_opacity, top=top_zone)
+    report["scrim"] = {"mode": tpl, "color": (scrim_hex or "#000000").upper(), "opacity": scrim_opacity,
+                       **({"position": "위"} if top_zone else {})}
+    draw = ImageDraw.Draw(canvas)
     body_cut = bool(body) and body_fit(body_size)[1]
     if body_cut:
         report["warnings"].append(f"본문이 {body_max_lines}줄을 넘어 뒤를 줄였습니다 (편집에서 줄이거나 본문을 끄세요)")
