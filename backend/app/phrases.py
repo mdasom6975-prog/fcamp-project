@@ -35,5 +35,6 @@ def effective(bv, brief: dict | None) -> dict:
 def rules(bv, brief: dict | None) -> dict:
     """카피 생성·검사용 브랜드 규칙 dict (copywriter.check / _prompt 가 읽는 형태)."""
     eff = effective(bv, brief)
+    from . import legal
     return {"voice": bv.voice, "required_phrases": eff["required_phrases"],
-            "forbidden_phrases": eff["forbidden_phrases"], "levels": bv.levels}
+            "forbidden_phrases": eff["forbidden_phrases"], "levels": bv.levels, "source_text": legal.source_text(brief)}

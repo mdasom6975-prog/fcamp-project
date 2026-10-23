@@ -18,12 +18,17 @@ def _verdict(violations: list[dict]) -> str:
     return "수정 필요" if any(v["severity"] in ("필수", "강제", "수정 필요") for v in violations) else "통과"
 
 
+def _brand_only(violations: list[dict]) -> list[dict]:
+    """이 테스트셋은 브랜드 규칙(금지·필수 표현, 글자 수) 판정을 본다. 법적 표현 사전 검사(type=legal)는 tests/test_legal.py 가 따로 본다."""
+    return [v for v in violations if v["type"] != "legal"]
+
+
 @pytest.mark.parametrize("row", ROWS, ids=[r["id"] for r in ROWS])
 def test_case_matches_expected(row):
     limits = {"headline": {"field": "headline", "min": None, "max": int(row["headline_max"]), "level": "강제", "method": "글자 수"},
               "body": None, "cta": None}
     copy = {"headline": row["headline"], "body": row["body"], "cta": row["cta"]}
-    got = copywriter.check(copy, limits, BRAND)
+    got = _brand_only(copywriter.check(copy, limits, BRAND))
     assert _verdict(got) == row["expected"], (row["case"], got)
     expected_types = sorted(t for t in row["expected_types"].split(",") if t)
     assert sorted(v["type"] for v in got) == expected_types, (row["case"], got)
@@ -32,7 +37,7 @@ def test_case_matches_expected(row):
 def test_every_forbidden_phrase_is_caught():
     """금지 표현 21개 각각이 제목에 들어가면 하나도 빠짐없이 '수정 필요'가 된다."""
     for ph in BRAND["forbidden_phrases"]:
-        got = copywriter.check({"headline": f"쿠챠 {ph}", "body": "본문", "cta": "보기"}, {}, BRAND)
+        got = _brand_only(copywriter.check({"headline": f"쿠챠 {ph}", "body": "본문", "cta": "보기"}, {}, BRAND))
         assert [v["type"] for v in got] == ["forbidden"] and _verdict(got) == "수정 필요", ph
 
 

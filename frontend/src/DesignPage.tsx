@@ -38,7 +38,7 @@ async function post(url: string, body: unknown, method: 'POST' | 'PUT' = 'POST')
   return j
 }
 
-type Violation = { type: string; field: string; detail: string; severity: string }
+type Violation = { type: string; field: string; detail: string; severity: string; phrase?: string; law?: string; reason?: string; suggest?: string; grounded?: boolean }
 type Variant = { id: number; variant_no: number; headline: string; body: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
 // 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
@@ -328,7 +328,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
               const reqOk = !v.violations.some((x) => x.type === 'required_missing')
               const banOk = !v.violations.some((x) => x.type === 'forbidden')
               const others = [
-                ...v.violations.filter((x) => !['required_missing', 'forbidden', 'length', 'min_length'].includes(x.type)),
+                ...v.violations.filter((x) => !['required_missing', 'forbidden', 'length', 'min_length', 'legal'].includes(x.type)),
                 ...lengthIssues(v.variant_no).map((x) => ({ ...x, field: `${x.placement} ${x.field}` })),
               ]
               return (
@@ -343,6 +343,13 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
                   <ul className="ad-checks">
                     <li className={reqOk ? 'ok' : 'ng'}>{reqOk ? '✓ 필수 표현 포함' : '✕ 필수 표현 누락'}</li>
                     <li className={banOk ? 'ok' : 'ng'}>{banOk ? '✓ 금지 표현 없음' : '✕ 금지 표현 포함'}</li>
+                    {v.violations.some((x) => x.type === 'legal')
+                      ? v.violations.filter((x) => x.type === 'legal').map((x, i) => (
+                        <li key={`legal${i}`} className={x.severity === '필수' ? 'ng' : 'warn'}>
+                          {x.severity === '필수' ? '✕' : '△'} 법적 표현 '{x.phrase}' — {x.reason}
+                          <div className="muted">근거: {x.law}{x.suggest ? ` · 제안: ${x.suggest}` : ''}{x.grounded ? ' · 입력에 있던 표현이라 근거 자료 확인 필요' : ''}</div>
+                        </li>))
+                      : <li className="ok" title="표시·광고법 등 법적 금지·주의 표현 사전 기준의 참고용 자동 검사입니다. 법률 자문이 아닙니다.">✓ 법적 표현 점검 통과</li>}
                     {others.map((x, i) => <li key={i} className="ng">✕ {x.field}: {x.detail}</li>)}
                   </ul>
                   {v.selected
@@ -517,7 +524,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
                 {fitNote && v.selected && <div className="notice ok">{fitNote}</div>}
                 {issues.map((x, i) => (
                   <span key={i} className={`badge ${x.severity === '필수' || x.severity === '강제' || x.severity === '수정 필요' ? 'b-need' : 'b-warn'}`}>
-                    {x.severity} · {x.placement ? `${x.placement} ` : ''}{x.field}: {x.detail}
+                    {x.severity} · {x.placement ? `${x.placement} ` : ''}{x.field}: {x.detail}{x.type === 'legal' && x.law ? ` · 근거: ${x.law}` : ''}
                     {v.selected && 'preset_id' in x && (x.type === 'length' || x.type === 'min_length') && (
                       <button type="button" className="link" style={{ marginLeft: 6 }} disabled={fitting !== null || picking}
                         onClick={() => fitPreset((x as { preset_id: number }).preset_id)}>이 지면에 맞게 줄이기 (채팅 1회)</button>

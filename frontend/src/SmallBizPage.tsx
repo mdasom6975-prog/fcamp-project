@@ -4,7 +4,8 @@ import { KIND_LABEL, type ApiCalls } from './DevStats'
 
 type Preset = { id: string; name: string; desc: string; tags: string[]; colors: string[] }
 type Item = { preset_id: number; name: string; image: { id: number; file: string } | null }
-type Campaign = { design_id: number; key_message: string; preset_id: string | null; has_photo: boolean; items: Item[] }
+type LegalHit = { phrase: string; reason: string; law: string; suggest: string; grounded: boolean; severity: string }
+type Campaign = { design_id: number; legal: LegalHit[]; key_message: string; preset_id: string | null; has_photo: boolean; items: Item[] }
 
 async function j<T>(r: Response): Promise<T> {
   const body = await r.json().catch(() => ({}))
@@ -200,6 +201,13 @@ export default function SmallBizPage() {
         <h2>광고 이미지가 만들어졌어요</h2>
         {err && <p className="sb-err">{err}</p>}
         <p className="muted">문구: {camp.key_message}</p>
+        {camp.legal.length === 0
+          ? <p className="muted" title="표시·광고법 등 법적 금지·주의 표현 사전 기준의 참고용 자동 검사입니다. 법률 자문이 아닙니다.">✓ 법적 표현 점검 통과 (참고용 자동 검사)</p>
+          : camp.legal.map((h) => (
+            <p key={h.phrase} className={h.severity === '필수' ? 'sb-err' : 'sb-warn'}>
+              {h.severity === '필수' ? '✕' : '△'} 법적 표현 '{h.phrase}' — {h.reason}<br />
+              <small>근거: {h.law}{h.suggest ? ` · 제안: ${h.suggest}` : ''}{h.grounded ? ' · 입력에 있던 표현이라 근거 자료 확인 필요' : ''}</small>
+            </p>))}
         <div className="sb-results">
           {camp.items.map((it, idx) => (
             <figure key={it.preset_id}>

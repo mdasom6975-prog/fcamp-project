@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import compose, copywriter, exporting, storage
+from . import compose, copywriter, exporting, legal, storage
 from .copyfields import EXTRA
 from .textcount import count_len
 
@@ -298,6 +298,15 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
             out.append(item("브랜드", "금지 표현", st, f"'{ph}' 포함", lv.get("forbidden_phrases"), bl))
     if brand["forbidden_phrases"] and not any(ph and ph in joined for ph in brand["forbidden_phrases"]):
         out.append(item("브랜드", "금지 표현", "통과", "금지 표현이 없습니다", lv.get("forbidden_phrases")))
+    # 법적·제도적 금지 표현(표시광고법 등): 브랜드 규칙과 별개로 항상 검사. block 은 차단, warn 은 경고, 입력에 있던 표현은 경고로 낮춘다
+    hits = legal.scan(joined, brand.get("source_text") or "")
+    for h in hits:
+        blocking = h["severity"] == "block"
+        out.append(item("법적", f"법적 표현 '{h['phrase']}'", "수정 필요" if blocking else "경고",
+                        f"{h['reason']} — 근거: {h['law']}" + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
+                        "필수" if blocking else "권장", blocking))
+    if not hits:
+        out.append(item("법적", "법적 표현", "통과", "금지·주의 표현 사전에 걸리는 표현이 없습니다(참고용 자동 검사, 법률 자문 아님)", "필수"))
     for ph in brand["required_phrases"]:
         if ph and ph not in joined:
             st, bl = _brand_fail(lv.get("required_phrases"))

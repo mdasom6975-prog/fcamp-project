@@ -110,6 +110,7 @@ def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
         if ph and ph not in joined:
             v.append({"type": "required_missing", "field": "필수 표현", "detail": f"'{ph}' 누락",
                       "severity": lv.get("required_phrases", "필수")})
+    v += legal.violations(joined, brand.get("source_text") or "")       # 법적·제도적 금지 표현(브랜드 규칙과 별개로 항상 검사)
     return v
 
 

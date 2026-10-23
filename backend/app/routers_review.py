@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import imagegen, phrases, review
+from . import imagegen, legal, phrases, review
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, IconAsset,
                      PresetVersion, ReviewResult)
 from .routers_assets import get_db
@@ -52,7 +52,8 @@ def _brand_dict(bv: BrandVersion, name: str = "", brief: dict | None = None) -> 
     eff = phrases.effective(bv, brief)
     return {"name": name, "levels": bv.levels or {}, "forbidden_phrases": eff["forbidden_phrases"],
             "required_phrases": eff["required_phrases"], "colors": bv.colors or [], "fonts": bv.fonts or [],
-            "logo_asset_id": bv.logo_asset_id, "icon_style": bv.icon_style or {}}
+            "logo_asset_id": bv.logo_asset_id, "icon_style": bv.icon_style or {},
+            "source_text": legal.source_text(brief)}
 
 
 def gather(db: Session, d: Design, pv: PresetVersion, brand: dict) -> dict:

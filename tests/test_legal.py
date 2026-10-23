@@ -46,3 +46,79 @@ def test_every_legal_file_records_law_and_status():
         meta = prompts.load(n).meta
         assert meta.get("law") and meta.get("status"), f"{n}: law/status 메타가 필요합니다"
 
+
+# ---- 2단계: 생성 후 표현 사전 검사 ----
+def test_scan_blocks_superlative_and_ignores_spaces():
+    hits = legal.scan("우리 동네 최 고 의 케이크, 원금 보장!")
+    ph = {h["phrase"]: h for h in hits}
+    assert ph["최고"]["severity"] == "block" and "표시·광고의 공정화" in ph["최고"]["law"]
+    assert "원금 보장" not in ph          # 금융 업종이 아니면 업종 한정 표현은 보지 않는다
+
+
+def test_industry_phrases_apply_only_to_detected_industry():
+    assert any(h["phrase"] == "치료" for h in legal.scan("피부 트러블 치료 크림", "수분 크림"))
+    assert not any(h["phrase"] == "치료" for h in legal.scan("충치 치료 안내", "텀블러"))      # 식품·화장품 업종이 아니면 제외
+    assert any(h["phrase"] == "원금 보장" for h in legal.scan("원금 보장 적금", "적금 상품"))
+
+
+def test_phrase_in_user_input_is_downgraded_to_warning():
+    hits = legal.scan("지역 1등 케이크", "지역 1등 케이크 가게")
+    h = next(x for x in hits if x["phrase"] == "1등")
+    assert h["severity"] == "warn" and h["grounded"] is True
+    h2 = next(x for x in legal.scan("지역 1등 케이크", "케이크 가게") if x["phrase"] == "1등")
+    assert h2["severity"] == "block" and h2["grounded"] is False
+
+
+def test_false_positive_words_are_not_flagged():
+    for ok in ("쫄깃하게 씹는 맛이 좋은 빵", "시발점이 되는 이야기"):
+        assert not legal.scan(ok), ok
+
+
+def test_check_adds_legal_violation_with_law_and_severity():
+    brand = {"levels": {}, "forbidden_phrases": [], "required_phrases": [], "source_text": "케이크"}
+    v = copywriter.check({"headline": "국내 최고 케이크", "body": "무조건 만족", "cta": "보기"},
+                         {"headline": None, "body": None, "cta": None}, brand)
+    lg = [x for x in v if x["type"] == "legal"]
+    assert {x["phrase"] for x in lg} >= {"최고", "무조건"}
+    assert all(x["severity"] == "필수" and x["law"] and x["detail"] for x in lg)
+
+
+def test_phrase_file_entries_are_well_formed():
+    import json
+    data = json.loads(legal.PHRASES_FILE.read_text(encoding="utf-8"))
+    assert data["status"] and data["entries"]
+    for e in data["entries"]:
+        assert e["severity"] in ("block", "warn") and e["phrase"] and e["reason"] and e["law"]
+        assert set(e.get("industries", [])) <= set(legal.INDUSTRY_KEYWORDS)
+
+
+def _review(tmp_path, headline, source="케이크"):
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from app import review
+    path = tmp_path / "img.png"
+    Image.new("RGB", (500, 500), "white").save(path)
+    pv = SimpleNamespace(production_width=500, production_height=500, ratio=None, conditions=[], safe_area=None,
+                         text_limits=[], required_assets=[], placement=SimpleNamespace(content_kind="완성형", name="피드"))
+    brand = {"levels": {}, "forbidden_phrases": [], "required_phrases": [], "colors": [], "fonts": [], "logo_asset_id": None,
+             "source_text": source}
+    items = review.review_preset(pv, SimpleNamespace(file_path=str(path)), {"headline": headline, "body": "", "cta": ""},
+                                 None, None, None, None, brand, None, True)
+    return [i for i in items if i["category"] == "법적"]
+
+
+def test_review_blocks_on_legal_block_phrase(tmp_path):
+    items = _review(tmp_path, "세계 최초 케이크")
+    assert any(i["blocking"] and i["status"] == "수정 필요" and "최초" in i["item"] and "표시·광고의 공정화" in i["message"] for i in items)
+
+
+def test_review_warns_when_phrase_came_from_user_input(tmp_path):
+    items = _review(tmp_path, "지역 1등 케이크", source="지역 1등 케이크 가게")
+    assert items and all(not i["blocking"] and i["status"] == "경고" for i in items)
+
+
+def test_review_passes_clean_copy(tmp_path):
+    items = _review(tmp_path, "오늘 구운 딸기 케이크")
+    assert [i["status"] for i in items] == ["통과"]

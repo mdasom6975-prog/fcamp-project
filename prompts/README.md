@@ -24,6 +24,7 @@
 | `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
 | `legal/_copy_common.md` | 모든 카피에 붙는 공통 법적 준수 규칙(표시·광고의 공정화에 관한 법률 기준: 거짓·과장·기만·부당 비교·추천 보증·건전성). `copy/system.md` 가 include | `copywriter._prompt` |
 | `legal/_image_common.md` | 모든 배경에 붙는 공통 법적 준수 규칙(전후 비교·전문가 가운·보증 장식·실존 인물·상표 금지). `image/background.md` 가 include | `imagegen.build_prompt` |
+| `legal/phrases.json` | 생성 후 검사용 표현 사전(차단/경고, 사유, 근거 법령, 적용 업종). 프롬프트가 아니라 코드 검사 데이터 | `legal.scan` |
 | `legal/industry/{식품,건강기능식품,화장품,의료,금융,주류}.md` | 품목 글에서 업종 키워드(`legal.INDUSTRY_KEYWORDS`)가 감지되면 카피 User 끝에 붙는 업종별 주의 규칙. 메타에 `law`(근거 법령)·`status`(검토 상태)를 적는다 | `legal.industry_block` |
 | `analysis/judge_system.md` · `judge_user.md` | 분석 화면 비전 채점: 생성 배경 1장을 Claude 가 보고 톤·내용·표현 방식·금지 요소·글자 항목을 1~5점 (참고값, 검수 아님) | `analysis.judge_background` |
 

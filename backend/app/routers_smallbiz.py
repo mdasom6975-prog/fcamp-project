@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import calllog, imagegen, llm, pricing, smallbiz, storage
-from .models import Asset, Brand, BrandVersion, Design, Placement, PresetVersion
+from .models import Asset, Brand, BrandVersion, CopyVariant, Design, Placement, PresetVersion
 from .routers_assets import get_db
 from .routers_brands import _version_from
 
@@ -230,7 +230,11 @@ def get_campaign(design_id: int, db: Session = Depends(get_db)):
         items.append({"preset_id": pid, "name": pv.placement.name if pv else str(pid),
                       "image": routers_images._img_out(g)})
     b = d.brief or {}
-    return {"design_id": d.id, "what": b.get("description", ""), "key_message": b.get("key_message", ""),
+    sel = db.scalars(select(CopyVariant).where(CopyVariant.design_id == d.id, CopyVariant.selected.is_(True))).first()
+    from .routers_copy import with_legal
+    legal_hits = [{k: v.get(k) for k in ("phrase", "reason", "law", "suggest", "grounded", "severity")}
+                  for v in (with_legal(sel, d.brief) if sel else []) if v.get("type") == "legal"]
+    return {"design_id": d.id, "what": b.get("description", ""), "legal": legal_hits, "key_message": b.get("key_message", ""),
             "preset_id": (b.get("smallbiz") or {}).get("preset_id"), "has_photo": bool(b.get("product_image_asset_id")),
             "items": items}
 

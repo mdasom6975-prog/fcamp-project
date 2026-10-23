@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import calllog, copyfields, copywriter, phrases
+from . import calllog, copyfields, copywriter, legal, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
 from .routers_assets import get_db
 from .routers_review import invalidate_reviews
@@ -13,6 +13,12 @@ router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)]) 
 def _brand_rules(bv: BrandVersion, brief: dict | None = None) -> dict:
     """카피 규칙. 필수·금지 표현은 캠페인 입력이 우선, 비면 브랜드 규칙 (phrases.effective)."""
     return phrases.rules(bv, brief)
+
+
+def with_legal(r: CopyVariant, brief: dict | None) -> list[dict]:
+    """저장된 위반 중 법적 표현은 버리고 지금의 표현 사전으로 다시 검사해 붙인다(사전이 바뀌거나 사전 도입 전 카피여도 최신 기준)."""
+    text = " ".join([r.headline or "", r.body or "", r.cta or ""])
+    return [v for v in (r.violations or []) if v.get("type") != "legal"] + legal.violations(text, legal.source_text(brief))
 
 
 def _group(design: Design, db: Session) -> list[dict]:
@@ -33,7 +39,7 @@ def _group(design: Design, db: Session) -> list[dict]:
             "content_kind": pv.placement.content_kind, "width": pv.production_width, "height": pv.production_height,
             "limits": limits, "batch_no": last,
             "variants": [{"id": r.id, "variant_no": r.variant_no, "headline": r.headline, "body": r.body,
-                          "cta": r.cta, "violations": r.violations, "attempts": r.attempts, "selected": r.selected} for r in rows],
+                          "cta": r.cta, "violations": with_legal(r, design.brief), "attempts": r.attempts, "selected": r.selected} for r in rows],
         })
     return out
 

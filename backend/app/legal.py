@@ -37,3 +37,57 @@ def refs(industries: list[str]) -> list[str]:
     return [prompts.ref("legal/_copy_common"), prompts.ref("legal/_image_common"),
             *[prompts.ref(f"legal/industry/{k}") for k in industries]]
 
+
+# ---- 생성 후 검사: 표현 사전(prompts/legal/phrases.json) ----
+import json
+import re
+from functools import lru_cache
+
+PHRASES_FILE = prompts.PROMPTS_DIR / "legal" / "phrases.json"
+_SPACE = re.compile(r"\s+")
+
+
+@lru_cache(maxsize=1)
+def _entries() -> tuple[dict, ...]:
+    data = json.loads(PHRASES_FILE.read_text(encoding="utf-8"))
+    best: dict[tuple, dict] = {}
+    for e in data["entries"]:
+        key = (_SPACE.sub("", e["phrase"]).lower(), tuple(e.get("industries") or ()))
+        if key not in best or (e["severity"] == "block" and best[key]["severity"] != "block"):
+            best[key] = e
+    return tuple(best.values())
+
+
+def source_text(brief: dict | None) -> str:
+    """사용자가 입력한 사실(상품명·설명·핵심 메시지). 카피에 나온 표현이 여기 있으면 사용자가 쓴 말로 본다."""
+    b = brief or {}
+    return " ".join(str(b.get(k) or "") for k in ("product_name", "description", "key_message"))
+
+
+def scan(text: str, source: str = "") -> list[dict]:
+    """문구에서 표현 사전의 금지·주의 표현을 찾는다. 반환: [{phrase, severity(block|warn), reason, law, suggest, grounded}].
+    같은 표현이 입력(source)에 있으면 grounded=True 로 block 을 warn 으로 낮춘다. 업종 한정 항목은 그 업종으로 감지된 때만 본다."""
+    norm = lambda s: _SPACE.sub("", s or "").lower()
+    t, src = norm(text), norm(source)
+    industries = set(detect(f"{source} {text}"))
+    out, seen = [], set()
+    for e in _entries():
+        ind = e.get("industries")
+        if ind and not industries & set(ind):
+            continue
+        ph = norm(e["phrase"])
+        if ph in t and ph not in seen:
+            seen.add(ph)
+            grounded = ph in src
+            sev = "warn" if grounded and e["severity"] == "block" else e["severity"]
+            out.append({"phrase": e["phrase"], "severity": sev, "reason": e["reason"], "law": e["law"],
+                        "suggest": e.get("suggest", ""), "grounded": grounded})
+    return out
+
+
+def violations(text: str, source: str = "") -> list[dict]:
+    """copywriter.check 가 쓰는 위반 항목 형태. block 은 '필수'(수정 필요), warn 은 '권장'(경고)으로 매긴다."""
+    return [{"type": "legal", "field": "법적 표현", "phrase": h["phrase"], "law": h["law"], "reason": h["reason"],
+             "suggest": h["suggest"], "grounded": h["grounded"],
+             "detail": f"'{h['phrase']}' — {h['reason']}" + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
+             "severity": "필수" if h["severity"] == "block" else "권장"} for h in scan(text, source)]
