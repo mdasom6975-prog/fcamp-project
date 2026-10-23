@@ -209,7 +209,7 @@ def prompt_refs(template: str, style: str, variant: bool = False, single: bool =
                 product: bool = False) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
-            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common")]
+            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common")]
     refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs
     return ([prompts.ref("image/product_ref")] + refs) if product else refs
 

@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from . import prompts
+from . import legal, prompts
 from .db import BASE_DIR
 from .textcount import METHODS, count_len
 
@@ -158,6 +158,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         limit_body=rule("body", "body(본문)"),
         limit_cta=rule("cta", "cta(행동 유도)"),
         assets=assets,
+        legal=legal.industry_block(legal.detect(" ".join(str(brief.get(k) or "") for k in ("product_name", "description", "key_message")))),
     )
     return system, user
 
