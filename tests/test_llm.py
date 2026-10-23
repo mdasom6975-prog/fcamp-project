@@ -34,6 +34,7 @@ class _FakeClient:
 def claude(monkeypatch):
     monkeypatch.setattr(llm, "CHAT_PROVIDER", "anthropic")
     monkeypatch.setattr(llm, "CLAUDE_MODEL", "claude-opus-5-5")
+    monkeypatch.setattr(llm, "KIND_DEFAULTS", {})      # 종류별 기본(Haiku)은 별도 테스트에서 확인
     monkeypatch.setattr(llm, "CLAUDE_EFFORT", "low")
     fake = _FakeClient(text=json.dumps({"variants": [{"headline": "h", "body": "b", "cta": "c"}], "icons": [{"name": "n", "concept": "o"}]}))
     monkeypatch.setattr(llm, "_anthropic_client", fake)
@@ -107,3 +108,14 @@ def test_pricing_knows_claude_models():
     usd, est = pricing.cost_of({"ok": True, "api": "chat", "provider": "anthropic", "model": "claude-haiku-5-5",
                                 "tokens_in": 1_000_000, "tokens_out": 0})
     assert usd == 0.10
+
+
+def test_model_for_kind_defaults_and_env_override(monkeypatch):
+    monkeypatch.setattr(llm, "CHAT_PROVIDER", "anthropic")
+    monkeypatch.setattr(llm, "CLAUDE_MODEL", "claude-sonnet-5-5")
+    for k in ("COPY", "COPY_FIT", "ICON_NAMES", "JUDGE"):
+        monkeypatch.delenv(f"CLAUDE_MODEL_{k}", raising=False)
+    assert all(llm.chat_model(k) == "claude-haiku-5-5" for k in ("copy", "copy_fit", "icon_names"))
+    assert llm.model_for("judge") == "claude-sonnet-5-5" and llm.model_for(None) == "claude-sonnet-5-5"     # 나머지는 기본값
+    monkeypatch.setenv("CLAUDE_MODEL_COPY", "claude-sonnet-5-5")
+    assert llm.model_for("copy") == "claude-sonnet-5-5" and llm.model_for("copy_fit") == "claude-haiku-5-5"

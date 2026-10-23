@@ -249,7 +249,7 @@ def prompt_entries(db: Session, d: Design, bv: BrandVersion, brand: Brand, rows:
         sp = _copy_prompt(db, d, bv, brand)
         if sp:
             out.append({"stage": "copy", "kind": "copy", "source": "reconstructed", "ts": None, "provider": None,
-                        "model": llm.chat_model(), "system": sp[0], "user": sp[1],
+                        "model": llm.chat_model("copy"), "system": sp[0], "user": sp[1],
                         "note": "이 캠페인의 카피는 프롬프트 전문을 기록하기 전에 만들었습니다. 현재 브랜드 규칙·입력·프롬프트 파일로 다시 조립한 문장이라 보낸 당시와 다를 수 있습니다."})
     if icon_set and "icon_names" not in kinds_seen:
         if (d.brief or {}).get("icon_candidates"):
@@ -258,7 +258,7 @@ def prompt_entries(db: Session, d: Design, bv: BrandVersion, brand: Brand, rows:
         else:
             s, u = _icon_names_prompt(d, bv, brand)
             out.append({"stage": "icon", "kind": "icon_names", "source": "reconstructed", "ts": None, "provider": None,
-                        "model": llm.chat_model(), "system": s, "user": u,
+                        "model": llm.chat_model("icon_names"), "system": s, "user": u,
                         "note": "기능명 제안 호출의 전문이 기록에 없어 현재 입력으로 다시 조립했습니다."})
     out.sort(key=lambda e: (e.get("ts") or "9999", e["stage"]))
     return out
@@ -306,7 +306,7 @@ def judge_background(db: Session, d: Design, bv: BrandVersion, brand: Brand, g: 
     last = next((r for r in reversed(calllog.calls(d.id)) if r.get("kind") == "judge"), None)
     result = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "background_id": g.id,
               "file": Path(g.file_path).stem, "template": (g.layout or {}).get("template"), "style": vars["style"],
-              "model": llm.CLAUDE_MODEL, "scores": scores, "overall": int(data.get("overall") or 0),
+              "model": llm.model_for("judge"), "scores": scores, "overall": int(data.get("overall") or 0),
               "summary": str(data.get("summary") or ""), "prompt_refs": [prompts.ref("analysis/judge_system"), prompts.ref("analysis/judge_user")],
               "cost_usd": (last or {}).get("cost_usd"), "tokens_in": (last or {}).get("tokens_in"), "tokens_out": (last or {}).get("tokens_out")}
     try:
@@ -405,6 +405,6 @@ def build(db: Session, d: Design) -> dict:
 def _judge_estimate() -> dict:
     """채점 1회의 대략적인 비용(이미지 1장 ≈ 1,500 토큰 + 프롬프트·응답)."""
     from . import pricing
-    usd, est = pricing.cost_of({"ok": True, "api": "chat", "provider": "anthropic", "model": llm.CLAUDE_MODEL,
+    usd, est = pricing.cost_of({"ok": True, "api": "chat", "provider": "anthropic", "model": llm.model_for("judge"),
                                 "tokens_in": 2500, "tokens_out": 400})
-    return {"usd": usd, "krw": pricing.krw(usd), "estimated": True, "model": llm.CLAUDE_MODEL}
+    return {"usd": usd, "krw": pricing.krw(usd), "estimated": True, "model": llm.model_for("judge")}
