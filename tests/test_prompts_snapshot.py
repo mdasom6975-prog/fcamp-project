@@ -187,3 +187,12 @@ def test_judge_prompt():
     bv = SimpleNamespace(image_tone=BRAND["image_tone"])
     vars = analysis.judge_vars(SimpleNamespace(name="쿠챠"), bv, BRIEF, "실사 제품·공간")
     _assert_snapshot("analysis__judge", f"[SYSTEM]\n{prompts.render('analysis/judge_system')}\n\n[USER]\n{prompts.render('analysis/judge_user', **vars)}\n")
+
+
+def test_background_product_slot_prompt():
+    """제품을 그리지 않고 구역을 비워 두는 프롬프트 (image/product_slot.md), 비율군 변형과 함께 쓸 때."""
+    from app import imagegen
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", "실사 제품·공간", product=True, composite=True)
+    _assert_snapshot("image__product_slot_세로형", base + "\n")
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True, variant=True, composite=True)
+    _assert_snapshot("image__product_slot_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
