@@ -167,13 +167,20 @@ def pick_style(tone: dict, brief: dict) -> tuple[str, str]:
     return DEFAULT_STYLE, "자동: 기본값(사람 없는 제품·공간)"
 
 
+PRODUCT_ATTACH = "첨부한 이미지는 제품 원본 사진 한 장이다."
+PRODUCT_ATTACH_VARIANT = ("첨부한 이미지는 두 장이다. 1번은 장면 참조, 2번은 제품 원본이다. 1번에 그려진 상품은 이전에 다시 그린 것이라 "
+                          "모양이 부정확하므로 따라 그리지 말고, 1번에서는 장면·소품·조명·색만 참조한다. 상품은 반드시 2번 제품 원본을 따른다.")
+
+
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
-                 single: bool = False, product: bool = False) -> str:
+                 single: bool = False, product: bool = False, variant: bool = False) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
     표현 방식(배경 형태)은 prompts/image/style/<형태>.md (style 이 None 이면 pick_style 로 정한다).
     product=True 면 제품 누끼 이미지를 참조 이미지로 함께 보내므로 prompts/image/product_ref.md 문장을 덧붙인다.
+    variant=True 면 다른 비율군 배경(1번)이 제품 원본(2번) 앞에 함께 첨부되므로, 1번 속 상품은 이전에 그려진 것이라
+    무시하고 제품 원본만 따르게 첨부 이미지의 역할을 적는다 (generate_variant 의 첨부 순서와 맞춘다).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
     """
     style = style or pick_style(tone, brief)[0]
@@ -188,7 +195,8 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                           key_message=brief.get("key_message") or "지정 없음", target=target,
                           tone=tone.get("description") or "지정 없음", composition=composition, style=style_text)
     if product:
-        text = prompts.render("image/product_ref", product_name=brief.get("product_name"), base=text)
+        attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
+        text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
     return text
 
 

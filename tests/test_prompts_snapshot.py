@@ -169,7 +169,7 @@ def test_background_product_prompt():
     from app import imagegen
     base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "정사각", "실사 제품·공간", product=True)
     _assert_snapshot("image__product_정사각", base + "\n")
-    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True)
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True, variant=True)
     _assert_snapshot("image__product_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
 
 

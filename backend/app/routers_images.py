@@ -269,7 +269,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     product_img, product_id = _product_image(db, d)
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
-                                       product=product_img is not None)
+                                       product=product_img is not None, variant=ref_img is not None)
         if ref_img is not None:
             prompt = imagegen.build_variant_prompt(prompt)
         if ref_img is not None or product_img is not None:

@@ -933,9 +933,11 @@ def test_product_image_is_attached_to_every_background_call(env):
     assert out["generated"] == 3 and len(variants) == 3, "첫 비율군도 제품 참조 호출(generate_variant)로 만든다"
     first = variants[0]
     assert first["ref_size"] is None and first["product_size"] is not None and first["size"] == (1024, 1536)
-    assert first["prompt"].startswith("[제품 이미지]") and "리빙 창고 대방출" in first["prompt"] and "[장면]" in first["prompt"]
+    assert first["prompt"].startswith("[제품 이미지") and "리빙 창고 대방출" in first["prompt"] and "[장면]" in first["prompt"]
     assert all(v["ref_size"] == (1024, 1536) and v["product_size"] is not None for v in variants[1:])
-    assert all("[제품 이미지]" in v["prompt"] and v["prompt"].startswith("[참조 이미지]") for v in variants[1:])
+    assert "첨부한 이미지는 제품 원본 사진 한 장" in first["prompt"]
+    assert all("1번은 장면 참조, 2번은 제품 원본" in v["prompt"] for v in variants[1:])      # 변형은 참조 배경 속 상품을 따르지 않는다
+    assert all("[제품 이미지" in v["prompt"] and v["prompt"].startswith("[참조 이미지]") for v in variants[1:])
     rows = c.get(f"/api/designs/{ids['design']}/images").json()
     lay = rows[0]["background"]["layout"]
     assert lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_ref@")
