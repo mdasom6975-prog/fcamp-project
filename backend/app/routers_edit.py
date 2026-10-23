@@ -120,7 +120,7 @@ def _render_rows(db, d, pv, rows, bg_path):
     return img, measure, warns
 
 
-def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None = None) -> dict:
+def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None = None, snapshot: bool = True) -> dict:
     img, measure, warns = _render_rows(db, d, pv, rows, bg_row.file_path)
     path = storage.put_image(f"edt_{uuid.uuid4().hex[:10]}.png", img)
     layout = {"template": compose.template_for(pv.production_width, pv.production_height),
@@ -149,7 +149,8 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None
                        copy_variant_id=copy_variant_id or (comp_prev.copy_variant_id if comp_prev else None),
                        brand_version_id=d.brand_version_id, layout=layout)
     db.add(g)
-    db.add(DesignSnapshot(design_id=d.id, elements=[{"preset_version_id": pv.id, **_el_out(r)} for r in rows]))
+    if snapshot:
+        db.add(DesignSnapshot(design_id=d.id, elements=[{"preset_version_id": pv.id, **_el_out(r)} for r in rows]))
     d.status = "수정됨"
     for rr in db.scalars(select(ReviewResult).where(ReviewResult.design_id == d.id,
                                                      ReviewResult.preset_version_id == pv.id)).all():
@@ -402,6 +403,50 @@ def reset_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
     db.commit()
     return {**res, "elements": [_el_out(r) for r in rows]}
+
+
+# ---------- 실행 취소 ----------
+def _snap_key(elements: list[dict]) -> list:
+    """스냅샷 비교용: id 는 '처음 상태로'에서 새로 매겨지므로 뺀다."""
+    return [(e["type"], e.get("role", ""), e["scope"], e["z_index"], e["locked"], e["props"]) for e in elements]
+
+
+@router.post("/designs/{design_id}/presets/{preset_id}/edit/undo")
+def undo_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
+    """직전 저장 상태로 돌아간다. 저장 시점마다 남는 DesignSnapshot 을 쌓인 순서대로 하나씩 꺼낸다.
+    현재와 같은 내용의 스냅샷(다른 지면 편집·배경 재생성으로 남은 것)은 건너뛰고, 더 이전 스냅샷이 없으면 자동 배치 상태로 돌아간다.
+    배경 이미지 자체는 되돌리지 않는다(요소의 문구·위치·크기·색·잠금만)."""
+    d = _design(db, design_id)
+    ensure_unlocked(d)
+    pv = _preset(db, d, preset_id)
+    snaps = [s for s in db.scalars(select(DesignSnapshot).where(DesignSnapshot.design_id == d.id)
+                                   .order_by(DesignSnapshot.id.desc())).all()
+             if s.elements and s.elements[0].get("preset_version_id") == preset_id]
+    if not snaps:
+        raise HTTPException(400, "되돌릴 편집이 없습니다")
+    cur = _snap_key(snaps[0].elements)
+    target = next((s for s in snaps[1:] if _snap_key(s.elements) != cur), None)
+    for s in (snaps if target is None else snaps[:snaps.index(target)]):
+        db.delete(s)                       # 현재 상태와 그 사이에 쌓인 같은 내용의 스냅샷을 쓴 것으로 친다
+    for r in _els(db, d.id, preset_id):
+        db.delete(r)
+    db.flush()
+    bv = db.get(BrandVersion, d.brand_version_id)
+    if target is None:
+        rows = _bootstrap(db, d, preset_id, bv)
+    else:
+        rows = []
+        for e in target.elements:
+            props = dict(e["props"])
+            props["_role"] = e.get("role", "")
+            row = Element(design_id=d.id, preset_version_id=preset_id, type=e["type"], scope=e["scope"],
+                          props=props, z_index=e["z_index"], locked=e["locked"])
+            db.add(row)
+            rows.append(row)
+        db.flush()
+    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"), snapshot=False)
+    db.commit()
+    return {**res, "elements": [_el_out(r) for r in rows], "to": "이전 저장 상태" if target else "자동 배치 상태"}
 
 
 # ---------- 시안(A/B/C) 바꾸기: 만든 이미지에도 새 문구를 반영한다 ----------

@@ -141,3 +141,42 @@ def test_element_boxes_helper_skips_unrendered_elements():
     rows = [(1, "image"), (2, "shape"), (3, "logo"), (4, "text"), (5, "body"), (6, "cta")]
     measure = {"logo": {"missing": True}, "text": {"box": [1.0, 2.0, 30.0, 40.0]}, "cta": {"box": [5, 6, 7, 8]}}
     assert element_boxes(rows, measure) == {"4": [1, 2, 30, 40], "6": [5, 6, 7, 8]}
+
+
+def test_undo_walks_back_through_saves_to_auto_layout(env):
+    """저장을 두 번 한 뒤 실행 취소: 1차 저장 상태 → 자동 배치 상태 → 더 되돌릴 것 없음(400). 취소해도 합성본은 새로 남는다."""
+    c = env["client"]
+    els = _els(env)
+    assert c.put(env["base"], json={"elements": _payload(els, cta={"x": 700, "y": 820})}).status_code == 200
+    els = _els(env)
+    assert c.put(env["base"], json={"elements": _payload(els, body={"text": "두 번째로 고친 본문"})}).status_code == 200
+    assert _els(env)["body"]["props"]["text"] == "두 번째로 고친 본문"
+
+    j = c.post(env["base"] + "/undo").json()
+    by = {e["type"]: e for e in j["elements"]}
+    assert j["to"] == "이전 저장 상태"
+    assert by["body"]["props"]["text"] == "지금 가입하면 첫 달이 무료입니다" and by["cta"]["props"]["x"] == 700
+    assert _els(env)["cta"]["props"]["x"] == 700
+
+    j = c.post(env["base"] + "/undo").json()
+    assert j["to"] == "자동 배치 상태"
+    assert {e["type"]: e for e in j["elements"]}["cta"]["props"]["x"] == 60
+
+    r = c.post(env["base"] + "/undo")
+    assert r.status_code == 400 and "되돌릴 편집이 없습니다" in r.text
+
+
+def test_undo_refused_after_review_complete(env):
+    from app import models
+    c = env["client"]
+    els = _els(env)
+    c.put(env["base"], json={"elements": _payload(els, cta={"x": 700})})
+    # 검수 완료 시안은 편집과 마찬가지로 실행 취소도 막는다
+    from app.main import app
+    from app.routers_assets import get_db
+    gen = app.dependency_overrides[get_db]()
+    sess = next(gen)
+    d = sess.get(models.Design, env["ids"]["design"])
+    d.status = "검수 완료"
+    sess.commit()
+    assert c.post(env["base"] + "/undo").status_code == 409

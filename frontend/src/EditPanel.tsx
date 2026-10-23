@@ -93,6 +93,7 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
   }
 
   const save = () => run(() => call('PUT', base, { elements: payload(els) }), '저장했습니다. (저장 시점 스냅샷이 남았습니다)')
+  const undo = () => run(() => call('POST', `${base}/undo`), (j: any) => `실행 취소: ${j?.to ?? '이전 상태'}로 돌아갔습니다. (배경 이미지는 되돌리지 않습니다)`)
   const reset = () => run(() => call('POST', `${base}/reset`), '처음 상태(자동 배치)로 되돌렸습니다.')
   const regen = (element: 'background' | 'text') => overlay.run(
     element === 'background' ? '배경 새로 만드는 중… 편집 중인 매체의 비율군만 만들어 적용합니다 (1~3분)' : '문구 다시 만드는 중… (수십 초)',
@@ -308,8 +309,9 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
       {msg && <div className={msg.ok ? 'notice ok' : 'notice err'}>{msg.text}</div>}
       <div className="row">
         <button className="primary" disabled={busy} onClick={save}>저장</button>
+        <button disabled={busy} onClick={undo}>실행 취소</button>
         <button disabled={busy} onClick={reset}>처음 상태로 되돌리기</button>
-        <span className="muted">실행 취소(Undo)는 제공하지 않습니다. 저장 전에는 미리보기만 바뀝니다.</span>
+        <span className="muted">실행 취소는 직전에 저장한 상태로 돌아갑니다(배경 이미지 제외). 저장 전에는 미리보기만 바뀝니다.</span>
       </div>
     </div>
   )

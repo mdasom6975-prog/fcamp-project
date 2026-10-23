@@ -111,7 +111,7 @@ class Design(Base):
 
 
 class DesignSnapshot(Base):
-    """저장 시점 보관. 복원·비교 UI는 만들지 않는다 (확정된 결정)."""
+    """저장 시점 보관. 편집 화면의 실행 취소가 이 기록을 하나씩 꺼내 쓴다(비교 UI는 만들지 않는다)."""
     __tablename__ = "design_snapshots"
     id: Mapped[int] = mapped_column(primary_key=True)
     design_id: Mapped[int] = mapped_column(ForeignKey("designs.id"))
