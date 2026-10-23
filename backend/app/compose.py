@@ -266,7 +266,6 @@ def pick_logo_corner(canvas: Image.Image, boxes: dict[str, list[int]], pad: int)
     return best, scores[best], scores
 
 
-LOGO_PLATE_BUSYNESS = 0.5        # 로고 자리 복잡도가 이 값을 넘으면 반투명 판을 깐다 (0.8 에서 낮춤 — 사진 위 로고가 묻혔다)
 TEXT_BACKING_BUSYNESS = 0.6      # 문구 블록 뒤 보강판을 까는 복잡도 기준
 TEXT_BACKING_OPACITY = 0.5
 
@@ -306,20 +305,6 @@ def draw_text_soft(canvas: Image.Image, items: list[tuple[int, int, str]], font,
     for x, y, text in items:
         d.text((x, y), text, font=font, fill=color)
     return out.convert("RGB")
-
-
-def _logo_plate(canvas: Image.Image, logo: Image.Image, box: list[int]) -> Image.Image:
-    """복잡한 배경 위에서 로고가 묻히지 않게 반투명 판을 깐다. 로고가 밝으면 어두운 판, 어두우면 밝은 판."""
-    a = logo.getchannel("A")
-    lum = logo.convert("L")
-    px = [v for v, al in zip(lum.getdata(), a.getdata()) if al > 128]
-    light_logo = bool(px) and sum(px) / len(px) > 140
-    x0, y0, x1, y1 = box
-    p = round((y1 - y0) * 0.25)
-    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).rounded_rectangle((x0 - p, y0 - p, x1 + p, y1 + p), radius=p,
-                                              fill=(0, 0, 0, 150) if light_logo else (255, 255, 255, 170))
-    return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
 
 
 def compose_strip(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
@@ -474,7 +459,6 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
 
     # 1-1) 로고 위치 자동 선택: 후보 중 이미지가 가장 단순한 곳(사람·디테일 회피). 후보는 문구 영역과 겹치지 않는 곳만 쓴다.
     #      세로형·정사각은 피사체가 위쪽에 오는 구도라 아래 모서리도 후보에 넣는다(선택되면 문구를 로고 위에 쌓는다).
-    logo_plate = False
     if logo_box:
         # 로고 모서리는 logo_corner 에 둔다. 인자 corner(CTA 버튼 모양 둥근/각진)와 섞이면 CTA 에 로고 위치가 기록된다
         lw, lh = logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]
@@ -502,9 +486,6 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                     score = scores[logo_corner]
             report["logo_placement"] = {"corner": logo_corner, "busyness": round(score, 2), "mode": "자동"}
         logo_box = all_cands[logo_corner]
-        if score > LOGO_PLATE_BUSYNESS:
-            logo_plate = True
-            report["warnings"].append("로고 주변 이미지가 복잡해 반투명 판을 깔았습니다")
     left_logo = bool(logo_box) and logo_box[0] <= cl + 1
     # 로고가 아래 모서리면 문구는 그 위에 쌓는다. 가로형은 문구가 왼쪽 열이라 왼쪽 아래 로고만 해당한다
     bottom_logo = bool(logo_box) and logo_box[1] > ct + 1 and (tpl != HORIZONTAL or left_logo)
@@ -555,24 +536,22 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
 
     # 3) 스크림(가독성 보조)은 문구 자리(아래/위)가 정해진 뒤에 4-1)에서 깐다.
 
-    # 4) 문구 블록 크기 맞춤: 제목(+본문 +CTA)을 한 덩어리로 보고 제목 크기를 줄여 가며 맞춘다. 본문은 줄 수 상한을 넘으면
-    #    "…"로 줄이고, 블록이 최소 글자 크기에서도 안 들어가면 본문을 먼저 뺀다(제목·CTA 우선). 그래도 넘치면 경고만 남긴다.
+    # 4) 문구 블록 크기 맞춤: 제목(+본문 +CTA)을 한 덩어리로 보고 제목 크기를 줄여 가며 맞춘다. 본문은 말줄임표("…")로 줄이지 않는다:
+    #    줄 수 상한 안에 들어가도록 글자 크기를 줄이고, 최소 크기에서도 안 들어가면 상한을 넘겨 모든 줄을 그대로 둔다.
+    #    블록이 최소 글자 크기에서도 안 들어가면 본문을 먼저 뺀다(제목·CTA 우선). 그래도 넘치면 경고만 남긴다.
     draw = ImageDraw.Draw(canvas)
     body_max_lines = 1 if strip else BODY_MAX_LINES.get(tpl, 2)
     body_min_size = 11
     inner_gap = round(h * 0.012) if not strip else round(h * 0.04)
     size0 = max(24, round(min(w, h) * 0.09))     # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
-    def body_fit(bsize: int) -> tuple[list[str], bool]:
-        bf = ImageFont.truetype(body_font_path, bsize)
-        bl = _wrap(draw, body, bf, avail_w)
-        cut = len(bl) > body_max_lines
-        if cut:
-            bl = bl[:body_max_lines]
-            last = bl[-1]
-            while last and draw.textlength(last + "…", font=bf) > avail_w:
-                last = last[:-1]
-            bl[-1] = last + "…"
-        return bl, cut
+    def body_fit(bsize: int) -> tuple[list[str], int]:
+        """본문을 bsize 로 줄바꿈한 줄들(자르지 않음)과 실제로 쓸 글자 크기. 줄 수 상한 안에 들어갈 때까지 크기를 줄이고,
+        최소 크기에서도 넘치면 최소 크기의 모든 줄을 돌려준다."""
+        for bs in range(bsize, body_min_size - 1, -1):
+            bl = _wrap(draw, body, ImageFont.truetype(body_font_path, bs), avail_w)
+            if len(bl) <= body_max_lines:
+                return bl, bs
+        return bl, body_min_size
     def fit_block(ah: int):
         """주어진 높이에 제목(+본문 +CTA)을 맞춘다. 반환: 제목 크기, 제목 줄, 본문 줄, 본문 크기, 맞음, 본문 유지, 블록 높이"""
         sz = size0
@@ -583,8 +562,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             bl: list[str] = []
             bs = 0
             if body:
-                bs = max(body_min_size, round(sz * 0.55))
-                bl, _cut = body_fit(bs)
+                bl, bs = body_fit(max(body_min_size, round(sz * 0.55)))
                 bh += inner_gap + round(bs * 1.28) * len(bl)
             if cta and not strip:
                 bh += inner_gap + cta_h
@@ -623,9 +601,8 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     report["scrim"] = {"mode": tpl, "color": (scrim_hex or "#000000").upper(), "opacity": scrim_opacity,
                        **({"position": "위"} if top_zone else {})}
     draw = ImageDraw.Draw(canvas)
-    body_cut = bool(body) and body_fit(body_size)[1]
-    if body_cut:
-        report["warnings"].append(f"본문이 {body_max_lines}줄을 넘어 뒤를 줄였습니다 (편집에서 줄이거나 본문을 끄세요)")
+    if body and len(body_lines) > body_max_lines:
+        report["warnings"].append(f"본문이 {body_max_lines}줄을 넘습니다 (말줄임 없이 전부 표시). 편집에서 줄이거나 본문을 끄세요")
     text_h = round(size * 1.28) * len(lines)
     body_h = (round(body_size * 1.28) * len(body_lines)) if body else 0
     # 아래에서 위로: CTA(띠형 제외) → 본문 → 제목
@@ -674,7 +651,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         bf = ImageFont.truetype(body_font_path, body_size)
         canvas = draw_text_soft(canvas, [(tx0, body_box[1] + i * round(body_size * 1.28), ln) for i, ln in enumerate(body_lines)], bf, color)
         report["elements"].append({"type": "body", "role": "본문", "text": body, "lines": body_lines, "box": body_box,
-                                   "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": body_cut})
+                                   "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": False})
     draw = ImageDraw.Draw(canvas)
     if cta and cta_box:
         cta_bg, cta_fg = cta_colors(accent_hex, color)
@@ -691,9 +668,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     # 6) 로고 합성
     if logo is not None and logo_box:
         lg = logo.resize((logo_box[2] - logo_box[0], logo_box[3] - logo_box[1]), Image.LANCZOS)
-        if logo_plate:
-            canvas = _logo_plate(canvas, lg, logo_box)
-        canvas.paste(lg, (logo_box[0], logo_box[1]), lg)
+        canvas.paste(lg, (logo_box[0], logo_box[1]), lg)      # 원본 그대로(크기만 비율 유지로 맞춤). 판·테두리·색 변경 없음
         report["elements"].append({"type": "logo", "box": logo_box, "locked": True,
                                    "note": "원본 비율 유지"})
     report["elements"].append({"type": "text", "role": "제목", "text": headline, "lines": lines,

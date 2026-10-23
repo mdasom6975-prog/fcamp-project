@@ -198,17 +198,11 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
             draw = ImageDraw.Draw(canvas)
             font = ImageFont.truetype(font_path_of(p["font"]), int(p["font_size"]))
             lines = compose._wrap(draw, p["text"], font, int(p["w"]))
-            cut = len(lines) > int(p.get("max_lines", 2))
-            if cut:
-                lines = lines[:int(p.get("max_lines", 2))]
-                last = lines[-1]
-                while last and draw.textlength(last + "…", font=font) > int(p["w"]):
-                    last = last[:-1]
-                lines[-1] = last + "…"
+            over_lines = len(lines) > int(p.get("max_lines", 2))     # 말줄임 없이 모든 줄을 그리고, 상한 초과만 알린다
             lh = round(int(p["font_size"]) * LINE_H)
             color = compose._hex(p["color"])
             canvas = compose.draw_text_soft(canvas, _placed(draw, lines, font, p, lh), font, color)
-            measure["body"] = {"lines": lines, "cut": cut, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
+            measure["body"] = {"lines": lines, "cut": False, "over_lines": over_lines, "box": [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]),
                                                                   int(p["y"]) + lh * len(lines)]}
         elif e["type"] == "cta":
             box = [int(p["x"]), int(p["y"]), int(p["x"] + p["w"]), int(p["y"] + p["h"])]
@@ -239,8 +233,8 @@ def warnings_for(measure: dict, W: int, H: int, safe: dict | None, brand_hexes: 
         box_warn("로고", measure["logo"]["box"])
     if "body" in measure:
         box_warn("본문", measure["body"]["box"])
-        if measure["body"].get("cut"):
-            out.append("본문이 줄 수 상한을 넘어 뒤를 줄였습니다")
+        if measure["body"].get("over_lines"):
+            out.append("본문이 줄 수 상한을 넘었습니다 (말줄임 없이 모두 표시). 글자 크기를 줄이거나 줄 수 상한을 늘리세요")
     if "cta" in measure:
         box_warn("CTA 버튼", measure["cta"]["box"])
         if measure["cta"].get("overflow_width"):

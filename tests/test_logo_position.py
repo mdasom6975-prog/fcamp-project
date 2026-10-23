@@ -53,9 +53,21 @@ def test_same_corner_across_placements_when_fixed():
     assert corners == {"우상단"}
 
 
-def test_logo_plate_threshold_lowered():
+def test_logo_is_pasted_as_original_without_plate():
+    """복잡한 배경 위에서도 로고 뒤에 반투명 판을 깔지 않고, 로고 픽셀은 원본(크기만 조정) 그대로다."""
+    from PIL import Image
     from app import compose
-    assert compose.LOGO_PLATE_BUSYNESS <= 0.5
+    assert not hasattr(compose, "LOGO_PLATE_BUSYNESS") and not hasattr(compose, "_logo_plate")
+    logo = _logo()
+    img, rep = compose.compose(_busy_bright(), 1440, 1800, "제목", FONT, logo, None, 10, "#000000", "#FFFFFF",
+                               logo_position="좌상단")
+    assert not any("판" in w for w in rep["warnings"])
+    x0, y0, x1, y1 = next(e for e in rep["elements"] if e["type"] == "logo")["box"]
+    lg = logo.resize((x1 - x0, y1 - y0), Image.LANCZOS)
+    region = img.crop((x0, y0, x1, y1)).convert("RGB")
+    solid = [(region.getpixel((x, y)), lg.getpixel((x, y))[:3]) for y in range(0, y1 - y0, 3) for x in range(0, x1 - x0, 3)
+             if lg.getpixel((x, y))[3] == 255]
+    assert solid and all(a == b for a, b in solid)
 
 
 def test_text_backing_added_on_bright_busy_background():
@@ -134,3 +146,18 @@ def test_legacy_cta_corner_with_logo_position_is_normalized():
              "text_color": "#000000", "font": {"source": "provided", "name": "Pretendard-Bold"}, "corner": "좌상단"}
     assert editing.validate_props("cta", props, (1440, 1800))["corner"] == "둥근"
     assert editing.cta_corner("각진") == "각진" and editing.cta_corner(None) == "둥근"
+
+
+def test_long_body_is_never_ellipsized():
+    """본문이 길어도 말줄임표로 줄이지 않는다: 글자 크기를 줄여 상한 안에 넣고, 그래도 넘치면 모든 줄을 그대로 둔다."""
+    from app import compose
+    body = "출퇴근길 15분 강의로 30일 동안 영어 회화 감각을 차근차근 익히고 실전 표현까지 자연스럽게 말해 보세요. " * 3
+    for w, h in ((1440, 1800), (1200, 1200), (1200, 600), (1440, 2560)):
+        _, rep = compose.compose(_scene(), w, h, "출퇴근길 영어 루틴", FONT, None, None, None, "#FFFFFF", "#000000",
+                                 body=body, cta="지금 시작하기", body_font_path=FONT)
+        el = next((e for e in rep["elements"] if e["type"] == "body"), None)
+        if el is None:                       # 자리가 정말 없으면 본문을 통째로 뺀다(잘라서 넣지 않음)
+            assert any("본문을 이미지에서 뺐습니다" in x for x in rep["warnings"]), rep["warnings"]
+            continue
+        assert not any("…" in ln for ln in el["lines"]) and el["cut"] is False
+        assert "".join(el["lines"]).replace(" ", "") == body.replace(" ", "").strip(), "본문 글자가 하나도 빠지지 않는다"
