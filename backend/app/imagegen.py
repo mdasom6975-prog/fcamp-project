@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import httpx
 from PIL import Image
 
-from . import calllog, prompts, state
+from . import calllog, compose, prompts, state
 from .copywriter import client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
 PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare
@@ -167,13 +167,24 @@ def pick_style(tone: dict, brief: dict) -> tuple[str, str]:
     return DEFAULT_STYLE, "자동: 기본값(사람 없는 제품·공간)"
 
 
+# 제품 처리 방식: composite = 제품 없는 배경을 만들고 원본 누끼를 코드로 붙임(투명 누끼일 때만, 변형 없음·저렴) / reference = 누끼를 참조 이미지로 첨부해 AI 가 그리게 함
+PRODUCT_MODE = os.getenv("IMAGE_PRODUCT_MODE", "composite").strip().lower()
+
+
+def product_mode(product: Image.Image | None) -> str | None:
+    """이 제품 이미지를 어떻게 다룰지: None(제품 없음) / 'composite' / 'reference'. 불투명 사진은 오려 붙일 수 없어 reference."""
+    if product is None:
+        return None
+    return "composite" if PRODUCT_MODE == "composite" and compose.has_cutout(product) else "reference"
+
+
 PRODUCT_ATTACH = "첨부한 이미지는 제품 원본 사진 한 장이다."
 PRODUCT_ATTACH_VARIANT = ("첨부한 이미지는 두 장이다. 1번은 장면 참조, 2번은 제품 원본이다. 1번에 그려진 상품은 이전에 다시 그린 것이라 "
                           "모양이 부정확하므로 따라 그리지 말고, 1번에서는 장면·소품·조명·색만 참조한다. 상품은 반드시 2번 제품 원본을 따른다.")
 
 
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
-                 single: bool = False, product: bool = False, variant: bool = False) -> str:
+                 single: bool = False, product: bool = False, variant: bool = False, composite: bool = False) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
@@ -181,6 +192,8 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     product=True 면 제품 누끼 이미지를 참조 이미지로 함께 보내므로 prompts/image/product_ref.md 문장을 덧붙인다.
     variant=True 면 다른 비율군 배경(1번)이 제품 원본(2번) 앞에 함께 첨부되므로, 1번 속 상품은 이전에 그려진 것이라
     무시하고 제품 원본만 따르게 첨부 이미지의 역할을 적는다 (generate_variant 의 첨부 순서와 맞춘다).
+    composite=True 면 제품을 이미지에 그리지 않고 제품 구역(compose.PRODUCT_SLOT)을 비워 두게 한다(product_slot.md). 제품 누끼는 생성 뒤 코드가
+    그 자리에 그대로 붙이므로 참조 이미지로 첨부하지 않는다(product 는 무시).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
     """
     style = style or pick_style(tone, brief)[0]
@@ -190,11 +203,16 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     # single: 한 장을 모든 지면이 잘라 쓰므로 비율군 구도 대신 '어느 방향으로 잘려도 되는' 공용 구도를 쓴다
     composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}")
     style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
-    text = prompts.render("image/background", product_name=brief.get("product_name"),
-                          description=brief.get("description") or "",
+    # composite: 상품명·설명이 장면에 들어가면 모델이 비워 둔 구역에 같은 종류의 물건을 그린다 → 중립어로 바꾸고 설명은 뺀다
+    text = prompts.render("image/background", product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
+                          description="" if composite else brief.get("description") or "",
                           key_message=brief.get("key_message") or "지정 없음", target=target,
                           tone=tone.get("description") or "지정 없음", composition=composition, style=style_text)
-    if product:
+    if composite:
+        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
+        text = prompts.render("image/product_slot",
+                              slot=f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", base=text)
+    elif product:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
     return text
@@ -206,11 +224,13 @@ def build_variant_prompt(base_prompt: str) -> str:
 
 
 def prompt_refs(template: str, style: str, variant: bool = False, single: bool = False,
-                product: bool = False) -> list[str]:
+                product: bool = False, composite: bool = False) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
             prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common")]
     refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs
+    if composite:
+        return [prompts.ref("image/product_slot")] + refs
     return ([prompts.ref("image/product_ref")] + refs) if product else refs
 
 

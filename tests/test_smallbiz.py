@@ -99,6 +99,58 @@ def _png(size, color):
     return buf.getvalue()
 
 
+from app import cutout as _cutout_mod
+_REAL_CUT = _cutout_mod.cut        # autouse 가짜로 바뀌기 전의 실제 함수
+
+
+@pytest.fixture(autouse=True)
+def _no_real_cutout(monkeypatch):
+    """업로드 테스트가 실제 rembg 모델을 돌리지 않게 한다(누끼 처리는 아래 전용 테스트에서 가짜로 확인)."""
+    from app import cutout
+    monkeypatch.setattr(cutout, "cut", lambda im: None)
+
+
+def test_photo_upload_saves_cutout_png_when_background_removed(env, monkeypatch):
+    from app import cutout, storage
+    client, _ = env
+    def fake_cut(im):
+        out = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        out.paste((200, 30, 30, 255), (im.width // 4, im.height // 4, im.width * 3 // 4, im.height * 3 // 4))
+        return out
+    monkeypatch.setattr(cutout, "cut", fake_cut)
+    r = client.post("/api/smallbiz/photo", files={"file": ("a.jpg", _png((400, 300), (120, 120, 120)), "image/png")})
+    assert r.status_code == 200 and r.json()["cutout"] is True
+    assert client.get(f"/api/assets/{r.json()['id']}/file").headers["content-type"] == "image/png"
+
+
+def test_photo_upload_keeps_original_when_cutout_unavailable(env):
+    client, _ = env
+    r = client.post("/api/smallbiz/photo", files={"file": ("a.png", _png((400, 300), (120, 120, 120)), "image/png")})
+    assert r.json()["cutout"] is False
+    assert client.get(f"/api/assets/{r.json()['id']}/file").headers["content-type"] == "image/jpeg"
+
+
+def test_cutout_rejects_implausible_masks(monkeypatch):
+    import sys, types
+    from app import cutout
+    masks = {}
+    fake = types.ModuleType("rembg")
+    fake.new_session = lambda name: object()
+    fake.remove = lambda im, session=None: masks["m"]
+    monkeypatch.setitem(sys.modules, "rembg", fake)
+    monkeypatch.setattr(cutout, "_session", None)
+    src = Image.new("RGB", (200, 200), "white")
+    masks["m"] = Image.new("RGBA", (200, 200), (1, 2, 3, 0))                         # 아무것도 못 찾음
+    assert _REAL_CUT(src) is None
+    masks["m"] = Image.new("RGBA", (200, 200), (1, 2, 3, 255))                       # 전부 제품(배경을 못 지움)
+    assert _REAL_CUT(src) is None
+    m = Image.new("RGBA", (200, 200), (1, 2, 3, 0)); m.paste((9, 9, 9, 255), (50, 50, 150, 150))
+    masks["m"] = m
+    assert _REAL_CUT(src) is not None
+    monkeypatch.setattr(cutout, "available", lambda: False)
+    assert _REAL_CUT(src) is None
+
+
 def test_photo_upload_resizes_and_warns(env):
     client, _ = env
     r = client.post("/api/smallbiz/photo", files={"file": ("a.png", _png((200, 200), (10, 10, 10)), "image/png")})

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import calllog, imagegen, llm, pricing, smallbiz, storage
+from . import calllog, cutout, imagegen, llm, pricing, smallbiz, storage
 from .models import Asset, Brand, BrandVersion, CopyVariant, Design, Placement, PresetVersion
 from .routers_assets import get_db
 from .routers_brands import _version_from
@@ -45,7 +45,7 @@ def _image_price(model: str, size: str) -> float | None:
 def pricing_info(db: Session = Depends(get_db)):
     """화면에 보여 줄 호출 계획과 가격표. 지면 규격에서 배경 호출 수를 계산하고, 단가는 pricing.py(추정치) 기준이다.
     이미지 단가는 토큰 과금이라 실제 값은 호출 기록(/designs/{id}/api-calls)이 정확하고, 여기 값은 장당 표 기준 추정이다."""
-    model, chat_model = imagegen.OPENAI_MODEL, llm.chat_model()
+    model, chat_model = imagegen.OPENAI_MODEL, llm.chat_model("copy")
     sizes = {}
     for pid in _placement_ids(db, smallbiz.DEFAULT_PLACEMENTS):
         pv = db.get(PresetVersion, pid)
@@ -147,8 +147,9 @@ async def upload_photo(file: UploadFile = File(...), db: Session = Depends(get_d
     warns = _check_photo(im)
     alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
     buf = io.BytesIO()
-    if alpha:
-        im.convert("RGBA").save(buf, format="PNG", optimize=True)
+    cut = None if alpha else cutout.cut(im)        # 배경을 지워 누끼로 저장하면 제품을 AI 가 다시 그리지 않고 원본 그대로 합성한다
+    if alpha or cut is not None:
+        (im.convert("RGBA") if alpha else cut).save(buf, format="PNG", optimize=True)
         ext, mime = "png", "image/png"
     else:
         im.convert("RGB").save(buf, format="JPEG", quality=88, optimize=True)
@@ -157,7 +158,7 @@ async def upload_photo(file: UploadFile = File(...), db: Session = Depends(get_d
     a = Asset(kind="product", file_path=key, mime=mime, bytes=buf.tell(), width=im.width, height=im.height)
     db.add(a)
     db.commit()
-    return {"id": a.id, "width": a.width, "height": a.height, "warnings": warns}
+    return {"id": a.id, "width": a.width, "height": a.height, "warnings": warns, "cutout": cut is not None}
 
 
 def _suggest_message(what: str) -> str:

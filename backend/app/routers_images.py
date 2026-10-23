@@ -265,14 +265,21 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 1장 방식의 보완 변형(force_ratio)은 can_edit
     if reference is not None and storage.exists(reference.file_path) and provider == "openai" \
             and ((imagegen.VARIANT and imagegen.can_edit()) if force_ratio else imagegen.can_vary(st["bg_mode"])):
-        ref_img = Image.open(storage.local(reference.file_path))
+        # 제품을 합성한 배경이면 제품이 없는 원본(clean_file)을 참조한다(제품을 다시 그리지 않고 장면만 이어받는다)
+        clean = (reference.layout or {}).get("clean_file")
+        ref_img = Image.open(storage.local(clean if clean and storage.exists(clean) else reference.file_path))
     product_img, product_id = _product_image(db, d)
+    pmode = imagegen.product_mode(product_img) if provider == "openai" else None
+    composite = pmode == "composite"
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
-                                       product=product_img is not None, variant=ref_img is not None)
+                                       product=product_img is not None, variant=ref_img is not None, composite=composite)
         if ref_img is not None:
             prompt = imagegen.build_variant_prompt(prompt)
-        if ref_img is not None or product_img is not None:
+        if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
+            bg = (imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"]) if ref_img is not None
+                  else imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider))
+        elif ref_img is not None or product_img is not None:
             bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"], product=product_img)
         else:
             bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider)
@@ -280,16 +287,21 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         raise HTTPException(429, str(e))
     except Exception as e:
         raise HTTPException(502, _gen_error(e))
+    extra: dict = {}
+    if composite:
+        clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
+        bg, placed = compose.paste_product(bg, product_img, template)
+        extra = {"clean_file": clean_key, "product_placed": placed}
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "mode": st["bg_mode"], "provider": provider,
               **({"single_extra": True} if force_ratio else {}),
-              **({"product_asset_id": product_id} if product_img is not None else {}),
+              **({"product_asset_id": product_id, "product_mode": pmode} if product_img is not None else {}), **extra,
               "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or Path(path).stem) if ref_img is not None else Path(path).stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, single=single,
-                                              product=product_img is not None)}
+                                              product=product_img is not None, composite=composite)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
                                "template": (reference.layout or {}).get("template")}

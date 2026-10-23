@@ -96,7 +96,7 @@ const store = {
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* 저장 실패는 무시 */ } },
   del(k: string) { try { localStorage.removeItem(k) } catch { /* 무시 */ } },
 }
-type Draft = { what: string; message: string; shop: string; presetId: string | null; photo: { id: number; warnings: string[] } | null }
+type Draft = { what: string; message: string; shop: string; presetId: string | null; photo: { id: number; warnings: string[]; cutout?: boolean } | null }
 
 // 이미지 크게 보기: 배경을 누르면 닫히고, ←/→ 로 다른 규격, Esc 로 닫는다.
 function Lightbox({ items, index, onIndex, onClose }: { items: Item[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
@@ -133,7 +133,7 @@ export default function SmallBizPage() {
   const [message, setMessage] = useState(draft?.message ?? '')
   const [shop, setShop] = useState(draft?.shop ?? '')
   const [presetId, setPresetId] = useState<string | null>(draft?.presetId ?? null)
-  const [photo, setPhoto] = useState<{ id: number; warnings: string[]; url: string } | null>(
+  const [photo, setPhoto] = useState<{ id: number; warnings: string[]; cutout?: boolean; url: string } | null>(
     draft?.photo ? { ...draft.photo, url: `/api/assets/${draft.photo.id}/file` } : null)
   const [camp, setCamp] = useState<Campaign | null>(null)
   const [zoom, setZoom] = useState<number | null>(null)
@@ -151,7 +151,7 @@ export default function SmallBizPage() {
   // 입력이 바뀌면 자동 임시저장(비어 있으면 지움)
   useEffect(() => {
     if (!what && !message && !shop && !photo && !presetId) { store.del(DRAFT_KEY); setSaved(false); return }
-    store.set(DRAFT_KEY, { what, message, shop, presetId, photo: photo ? { id: photo.id, warnings: photo.warnings } : null } satisfies Draft)
+    store.set(DRAFT_KEY, { what, message, shop, presetId, photo: photo ? { id: photo.id, warnings: photo.warnings, cutout: photo.cutout } : null } satisfies Draft)
     setSaved(true)
   }, [what, message, shop, presetId, photo])
   // 마지막 캠페인이 있으면 새로고침 뒤에도 결과 화면을 연다
@@ -172,8 +172,8 @@ export default function SmallBizPage() {
     if (!f) return
     await run('사진을 올리는 중…', async () => {
       const form = new FormData(); form.append('file', f)
-      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<{ id: number; warnings: string[] }>(r))
-      setPhoto({ id: d.id, warnings: d.warnings, url: URL.createObjectURL(f) })
+      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<{ id: number; warnings: string[]; cutout: boolean }>(r))
+      setPhoto({ id: d.id, warnings: d.warnings, cutout: d.cutout, url: URL.createObjectURL(f) })
     })
   }
 
@@ -251,6 +251,7 @@ export default function SmallBizPage() {
       {photo && (
         <div className="sb-photo">
           <img src={photo.url} alt="올린 사진" />
+          {photo.cutout && <p className="sb-ok">사진 속 배경을 지웠어요. 상품 모양은 그대로 광고에 넣어요</p>}
           {photo.warnings.map((w) => <p key={w} className="sb-warn">{w}</p>)}
         </div>
       )}

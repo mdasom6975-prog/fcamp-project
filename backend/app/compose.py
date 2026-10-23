@@ -151,6 +151,50 @@ def fit_blur(img: Image.Image, w: int, h: int) -> Image.Image:
     return back
 
 
+# 제품 누끼를 붙일 구역 (x0, y0, x1, y1) — 캔버스 대비 비율. 세로형·정사각은 위쪽 구역에 놓인 모양(아래는 문구 자리),
+# 가로형은 오른쪽 구역. 배경 프롬프트(image/product_slot.md)가 같은 숫자로 그 구역을 비워 두게 한다.
+PRODUCT_SLOT = {VERTICAL: (0.14, 0.06, 0.86, 0.66), SQUARE: (0.16, 0.05, 0.84, 0.70), HORIZONTAL: (0.40, 0.08, 0.94, 0.88)}
+PRODUCT_MAX_UPSCALE = 1.5    # 누끼가 구역보다 작을 때 늘리는 상한(그 이상은 흐려지므로 구역 안에서 작게 둔다)
+
+
+def has_cutout(im: Image.Image) -> bool:
+    """투명 배경이 실제로 있는 이미지인가(알파 채널이 있고 3% 이상이 투명). 불투명 사진은 오려 붙일 수 없다."""
+    if im.mode not in ("RGBA", "LA") and "transparency" not in im.info:
+        return False
+    a = im.convert("RGBA").getchannel("A")
+    hist = a.histogram()
+    return sum(hist[:250]) / max(1, a.width * a.height) >= 0.03
+
+
+def paste_product(bg: Image.Image, product: Image.Image, template: str) -> tuple[Image.Image, dict]:
+    """생성된 빈 배경 위에 제품 누끼 원본을 그대로(AI 재생성 없이) 붙인다. 제품 구역(PRODUCT_SLOT)에 비율을 지켜 맞추고,
+    세로형·정사각은 구역 아랫변에 발을 붙여 서 있게, 가로형은 구역 가운데에 둔다. 발밑에 접지 그림자를 깐다.
+    반환: (합성 이미지 RGB, 기록용 {slot, box, scale})."""
+    bg = bg.convert("RGB")
+    W, H = bg.size
+    prod = product.convert("RGBA")
+    bbox = prod.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    if bbox:
+        prod = prod.crop(bbox)
+    sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(PRODUCT_SLOT[template], (W, H, W, H)))
+    s = min((sx1 - sx0) / prod.width, (sy1 - sy0) / prod.height, PRODUCT_MAX_UPSCALE)
+    pw, ph = max(1, round(prod.width * s)), max(1, round(prod.height * s))
+    prod = prod.resize((pw, ph), Image.LANCZOS)
+    x = sx0 + (sx1 - sx0 - pw) // 2
+    y = sy1 - ph if template != HORIZONTAL else sy0 + (sy1 - sy0 - ph) // 2
+    canvas = bg.convert("RGBA")
+    # 접지 그림자: 발밑의 납작한 타원을 흐려 깐다(제품이 허공에 뜨지 않게)
+    sh_w, sh_h = round(pw * 0.78), max(6, round(ph * 0.05))
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    cx, base = x + pw // 2, y + ph - round(sh_h * 0.35)
+    ImageDraw.Draw(shadow).ellipse([cx - sh_w // 2, base - sh_h // 2, cx + sh_w // 2, base + sh_h // 2], fill=(0, 0, 0, 140))
+    canvas = Image.alpha_composite(canvas, shadow.filter(ImageFilter.GaussianBlur(max(3, sh_h * 0.45))))
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    layer.paste(prod, (x, y))
+    canvas = Image.alpha_composite(canvas, layer)
+    return canvas.convert("RGB"), {"slot": [sx0, sy0, sx1, sy1], "box": [x, y, x + pw, y + ph], "scale": round(s, 3)}
+
+
 def load_logo(path: str, mime: str) -> Image.Image:
     if mime == "image/svg+xml":
         import resvg_py

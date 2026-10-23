@@ -924,9 +924,11 @@ def _upload_product(env):
     return aid
 
 
-def test_product_image_is_attached_to_every_background_call(env):
-    """제품 누끼가 있으면 첫 비율군도 images.edit(제품만 첨부), 나머지 비율군은 [배경, 제품]을 함께 첨부하고
+def test_product_image_is_attached_to_every_background_call(env, monkeypatch):
+    """(reference 방식: IMAGE_PRODUCT_MODE=reference) 제품 누끼가 있으면 첫 비율군도 images.edit(제품만 첨부), 나머지 비율군은 [배경, 제품]을 함께 첨부하고
     프롬프트에 제품 참조 문장이 들어간다. layout 에 제품 자산 id 와 프롬프트 기록이 남는다."""
+    from app import imagegen
+    monkeypatch.setattr(imagegen, "PRODUCT_MODE", "reference")
     c, ids, variants = env["client"], env["ids"], env["variants"]
     aid = _upload_product(env)
     out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
@@ -941,6 +943,60 @@ def test_product_image_is_attached_to_every_background_call(env):
     rows = c.get(f"/api/designs/{ids['design']}/images").json()
     lay = rows[0]["background"]["layout"]
     assert lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_ref@")
+
+
+def test_composite_mode_generates_clean_background_and_pastes_original_cutout(env):
+    """기본(composite): 제품은 AI 에 보내지 않는다. 첫 비율군은 일반 생성(제품 자리 비움 프롬프트), 나머지는 제품 없는 원본을
+    참조한 변형(제품 첨부 없음). 저장되는 배경에는 원본 누끼가 붙어 있고, 제품 없는 원본 파일이 layout 에 남는다."""
+    from app import storage
+    c, ids, variants, prompts = env["client"], env["ids"], env["variants"], env["prompts"]
+    aid = _upload_product(env)
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
+    assert out["generated"] == 3
+    assert len(variants) == 2 and all(v["product_size"] is None and v["ref_size"] is not None for v in variants)
+    assert all("[제품 자리" in p and "[제품 이미지" not in p for p in prompts)
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    lay = rows[0]["background"]["layout"]
+    assert lay["product_mode"] == "composite" and lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_slot@")
+    assert lay["clean_file"] and lay["product_placed"]["box"][3] <= lay["product_placed"]["slot"][3]
+    with env["Local"]() as db:
+        comp_path = db.get(env["models"].GeneratedImage, rows[0]["background"]["id"]).file_path
+    comp = Image.open(storage.local(comp_path)).convert("RGB")
+    clean = Image.open(storage.local(lay["clean_file"])).convert("RGB")
+    x0, y0, x1, y1 = lay["product_placed"]["box"]
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    assert comp.getpixel((cx, cy)) != clean.getpixel((cx, cy)), "제품 자리에 누끼가 붙었다"
+    assert comp.getpixel((3, 3)) == clean.getpixel((3, 3)), "제품 밖은 생성 배경 그대로"
+
+
+def test_opaque_product_photo_falls_back_to_reference_mode(env):
+    """투명 배경이 없는 사진(소상공인 업로드)은 오려 붙일 수 없어 기존 참조 방식으로 만든다."""
+    import io
+    c, ids, variants = env["client"], env["ids"], env["variants"]
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 600), (200, 60, 60)).save(buf, format="JPEG")
+    r = c.post("/api/assets", data={"kind": "product", "brand_id": str(ids["brand"])}, files={"file": ("p.jpg", buf.getvalue(), "image/jpeg")})
+    assert r.status_code < 400, r.text
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_image_asset_id": r.json()["id"]}})
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert len(variants) == 3 and variants[0]["product_size"] is not None
+    assert c.get(f"/api/designs/{ids['design']}/images").json()[0]["background"]["layout"]["product_mode"] == "reference"
+
+
+def test_paste_product_keeps_cutout_pixels_and_rests_on_slot_bottom():
+    from app import compose
+    bg = Image.new("RGB", (1024, 1536), (240, 240, 240))
+    prod = Image.new("RGBA", (300, 500), (0, 0, 0, 0))
+    ImageDraw.Draw(prod).rectangle((50, 20, 250, 480), fill=(10, 120, 200, 255))
+    out, info = compose.paste_product(bg, prod, "세로형")
+    x0, y0, x1, y1 = info["box"]
+    assert y1 == info["slot"][3] and info["slot"][0] <= x0 and x1 <= info["slot"][2]
+    assert out.getpixel(((x0 + x1) // 2, (y0 + y1) // 2)) == (10, 120, 200), "누끼 색을 바꾸지 않는다"
+    assert out.getpixel((5, 5)) == (240, 240, 240)
+    assert out.getpixel(((x0 + x1) // 2, y1 + 2)) != (240, 240, 240), "발밑에 접지 그림자"
+    assert abs((x1 - x0) / (y1 - y0) - 200 / 460) < 0.01, "비율 유지"
+    assert compose.has_cutout(prod) and not compose.has_cutout(Image.new("RGB", (10, 10))) and not compose.has_cutout(Image.new("RGBA", (10, 10), (1, 2, 3, 255)))
 
 
 def test_without_product_image_uses_plain_generation(env):

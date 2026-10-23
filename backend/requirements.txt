@@ -1,2 +1,5 @@
 -r ../requirements.txt
 uvicorn[standard]
+# 선택: 불투명 제품 사진의 배경 제거(app/cutout.py). 없으면 기존 참조 방식으로 처리한다. Vercel 용 requirements.txt 에는 넣지 않는다(용량)
+rembg
+onnxruntime

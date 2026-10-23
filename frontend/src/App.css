@@ -723,7 +723,7 @@ mark.var { background: #fef08a; color: inherit; border-radius: 2px; padding: 0 1
 .sb-wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
 .sb-wrap label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .sb-wrap textarea, .sb-wrap input:not([type=file]) { font: inherit; padding: 8px 10px; }
-.sb-err { color: #b3261e; } .sb-warn { color: #b26a00; margin: 4px 0; }
+.sb-err { color: #b3261e; } .sb-warn { color: #b26a00; margin: 4px 0; } .sb-ok { color: #1b7a43; margin: 4px 0; }
 .sb-photo img { max-width: 160px; border-radius: 8px; }
 .sb-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }      /* 스타일 6개를 3×2 로 */
 @media (max-width: 520px) { .sb-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
