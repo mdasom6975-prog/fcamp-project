@@ -27,6 +27,7 @@ from .routers_designs import router as designs_router
 from .routers_presets import router as presets_router
 from .routers_spec_update import router as spec_update_router
 from .routers_review import router as review_router
+from .routers_smallbiz import router as smallbiz_router
 from .seed import deactivate_excluded, seed, sync_conditions
 
 
@@ -202,6 +203,7 @@ app.include_router(designs_router)
 app.include_router(analysis_router)
 app.include_router(spec_update_router)  # /presets/{id} 보다 먼저 등록해야 update-status 가 가려지지 않는다
 app.include_router(presets_router)
+app.include_router(smallbiz_router)
 
 
 @app.get("/api/health")

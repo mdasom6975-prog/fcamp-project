@@ -1,12 +1,23 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import BrandPage from './BrandPage'
 import PresetLibrary from './PresetLibrary'
 import DesignPage from './DesignPage'
 import AnalysisPage from './AnalysisPage'
+import SmallBizPage from './SmallBizPage'
+import Landing from './Landing'
 import BusyOverlay from './Busy'
 import './App.css'
 
 export default function App() {
+  // 주소 해시로 화면을 나눈다: 없음·#/ = 메인(선택), #/studio = 기존 앱, #/smallbiz = 소상공인
+  const [hash, setHash] = useState(window.location.hash)
+  useEffect(() => {
+    const on = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', on)
+    return () => window.removeEventListener('hashchange', on)
+  }, [])
+  const smallBiz = hash === '#/smallbiz'
+  const studio = hash === '#/studio'
   const [tab, setTab] = useState<'brand' | 'preset' | 'design' | 'analysis'>('brand')
   // 시안 작업 브랜드 (새로고침해도 유지)
   const [workBrandId, setWorkBrandIdState] = useState<number | null>(() => {
@@ -16,11 +27,13 @@ export default function App() {
     setWorkBrandIdState(id)
     try { id === null ? localStorage.removeItem('workBrandId') : localStorage.setItem('workBrandId', String(id)) } catch { /* 저장 실패는 무시 */ }
   }, [])
+  if (!smallBiz && !studio) return <Landing />
+  if (smallBiz) return <><BusyOverlay /><header className="topbar"><a className="brandmark" href="#/"><span className="logo-mark">B</span>소상공인 광고 이미지</a></header><SmallBizPage /></>
   return (
     <>
       <BusyOverlay />
       <header className="topbar">
-        <div className="brandmark"><span className="logo-mark">B</span>브랜드 스튜디오</div>
+        <a className="brandmark" href="#/"><span className="logo-mark">B</span>브랜드 스튜디오</a>
         <nav className="tabs">
           <button className={tab === 'brand' ? 'on' : ''} onClick={() => setTab('brand')}>브랜드</button>
           <button className={tab === 'design' ? 'on' : ''} onClick={() => setTab('design')}>규격·메시지·시안</button>

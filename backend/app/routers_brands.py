@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import smallbiz
 from .models import Asset, Brand, BrandVersion
 from .routers_assets import PROVIDED_FONTS, get_db
 from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandIn
@@ -93,7 +94,8 @@ def brand_defaults():
 
 @router.get("/brands")
 def list_brands(db: Session = Depends(get_db)):
-    brands = db.scalars(select(Brand).order_by(Brand.id)).all()
+    brands = [b for b in db.scalars(select(Brand).order_by(Brand.id)).all()
+              if not b.name.startswith(smallbiz.BRAND_PREFIX)]     # 소상공인 스타일 프리셋의 숨은 브랜드는 목록에서 뺀다
     out = []
     for b in brands:
         v = db.get(BrandVersion, b.current_version_id) if b.current_version_id else None
