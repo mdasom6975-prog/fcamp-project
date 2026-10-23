@@ -9,6 +9,7 @@
     backend/.venv/bin/python eval/run_eval.py --brand 쿠챠          # 브랜드 이름으로 고르기
     backend/.venv/bin/python eval/run_eval.py --rerun              # 시안마다 검수를 다시 실행 (사람 '확인함' 표시는 초기화됨)
     backend/.venv/bin/python eval/run_eval.py --db backend/data/app.db --out eval/reports/직접지정
+    backend/.venv/bin/python eval/run_eval.py --as-brand brands/kucha/brand.json   # 같은 시안을 쿠챠 규칙으로 교차 검수해 비교표 추가
 
 출력: eval/reports/<YYYYMMDD_HHMM>/report.html · results.json · summary.csv
 외부 API 는 호출하지 않는다 (채점은 저장된 것만 싣는다).
@@ -103,6 +104,115 @@ def _models_used(calls: list[dict]) -> dict:
     return {k: sorted(v) for k, v in out.items()}
 
 
+# ---------------------------------------------------------------- 교차 검수 (--as-brand)
+def load_brand_rules(path: Path) -> dict:
+    """brands/<id>/brand.json 을 검수용 브랜드 규칙 dict(routers_review._brand_dict 와 같은 모양)로 읽는다.
+    로고는 DB 자산이 아니므로 meta.logo 의 비율만 쓴다(logo_asset_id 는 '있음' 표시용 -1)."""
+    from app.schemas import DEFAULT_LEVELS
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    b = doc["brand"]
+    rules = {"name": b["name"], "levels": {**DEFAULT_LEVELS, **(b.get("levels") or {})},
+             "forbidden_phrases": [p for p in b.get("forbidden_phrases", []) if p],
+             "required_phrases": [p for p in b.get("required_phrases", []) if p],
+             "colors": [{"role": c.get("role"), "hex": c["hex"]} for c in b.get("colors", [])],
+             "fonts": b.get("fonts", []), "icon_style": b.get("icon_style") or {},
+             "logo_asset_id": None, "logo_aspect": None, "source": str(path)}
+    logo = (doc.get("meta") or {}).get("logo") or {}
+    if logo.get("aspect"):
+        rules["logo_asset_id"] = -1
+        rules["logo_aspect"] = float(logo["aspect"])
+        if not str(logo.get("file", "")).lower().endswith(".svg") and logo.get("width") and logo.get("height"):
+            rules["logo_dims"] = (int(logo["width"]), int(logo["height"]))      # SVG 의 크기는 픽셀이 아니라 넣지 않는다
+    return rules
+
+
+def _plain(it: dict) -> dict:
+    return {"category": it["category"], "item": it["item"], "status": it["status"], "message": it.get("message", ""),
+            "level": it.get("level"), "blocking": bool(it.get("blocking")), "needs_human": bool(it.get("needs_human")),
+            "confirmed": False}
+
+
+def cross_review(s, d: Design, rules: dict) -> dict:
+    """시안의 합성본·카피·아이콘을 다른 브랜드 규칙으로 검수한다. DB 에 쓰지 않고 결과만 돌려준다 (routers_review.run_review 와 같은 순서)."""
+    from app import review
+    from app.routers_review import _summary, gather, version_icon_set
+    brand = dict(rules)
+    text_assets = (d.brief or {}).get("text_assets") or None
+    results: list[tuple[int | None, list[dict]]] = []
+    for pid in d.preset_version_ids:
+        pv = s.get(PresetVersion, pid)
+        items: list[dict] = []
+        if pv is None:
+            continue
+        if pv.status == "확인 필요":
+            items.append(review.item("규격", "규격 출처", "확인 필요", "공식 규격이 확인되지 않아 검수할 수 없습니다", "강제", True))
+        else:
+            g = gather(s, d, pv, brand)
+            if g["sel"] is None:
+                items.append(review.item("문구", "사용할 카피", "수정 필요", "내보낼 카피가 선택되지 않았습니다", "강제", True))
+            items += review.review_preset(pv, g["comp"], g["texts"], g["text_el"], g["logo_el"]["box"] if g["logo_el"] else None,
+                                          g["scrim"], g["font_ref"], brand, rules.get("logo_aspect"), g["sep"], assets=text_assets)
+        results.append((pid, items))
+    icons = version_icon_set(s, d.brand_version_id)
+    if icons:
+        results.append((None, review.review_icons(icons, brand)))
+    groups = []
+    for pid, items in results:
+        pv = s.get(PresetVersion, pid) if pid is not None else None
+        name = f"{pv.placement.platform.name} · {pv.placement.name}" if pv else "아이콘 세트"
+        plain = [_plain(i) for i in items]
+        groups.append({"preset_id": pid, "name": name, "items": plain, "summary": _summary(plain),
+                       "export_ready": bool(plain) and not any(i["blocking"] for i in plain)})
+    return {"groups": groups, "export_ready": bool(groups) and all(g["export_ready"] for g in groups)}
+
+
+def compare_reviews(orig_groups: list[dict], cross_groups: list[dict]) -> list[dict]:
+    """같은 지면끼리 항목 상태를 대조한다. '시안' 분류(브랜드 버전 안내)는 규칙과 무관하므로 뺀다."""
+    out = []
+    cross_by = {g["preset_id"]: g for g in cross_groups}
+    for og in orig_groups:
+        cg = cross_by.get(og["preset_id"])
+        if cg is None:
+            continue
+        o_items = {(i["category"], i["item"]): i for i in og.get("items_full", []) if i["category"] != "시안"}
+        c_items = {(i["category"], i["item"]): i for i in cg["items"] if i["category"] != "시안"}
+        changed = []
+        for key in sorted(set(o_items) | set(c_items), key=lambda k: (k[0], k[1])):
+            o, c = o_items.get(key), c_items.get(key)
+            if o and c and o["status"] == c["status"] and o["blocking"] == c["blocking"]:
+                continue
+            changed.append({"category": key[0], "item": key[1],
+                            "from": o["status"] if o else None, "to": c["status"] if c else None,
+                            "from_blocking": bool(o and o["blocking"]), "to_blocking": bool(c and c["blocking"]),
+                            "message": (c or o)["message"]})
+        out.append({"preset_id": og["preset_id"], "name": og["name"], "orig_reviewed": og["reviewed"],
+                    "orig_ready": og["export_ready"], "cross_ready": cg["export_ready"],
+                    "orig_summary": og["summary"], "cross_summary": cg["summary"], "changed": changed})
+    return out
+
+
+def aggregate_cross(designs: list[dict]) -> dict:
+    groups = [g for d in designs for g in (d.get("cross") or {}).get("compare", [])]
+    reviewed = [g for g in groups if g["orig_reviewed"]]
+    changes = Counter()
+    for g in groups:
+        for c in g["changed"]:
+            changes[(c["category"], c["item"], c["from"] or "(없음)", c["to"] or "(없음)")] += 1
+    status_orig, status_cross = Counter(), Counter()
+    for g in reviewed:
+        for k, v in g["orig_summary"].items():
+            status_orig[k] += v
+        for k, v in g["cross_summary"].items():
+            status_cross[k] += v
+    return {"groups": len(groups), "reviewed": len(reviewed),
+            "orig_ready": sum(1 for g in reviewed if g["orig_ready"]),
+            "cross_ready": sum(1 for g in reviewed if g["cross_ready"]),
+            "status_orig": {k: status_orig.get(k, 0) for k in STATUSES},
+            "status_cross": {k: status_cross.get(k, 0) for k in STATUSES},
+            "changes": [{"category": c, "item": i, "from": f, "to": t, "count": n}
+                        for (c, i, f, t), n in changes.most_common()]}
+
+
 def select_designs(s, design_ids: list[int] | None, brand: str | None) -> list[Design]:
     q = select(Design).where(Design.kind == "광고 이미지").order_by(Design.id)
     if design_ids:
@@ -116,7 +226,7 @@ def select_designs(s, design_ids: list[int] | None, brand: str | None) -> list[D
     return [d for d in designs if any(_latest_composite(s, d.id, pid) for pid in d.preset_version_ids)]
 
 
-def collect_design(s, d: Design, rerun: bool) -> dict:
+def collect_design(s, d: Design, rerun: bool, as_brand: dict | None = None) -> dict:
     from app import analysis, calllog, storage
     from app.routers_review import _collect, run_review
     brand = s.get(Brand, d.brand_id)
@@ -142,7 +252,15 @@ def collect_design(s, d: Design, rerun: bool) -> dict:
             "has_image": bool(comp and storage.exists(comp.file_path)),
             "summary": g["summary"], "export_ready": g["export_ready"], "reviewed": bool(g["items"]),
             "problems": problems, "thumb": _thumb(comp.file_path) if comp else None,
+            "items_full": [_plain(i) | {"confirmed": bool(i["confirmed"])} for i in g["items"]],   # 교차 비교용(출력 전에 뺀다)
         })
+    cross = None
+    if as_brand:
+        cr = cross_review(s, d, as_brand)
+        cross = {"brand": as_brand["name"], "export_ready": cr["export_ready"],
+                 "compare": compare_reviews(groups, cr["groups"])}
+    for g in groups:
+        g.pop("items_full", None)
     calls = calllog.calls(d.id)
     cost = calllog.summary(design_id=d.id)
     judged = analysis.judgments(d.id)
@@ -162,6 +280,7 @@ def collect_design(s, d: Design, rerun: bool) -> dict:
         "models": _models_used(calls),
         "judge": ({"overall": latest_judge.get("overall"), "scores": latest_judge.get("scores"),
                    "model": latest_judge.get("model"), "count": len(judged)} if latest_judge else None),
+        "cross": cross,
     }
 
 
@@ -240,13 +359,17 @@ def aggregate(designs: list[dict]) -> dict:
 
 
 def build_report(session_factory, design_ids: list[int] | None = None, brand: str | None = None,
-                 rerun: bool = False) -> dict:
+                 rerun: bool = False, as_brand: Path | str | None = None) -> dict:
+    rules = load_brand_rules(Path(as_brand)) if as_brand else None
     with session_factory() as s:
-        designs = [collect_design(s, d, rerun) for d in select_designs(s, design_ids, brand)]
+        designs = [collect_design(s, d, rerun, rules) for d in select_designs(s, design_ids, brand)]
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"), "git_commit": _git_commit(),
         "settings": _settings(), "rerun": rerun, "filter": {"design_ids": design_ids, "brand": brand},
         "summary": aggregate(designs), "designs": designs,
+        "cross": ({"brand": rules["name"], "source": rules["source"], "logo_aspect": rules["logo_aspect"],
+                   "colors": [c["hex"] for c in rules["colors"]], "required_phrases": rules["required_phrases"],
+                   "forbidden_phrases": rules["forbidden_phrases"], "summary": aggregate_cross(designs)} if rules else None),
     }
 
 
@@ -353,6 +476,40 @@ ul.problems{{margin:0;padding-left:16px}} ul.problems li{{margin:1px 0}}
                          f"<td class='num'>{sm.get('통과', 0)} / {sm.get('경고', 0)} / {sm.get('수정 필요', 0)} / {sm.get('확인 필요', 0)}</td>"
                          f"<td><ul class='problems'>{probs or '<li class=muted>없음</li>'}</ul></td></tr>")
         parts.append("</table></div>")
+    # 교차 검수
+    X = data.get("cross")
+    if X:
+        XS = X["summary"]
+        parts.append(f"<h2>7. 교차 검수 — 같은 시안을 '{e(X['brand'])}' 규칙으로 판정하면</h2>"
+                     f"<p class='muted'>규칙 출처 {e(X['source'])} · 허용 색 {e(', '.join(X['colors']))} · 필수 표현 {e(', '.join(X['required_phrases']) or '없음')} · "
+                     f"금지 표현 {len(X['forbidden_phrases'])}개 · 로고 비율 {X['logo_aspect'] or '없음'}. 저장된 검수 결과는 바꾸지 않고 메모리에서만 다시 판정했다.</p>")
+        parts.append("<div class='kpi'>"
+                     f"<div><span class='muted'>비교한 지면·세트</span><b>{XS['reviewed']}</b>원래 규칙으로 검수된 것만</div>"
+                     f"<div><span class='muted'>검수 완료 가능</span><b>{XS['orig_ready']} → {XS['cross_ready']}</b>원래 규칙 → {e(X['brand'])} 규칙</div>"
+                     f"<div><span class='muted'>수정 필요</span><b>{XS['status_orig']['수정 필요']} → {XS['status_cross']['수정 필요']}</b></div>"
+                     f"<div><span class='muted'>확인 필요</span><b>{XS['status_orig']['확인 필요']} → {XS['status_cross']['확인 필요']}</b></div>"
+                     "</div>")
+        if XS["changes"]:
+            parts.append("<table><tr><th>분류</th><th>항목</th><th>원래 규칙</th><th></th><th>" + e(X["brand"]) + " 규칙</th><th class='num'>건수</th></tr>")
+            for c in XS["changes"]:
+                parts.append(f"<tr><td>{e(c['category'])}</td><td>{e(c['item'])}</td><td>{_badge(c['from']) if c['from'] in STATUSES else e(c['from'])}</td><td>→</td>"
+                             f"<td>{_badge(c['to']) if c['to'] in STATUSES else e(c['to'])}</td><td class='num'>{c['count']}</td></tr>")
+            parts.append("</table>")
+        else:
+            parts.append("<p class='muted'>판정이 달라진 항목이 없습니다.</p>")
+        parts.append("<table><tr><th>시안 · 지면</th><th>원래 규칙</th><th>" + e(X["brand"]) + " 규칙</th><th>달라진 항목</th></tr>")
+        for d in data["designs"]:
+            for g in (d.get("cross") or {}).get("compare", []):
+                if not g["orig_reviewed"]:
+                    continue
+                o = "<span class='badge ok'>통과</span>" if g["orig_ready"] else "<span class='badge fail'>차단</span>"
+                c = "<span class='badge ok'>통과</span>" if g["cross_ready"] else "<span class='badge fail'>차단</span>"
+                ch = "".join(f"<li>{e(x['item'])}: {_badge(x['from']) if x['from'] else '<span class=muted>없음</span>'} → "
+                             f"{_badge(x['to']) if x['to'] else '<span class=muted>없음</span>'}{' <b>[차단]</b>' if x['to_blocking'] else ''} "
+                             f"<span class='muted'>{e(x['message'])}</span></li>" for x in g["changed"])
+                parts.append(f"<tr><td>#{d['id']} {e(d['brand']['name'] or '')} · {e(g['name'])}</td><td>{o}</td><td>{c}</td>"
+                             f"<td><ul class='problems'>{ch or '<li class=muted>변화 없음</li>'}</ul></td></tr>")
+        parts.append("</table>")
     parts.append("<p class='muted'>eval/run_eval.py · 외부 API 호출 없음 · 비용은 app/pricing.py 요율 기준 추정</p></body></html>")
     return "".join(parts)
 
@@ -384,7 +541,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rerun", action="store_true", help="시안마다 검수를 다시 실행 (사람 '확인함' 표시 초기화)")
     ap.add_argument("--db", default=str(ROOT / "backend" / "data" / "app.db"), help="SQLite 파일 (기본 backend/data/app.db)")
     ap.add_argument("--out", help="출력 폴더 (기본 eval/reports/<날짜_시각>)")
+    ap.add_argument("--as-brand", help="교차 검수: brands/<id>/brand.json 의 규칙으로 같은 시안을 다시 판정해 비교표를 넣는다 (DB 변경 없음)")
     a = ap.parse_args(argv)
+    if a.as_brand and not Path(a.as_brand).exists():
+        print(f"브랜드 규칙 파일이 없습니다: {a.as_brand}", file=sys.stderr)
+        return 2
 
     db_path = Path(a.db)
     if not db_path.exists():
@@ -393,12 +554,16 @@ def main(argv: list[str] | None = None) -> int:
     engine = db_module.make_engine(f"sqlite:///{db_path}")
     factory = sessionmaker(bind=engine, autoflush=False)
     db_module.SessionLocal = factory          # calllog·analysis 가 같은 DB 를 읽게 한다
-    data = build_report(factory, a.designs or None, a.brand, a.rerun)
+    data = build_report(factory, a.designs or None, a.brand, a.rerun, a.as_brand)
     out_dir = Path(a.out) if a.out else ROOT / "eval" / "reports" / datetime.now().strftime("%Y%m%d_%H%M")
     paths = write_outputs(data, out_dir)
     S = data["summary"]
     print(f"시안 {S['designs']}개 · 지면 {S['presets']}개 (검수됨 {S['presets_reviewed']}, 통과 {S['presets_ready']}, "
           f"통과율 {_pct(S['pass_rate'])}) · 비용 {_krw(S['cost']['cost_krw'])}")
+    if data.get("cross"):
+        XS = data["cross"]["summary"]
+        print(f"교차 검수({data['cross']['brand']} 규칙): 검수 완료 가능 {XS['orig_ready']} → {XS['cross_ready']} / {XS['reviewed']} · "
+              f"달라진 항목 {sum(c['count'] for c in XS['changes'])}건")
     for k, p in paths.items():
         print(f"  {k}: {p.relative_to(ROOT) if p.is_relative_to(ROOT) else p}")
     return 0

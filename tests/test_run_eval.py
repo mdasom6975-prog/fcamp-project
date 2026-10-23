@@ -107,3 +107,33 @@ def test_select_by_design_id_and_brand(tmp_path):
     assert run_eval.build_report(db.SessionLocal, design_ids=[did + 99])["designs"] == []
     assert run_eval.build_report(db.SessionLocal, brand="없는브랜드")["designs"] == []
     assert len(run_eval.build_report(db.SessionLocal, brand="테스트브랜드")["designs"]) == 1
+
+
+def test_cross_review_with_other_brand_rules(tmp_path):
+    """--as-brand: 같은 시안을 다른 브랜드 규칙(필수 표현 '쿠챠', 금지 '최저가')으로 판정하면 결과가 달라진다. DB 는 바뀌지 않는다."""
+    from app import db
+    from app.models import ReviewResult
+    run_eval = _load_run_eval()
+    _seed(tmp_path)
+    rules_file = tmp_path / "brand.json"
+    rules_file.write_text(json.dumps({"brand": {
+        "name": "쿠챠", "colors": [{"role": "주조색", "hex": "#4C69FE"}, {"role": "텍스트색", "hex": "#1B1F2A"}],
+        "fonts": [], "required_phrases": ["쿠챠"], "forbidden_phrases": ["최저가"],
+        "levels": {"required_phrases": "필수", "forbidden_phrases": "필수", "logo": "필수", "colors": "필수"}},
+        "meta": {"logo": {"file": "logo.svg", "aspect": 3.42}}}, ensure_ascii=False), encoding="utf-8")
+    with db.SessionLocal() as s:
+        before = s.query(ReviewResult).count()
+    data = run_eval.build_report(db.SessionLocal, as_brand=rules_file)
+    with db.SessionLocal() as s:
+        assert s.query(ReviewResult).count() == before          # 저장된 검수 결과는 그대로
+    X = data["cross"]
+    assert X["brand"] == "쿠챠" and X["logo_aspect"] == 3.42 and X["colors"] == ["#4C69FE", "#1B1F2A"]
+    XS = X["summary"]
+    assert XS["reviewed"] == 2 and XS["orig_ready"] == 1 and XS["cross_ready"] == 0
+    items = {(c["category"], c["item"]) for c in XS["changes"]}
+    assert ("문구", "사용할 카피") in items                  # 시드에는 선택한 카피가 없어 교차 검수에서 차단된다
+    cmp = data["designs"][0]["cross"]["compare"]
+    assert len(cmp) == 2 and all(not g["cross_ready"] for g in cmp)
+    assert all("items_full" not in g for g in data["designs"][0]["groups"])
+    html = run_eval.render_html(data)
+    assert "교차 검수" in html and "쿠챠" in html

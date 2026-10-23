@@ -29,7 +29,7 @@ npm run dev        # http://localhost:5173
 - `tools/hash_logo.py <로고>`: 로고 해시·비율 기록
 - `prompts/*.md`: 모델에 보내는 모든 프롬프트 문장 (코드에는 두지 않음). 형식·변경 규칙은 `prompts/README.md`, 로더는 `backend/app/prompts.py`
 - 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q`
-- 평가 보고서: `backend/.venv/bin/python eval/run_eval.py` → `eval/reports/<날짜_시각>/report.html` (검수 통과율·위반 유형·시안별 결과·시간·비용·모델별 집계). `--rerun` 으로 검수를 다시 돌리고, `--designs`/`--brand` 로 대상을 고른다
+- 평가 보고서: `backend/.venv/bin/python eval/run_eval.py` → `eval/reports/<날짜_시각>/report.html` (검수 통과율·위반 유형·시안별 결과·시간·비용·모델별 집계). `--rerun` 으로 검수를 다시 돌리고, `--designs`/`--brand` 로 대상을 고른다. `--as-brand brands/kucha/brand.json` 을 주면 같은 시안을 그 브랜드 규칙으로 교차 검수해 판정이 달라진 항목 비교표를 넣는다(DB 변경 없음)
   - `tests/test_prompts_snapshot.py`: 프롬프트 렌더링 결과를 `tests/fixtures/prompts/*.txt` 와 글자 단위로 비교. 문장을 의도적으로 바꿨을 때만 `UPDATE_PROMPT_SNAPSHOTS=1` 로 갱신
 - 이미지 생성 비교(실제 과금, DB 의 시안 1개 필요): `backend/scripts/compare_models.py` 모델별 1장 → `backend/storage/compare/index.html` · `backend/scripts/compare_prompts.py` 프롬프트 변형별 1장 → `backend/storage/compare/prompts/index.html`
 - 화면 캡처: `docs/wireframes/`

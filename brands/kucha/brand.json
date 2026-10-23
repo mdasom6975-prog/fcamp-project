@@ -7,18 +7,48 @@
     "logo_asset_id": null,
     "logo_margin_percent": 25,
     "colors": [
-      { "role": "주조색", "hex": "#4C69FE" },
-      { "role": "보조색", "hex": "#734CFE" },
-      { "role": "강조색", "hex": "#FE964C" },
-      { "role": "주의색", "hex": "#FE4C4C" },
-      { "role": "배경색", "hex": "#F6F7FA" },
-      { "role": "텍스트색", "hex": "#1B1F2A" }
+      {
+        "role": "주조색",
+        "hex": "#4C69FE"
+      },
+      {
+        "role": "보조색",
+        "hex": "#734CFE"
+      },
+      {
+        "role": "강조색",
+        "hex": "#FE964C"
+      },
+      {
+        "role": "주의색",
+        "hex": "#FE4C4C"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F6F7FA"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1B1F2A"
+      }
     ],
     "fonts": [
-      { "role": "제목", "source": "provided", "name": "Pretendard-Bold" },
-      { "role": "본문", "source": "provided", "name": "Pretendard-Regular" }
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
     ],
-    "icon_style": { "stroke_width": 2, "corner": "둥근", "fill": "윤곽" },
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "윤곽"
+    },
     "image_tone": {
       "description": "밝고 중립적인 배경, 균형 잡힌 노출. 정돈된 상품 광고 구성(편집형 커머스)으로 정보 위계가 분명함. 부드럽고 둥근 형태, 무광 레진 재질, 스튜디오 확산광의 자연스러운 그림자. 성인 대상이되 아동 광고처럼 보이지 않게. 피사체는 상표 없는 범용 캡슐 토이. 금지: 카지노 네온·잭팟·룰렛, 빨강-금색 카지노 색상, 과도한 광택, 서비스 이용 단계·앱 화면·버튼·순서도, 미승인 캐릭터·가짜 로고, 이미지 안의 글자.",
       "reference_asset_ids": []
@@ -28,11 +58,31 @@
       "headline_max_chars": null,
       "polite": true
     },
-    "required_phrases": ["쿠챠"],
+    "required_phrases": [
+      "쿠챠"
+    ],
     "forbidden_phrases": [
-      "최저가", "무조건 무료배송", "100% 당첨", "손해 없음", "중복 없음", "시크릿 보장", "희귀 보장",
-      "특정 상품 선택", "원하는 상품을 고르", "카지노", "잭팟", "룰렛", "슬롯머신", "베팅", "코인",
-      "경품", "투자", "수익", "가격 비교", "디지털 아이템", "쿠지"
+      "최저가",
+      "무조건 무료배송",
+      "100% 당첨",
+      "손해 없음",
+      "중복 없음",
+      "시크릿 보장",
+      "희귀 보장",
+      "특정 상품 선택",
+      "원하는 상품을 고르",
+      "카지노",
+      "잭팟",
+      "룰렛",
+      "슬롯머신",
+      "베팅",
+      "코인",
+      "경품",
+      "투자",
+      "수익",
+      "가격 비교",
+      "디지털 아이템",
+      "쿠지"
     ],
     "levels": {
       "logo": "필수",
@@ -47,9 +97,21 @@
   },
   "meta": {
     "source": "Kucha_AI_Marketing_Asset_Guidelines_v1.pdf (쿠챠 브랜드 프롬프트 데이터 명세서 v1.0)",
-    "official_references": ["kucha.kr", "kucha.kr/legal/terms", "kucha.kr/gacha/236", "kucha.kr/kuji"],
+    "official_references": [
+      "kucha.kr",
+      "kucha.kr/legal/terms",
+      "kucha.kr/gacha/236",
+      "kucha.kr/kuji"
+    ],
     "checked_at": "2026-10-13",
-    "logo": null,
+    "logo": {
+      "file": "logo.svg",
+      "bytes": 5332,
+      "sha256": "2f5b198010713c1d57638cc868b67f8c50d1e2c5dd472ac900b085a0a553e0fd",
+      "width": 67.736,
+      "height": 19.7867,
+      "aspect": 3.4233
+    },
     "rule_sources": {
       "colors": "가이드 04 시각 기준 — 주요 파랑·보조 보라·주의 빨강·강조 주황·기본 글자·기본 배경 (공식)",
       "image_tone": "가이드 04 키워드 사전 + 07 제외·금지 사전 casino_v1 · quality_v1 · context_v1 · ip_v1 · text_v1",
