@@ -44,11 +44,11 @@ type Variant = { id: number; variant_no: number; headline: string; body: string;
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
   calls?: { total: number; images: number; chats: number; by_kind: Record<string, { count: number }> }
-  quality?: { draft: string; final: string } }
-const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
+  quality?: string }
+const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', product: '배경(제품 참조)', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
 type ImgSettings = {
-  models: { model: string; default: boolean; draft_usd: number | null; final_usd: number | null; estimated: boolean; input_fidelity: boolean }[]
-  modes: string[]; default_mode: string; quality: { draft: string; final: string }; provider: string; draft_provider?: string; usd_krw: number
+  models: { model: string; default: boolean; usd: number | null; estimated: boolean; input_fidelity: boolean }[]
+  modes: string[]; default_mode: string; quality: string; provider: string; usd_krw: number
 }
 const MODE_LABEL: Record<string, string> = { per_ratio: '비율군마다 1장 (1~3회, 변형은 images.edit)', single: '1장을 모든 지면이 잘라 씀 (손실 큰 비율군만 1장 더)' }
 const usdKrw = (v: number | null | undefined, rate: number) => (v == null ? '요율 없음' : `$${v.toFixed(3)} (약 ${Math.round(v * rate).toLocaleString()}원)`)
@@ -66,8 +66,9 @@ type Screen = 'design' | 'edit' | 'review'
 type View = 'master' | 'setup' | 'copy' | 'images' | 'icons' | 'edit' | 'review'
 
 type PanelView = 'copy' | 'images' | 'icons'
-function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
+function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
   designId: number; brandName: string; versionNo: number | null; imageStyle: string
+  locked: boolean    // 검수 완료된 캠페인: 이미지 재생성·생성 설정 변경 불가
   inImage: Record<number, InImage | undefined>    // 지면별 '이미지 안 문구' 설정(서버가 계산한 현재값·기본 여부)
   view: PanelView    // 3열 화면의 가운데에 무엇을 보일지: 카피 / 이미지 / 아이콘 (상태는 한 인스턴스가 공유)
   genSettings: { image_model?: string | null; bg_mode?: string | null }    // 브리프에 저장된 생성 설정(없으면 서버 기본)
@@ -103,8 +104,6 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
   const [bgBusy, setBgBusy] = useState(false)
   const [bgMsg, setBgMsg] = useState<string | null>(null)
   const [bgNote, setBgNote] = useState<string | null>(null)   // 재생성 뒤 안내(미뤄 둔 비율군 등)
-  const hasDraftBg = Object.values(imgs).some((r) => r?.background?.layout.draft)   // 초안 품질 배경이 하나라도 있는가
-  const qualitySplit = !usage?.quality || usage.quality.draft !== usage.quality.final   // 초안/확정 품질이 다르게 설정돼 있는가
   const [imgErr, setImgErr] = useState<Record<number, string>>({})
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
@@ -193,17 +192,14 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
 
   // 배경은 합성본이 있는 매체의 비율군만 1장씩 새로 만들고(합성본이 없으면 모든 비율군), 그 매체를 새 배경으로 다시 합성한다.
   // 아직 합성하지 않은 비율군은 나중에 그 매체를 합성할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
-  // final=false: 초안 품질(싸게, 형태·구도를 고르는 동안) / true: 확정 품질(내보낼 배경, 마음에 들 때 1회)
-  const regenBackground = (final: boolean) => overlay.run(
-    final ? '초안 배경의 장면을 참조해 확정 품질로 다시 만드는 중… 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)'
-      : '초안 품질로 배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner(final))
-  const regenBackgroundInner = async (final: boolean) => {
+  const regenBackground = () => overlay.run(
+    '배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner())
+  const regenBackgroundInner = async () => {
     setBgBusy(true); setBgMsg(null); setBgNote(null)
     try {
-      const out = await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle, final }) as {
-        deferred?: string[]; applied?: number[]; skipped?: { name: string; reason: string }[]; upgraded?: boolean; single_extra?: string[]; blur_fill?: string[] }
+      const out = await post(`/api/designs/${designId}/background/regenerate`, { style: bgStyle }) as {
+        deferred?: string[]; applied?: number[]; skipped?: { name: string; reason: string }[]; single_extra?: string[]; blur_fill?: string[] }
       const notes: string[] = []
-      if (out.upgraded) notes.push('초안 배경의 장면·구도를 참조해 확정 품질로 다시 그렸습니다.')
       if (out.single_extra?.length) notes.push(`1장을 잘라 쓰면 피사체가 많이 사라지는 비율군(${out.single_extra.join(', ')})은 원본을 참조해 1장 더 만들었습니다.`)
       if (out.blur_fill?.length) notes.push(`보완 변형에 실패한 비율군(${out.blur_fill.join(', ')})은 잘라 쓰지 않고 블러 채우기로 합성합니다.`)
       if (out.applied?.length) notes.push(`편집 저장한 지면 ${out.applied.length}개는 편집 내용을 유지한 채 새 배경으로 다시 그렸습니다.`)
@@ -380,18 +376,15 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
             {imgSettings && (
               <div className="row">
                 <label className="muted">이미지 모델{' '}
-                  <select value={curModel} disabled={bgBusy} onChange={(e) => saveSettings({ image_model: e.target.value })}>
+                  <select value={curModel} disabled={bgBusy || locked} onChange={(e) => saveSettings({ image_model: e.target.value })}>
                     {imgSettings.models.map((m) => <option key={m.model} value={m.model}>{m.model}{m.default ? ' (기본)' : ''}</option>)}
                   </select>
                 </label>
                 {(() => { const m = imgSettings.models.find((x) => x.model === curModel); return m ? (
-                  <span className="muted">정사각 1장 초안 {usdKrw(m.draft_usd, imgSettings.usd_krw)} · 확정 {usdKrw(m.final_usd, imgSettings.usd_krw)}{m.estimated ? ' · 요금표에 없어 추정' : ''}{m.input_fidelity ? '' : ' · input_fidelity 미지원'}</span>
+                  <span className="muted">정사각 1장 {imgSettings.quality} {usdKrw(m.usd, imgSettings.usd_krw)}{m.estimated ? ' · 요금표에 없어 추정' : ''}{m.input_fidelity ? '' : ' · input_fidelity 미지원'}</span>
                 ) : null })()}
-                {imgSettings.draft_provider && imgSettings.draft_provider !== imgSettings.provider && (
-                  <span className="muted">초안은 {imgSettings.draft_provider === 'cloudflare' ? 'FLUX(Workers AI, 무료 구간)' : imgSettings.draft_provider} · 확정만 {imgSettings.provider}</span>
-                )}
                 <label className="muted">배경 방식{' '}
-                  <select value={curMode} disabled={bgBusy} onChange={(e) => saveSettings({ bg_mode: e.target.value })}>
+                  <select value={curMode} disabled={bgBusy || locked} onChange={(e) => saveSettings({ bg_mode: e.target.value })}>
                     {imgSettings.modes.map((m) => <option key={m} value={m}>{MODE_LABEL[m] ?? m}</option>)}
                   </select>
                 </label>
@@ -400,26 +393,20 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
             {settingsMsg && <p className="muted">{settingsMsg}</p>}
             <div className="row">
               <label className="muted">배경 형태{' '}
-                <select value={bgStyle} disabled={bgBusy} onChange={(e) => setBgStyle(e.target.value)}>
+                <select value={bgStyle} disabled={bgBusy || locked} onChange={(e) => setBgStyle(e.target.value)}>
                   {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>
-              <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={() => regenBackground(false)}
-                title="형태·구도를 고르는 동안은 초안 품질로 만듭니다 (비용 약 1/4)">
-                배경 새로 생성 ({qualitySplit ? '초안 ' : ''}{usage?.quality ? `${usage.quality.draft} · ` : ''}{curMode === 'single' ? '1장, 모든 매체가 잘라 씀' : '합성한 비율군마다 1장, 모든 매체에 적용'})
+              <button disabled={locked || bgBusy || !Object.values(imgs).some((r) => r.background)} onClick={() => regenBackground()}
+                title={locked ? '검수가 완료된 캠페인은 이미지를 다시 만들 수 없습니다' : `${usage?.quality ?? ''} 품질로 배경을 새로 만듭니다`}>
+                배경 새로 생성 ({usage?.quality ? `${usage.quality} · ` : ''}{curMode === 'single' ? '1장, 모든 매체가 잘라 씀' : '합성한 비율군마다 1장, 모든 매체에 적용'})
               </button>
-              {qualitySplit && <button disabled={bgBusy || !Object.values(imgs).some((r) => r.background) || !hasDraftBg} onClick={() => regenBackground(true)}
-                title="지금 초안의 장면·구도를 참조해 한 번만 확정 품질로 다시 그립니다. 내보내기 전에 실행하세요">
-                확정 품질로 배경 생성{usage?.quality ? ` (${usage.quality.final})` : ''}
-              </button>}
               <button disabled={bgBusy || imgBusy !== null} onClick={resetGenerated}>시안 이미지 초기화</button>
               {bgBusy && <span className="muted">배경 생성 후 합성된 매체를 다시 합성하는 중… 1~2분 걸릴 수 있습니다.</span>}
             </div>
             {bgMsg && <div className="notice err">{bgMsg}</div>}
             {bgNote && <p className="muted">{bgNote}</p>}
-            {qualitySplit && hasDraftBg && !bgBusy && (
-              <p className="muted">현재 배경은 초안 품질입니다. 형태·구도가 정해지면 '확정 품질로 배경 생성'을 한 번 실행한 뒤 내보내세요. 검수에서도 경고로 표시됩니다.</p>
-            )}
+            {locked && <div className="notice">검수가 완료된 캠페인입니다. 입력 수정과 이미지 재생성은 할 수 없습니다. ('시안 이미지 초기화'를 하면 검수 전 상태로 돌아갑니다)</div>}
             {(() => {
               const cur = withCopy.find((x) => x.preset_id === imgTab) ?? withCopy[0]
               if (!cur) return null
@@ -435,7 +422,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
                         : `합성본 ${made}/${withCopy.length}개. 카드를 누르면 크게 보고 다시 합성하거나 편집할 수 있습니다.`}
                     </p>
                     {made === 0 && firstEligible !== null && (
-                      <button className="primary" disabled={imgBusy !== null || bgBusy} onClick={() => makeImage(firstEligible, false)}>
+                      <button className="primary" disabled={locked || imgBusy !== null || bgBusy} onClick={() => makeImage(firstEligible, false)}>
                         모든 지면 이미지 생성
                       </button>
                     )}
@@ -453,7 +440,7 @@ function CopyPanel({ designId, brandName, versionNo, imageStyle, genSettings, te
                       onNext={idx < withCopy.length - 1 ? () => setImgTab(withCopy[idx + 1].preset_id) : undefined}
                       position={`${idx + 1} / ${withCopy.length}`}>
                       <ImageBlock key={cur.preset_id} g={cur} row={imgs[cur.preset_id]} busy={imgBusy === cur.preset_id} err={imgErr[cur.preset_id]}
-                        canMake={cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected)} onMake={makeImage}
+                        canMake={!locked && (cur.content_kind !== '완성형' || cur.variants.some((v) => v.selected))} onMake={makeImage}
                         inImage={inImage[cur.preset_id]} onInImage={setInImageFor}
                         onEdit={(id) => { setLightbox(false); onEdit(id) }} />
                     </Lightbox>
@@ -659,7 +646,7 @@ function ImageBlock({ g, row, busy, err, canMake, onMake, onEdit, inImage, onInI
         </button>
         {comp && !sep && <button onClick={() => onEdit(g.preset_id)}>편집 화면에서 열기 →</button>}
         {busy && <span className="muted">이미지 생성 중… 1~2분 걸릴 수 있습니다. 비용이 발생합니다.</span>}
-        {!canMake && <span className="muted">완성형 지면은 사용할 카피를 먼저 선택해 주세요.</span>}
+        {!canMake && <span className="muted">완성형 지면은 사용할 카피를 먼저 선택해 주세요. (검수 완료된 캠페인은 다시 만들 수 없습니다)</span>}
       </div>
       {err && <div className="notice err">{err}</div>}
     </div>
@@ -1490,31 +1477,37 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             { v: 'master', label: '보기 전용 시안', st: 'cur', sub: '로고·제목·본문·CTA 한 장' },
             { v: 'setup', label: '① 규격·메시지', st: setupOk ? 'ok' : 'warn', sub: `규격 ${d.presets.length}개 · ${d.brief.key_message ? '메시지 입력됨' : '메시지 없음'}` },
             { v: 'copy', label: '③ 카피·시안', st: copySt, sub: w.selected ? `시안 선택됨 · ${w.selected.headline}` : w.copyCount ? `시안 ${w.copyCount}개 · 미선택` : '아직 없음', disabled: !hasCopy },
-            { v: 'images', label: '④ 이미지', st: imgSt, sub: `합성본 ${w.compositeCount}/${w.presetCount}${w.backgroundId ? (w.backgroundDraft ? ' · 초안 배경' : ' · 확정 배경') : ''}`, disabled: !hasCopy },
+            { v: 'images', label: '④ 이미지', st: imgSt, sub: `합성본 ${w.compositeCount}/${w.presetCount}`, disabled: !hasCopy },
             { v: 'icons', label: '⑤ 아이콘', st: iconSt, sub: w.iconCount ? `${w.iconCount}/${w.iconTarget}개` : '아직 없음', disabled: !hasCopy },
             { v: 'edit', label: '⑥ 편집', st: w.compositeCount ? 'ok' : 'none', sub: w.compositeCount ? '지면별 문구·로고 조정' : '합성본이 있어야 열림', disabled: !hasCopy || w.compositeCount === 0 },
             { v: 'review', label: '⑦ 검수·내보내기', st: reviewSt, sub: rv?.reviewed ? `차단 ${rv.blockers} · 경고 ${rv.warn} · 통과 ${rv.pass}` : '검수 전', disabled: !hasCopy },
           ]
+          const locked = d.status === '검수 완료'
+          const eff = d.effective_phrases
           const campInput = (
             <section className="card camp-input">
               <div className="camp-input-top">
                 <div>
-                  <div className="camp-label">입력한 메시지</div>
+                  <div className="camp-label">캠페인 입력 값{locked ? ' · 검수 완료(수정 불가)' : ''}</div>
                   <div className="camp-msg">{d.brief.key_message || d.brief.product_name}</div>
                 </div>
-                <button type="button" onClick={() => { setEditing(true) }}>입력 수정</button>
+                <button type="button" disabled={locked} title={locked ? '검수가 완료된 캠페인은 수정할 수 없습니다' : undefined}
+                  onClick={() => { setEditing(true) }}>입력 수정</button>
               </div>
-              <div className="camp-chips left">
-                <span className="info-chip">서비스 {d.brief.product_name}{d.brief.description ? ` · ${d.brief.description}` : ''}</span>
-                {d.brief.target && <span className="info-chip">타깃 {d.brief.target}</span>}
-                {d.effective_phrases && (
-                  <span className="info-chip" title={`필수: ${d.effective_phrases.required_phrases.join(', ') || '없음'} / 금지: ${d.effective_phrases.forbidden_phrases.join(', ') || '없음'}`}>
-                    필수 표현 {d.effective_phrases.required_phrases.length}개({d.effective_phrases.required_source}) · 금지 표현 {d.effective_phrases.forbidden_phrases.length}개({d.effective_phrases.forbidden_source})
-                  </span>
-                )}
-                <span className="info-chip">규격 {d.presets.length}개</span>
-                <span className="info-chip">광고 시안 + 카피</span>
-              </div>
+              <dl className="camp-input-grid">
+                <dt>서비스·상품</dt><dd>{d.brief.product_name}</dd>
+                <dt>상품 설명</dt><dd>{d.brief.description || <span className="muted">없음</span>}</dd>
+                <dt>핵심 메시지</dt><dd>{d.brief.key_message || <span className="muted">없음</span>}</dd>
+                <dt>타깃</dt><dd>{d.brief.target || <span className="muted">없음</span>}</dd>
+                <dt>배경 형태</dt><dd>{d.brief.image_style ?? '자동'}</dd>
+                <dt>제품 이미지</dt><dd>{d.brief.product_image_asset_id
+                  ? <img className="prod-thumb" src={`/api/assets/${d.brief.product_image_asset_id}/file`} alt="제품 이미지" />
+                  : <span className="muted">없음</span>}</dd>
+                <dt>필수 표현</dt><dd>{eff ? (eff.required_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.required_source})</span> : null}</dd>
+                <dt>금지 표현</dt><dd>{eff ? (eff.forbidden_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.forbidden_source})</span> : null}</dd>
+                <dt>규격</dt><dd>{d.presets.map((p) => `${p.platform} · ${p.name}`).join(' / ') || '없음'}</dd>
+              </dl>
+              {!locked && <p className="muted">검수 전까지는 입력을 수정할 수 있습니다. 입력을 바꿔도 이미 만든 이미지는 자동으로 바뀌지 않으니, 필요하면 배경을 새로 생성하세요.</p>}
             </section>
           )
           const panelTitle = view === 'copy' ? '③ 카피·시안 선택' : view === 'images' ? '④ 이미지 생성·편집' : '⑤ 아이콘 세트'
@@ -1528,7 +1521,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
               </div>
             </section>
           ) : view === 'setup' ? (
-            (!hasCopy || editing) ? setupSteps : campInput
+            (!hasCopy || (editing && d.status !== '검수 완료')) ? setupSteps : campInput
           ) : view === 'edit' && hasCopy ? (
             <EditScreen key={d.id} design={d} presetId={editPreset} onPick={setEditPreset}
               onBack={() => goView('images')} onReview={() => goView('review')} />
@@ -1546,7 +1539,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
           ) : hasCopy ? (
             <section className="card step-card" id="sec-copy">
               <header><h3>{panelTitle}</h3>{view !== 'copy' && <span className="muted">공통 문구: {w.selected ? `시안 ${LETTERS[w.selected.variant_no - 1] ?? w.selected.variant_no} · ${w.selected.headline}` : '미선택'}</span>}</header>
-              <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no}
+              <CopyPanel key={copyKey} designId={d.id} brandName={d.brand.name ?? ''} versionNo={d.brand.version_no} locked={d.status === '검수 완료'}
                 imageStyle={d.brief.image_style ?? '자동'} genSettings={{ image_model: d.brief.image_model, bg_mode: d.brief.bg_mode }}
                 textAssets={d.brief.text_assets} assetFields={d.text_asset_fields} view={view as PanelView}
                 inImage={inImageMap}

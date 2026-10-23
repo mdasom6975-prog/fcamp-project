@@ -13,7 +13,7 @@ from .db import BASE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
                      IconAsset, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db
-from .routers_review import invalidate_icon_reviews, invalidate_reviews
+from .routers_review import ensure_unlocked, invalidate_icon_reviews, invalidate_reviews
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 log = logging.getLogger("app.images")
@@ -132,15 +132,14 @@ def image_usage():
     """일일 한도 현황 + 오늘 호출 내역(종류별). 한도는 이미지 호출만 세고, calls 는 채팅까지 포함한다."""
     u = imagegen.usage()
     return {**u, "calls": calllog.summary(date=u["date"]),
-            "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}}
+            "quality": imagegen.OPENAI_QUALITY}
 
 
 @router.get("/image-settings")
 def image_settings():
-    """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 초안/확정 추정 비용)과 배경 방식, 기본값."""
+    """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 추정 비용)과 배경 방식, 기본값."""
     return {"models": imagegen.model_options(), "modes": list(imagegen.BG_MODES), "default_mode": imagegen.default_bg_mode(),
-            "quality": {"draft": imagegen.DRAFT_QUALITY, "final": imagegen.OPENAI_QUALITY}, "provider": imagegen.PROVIDER,
-            "draft_provider": imagegen.DRAFT_PROVIDER, "usd_krw": imagegen.pricing_rate(),
+            "quality": imagegen.OPENAI_QUALITY, "provider": imagegen.PROVIDER, "usd_krw": imagegen.pricing_rate(),
             "single_min_keep": imagegen.SINGLE_MIN_KEEP}
 
 
@@ -149,6 +148,7 @@ def set_image_settings(design_id: int, image_model: str | None = Body(None, embe
                        bg_mode: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """시안의 생성 설정(이미지 모델·배경 방식)을 브리프에 저장한다. 다음 배경 생성·재생성부터 적용된다(기존 배경은 그대로)."""
     d = _design(db, design_id)
+    ensure_unlocked(d)
     brief = dict(d.brief or {})
     if image_model is not None:
         if image_model not in imagegen.MODELS:
@@ -231,12 +231,26 @@ def _gen_error(e: Exception) -> str:
     return f"이미지 생성에 실패했습니다 ({type(e).__name__})"
 
 
+def _product_image(db: Session, d: Design) -> tuple[Image.Image | None, int | None]:
+    """캠페인 입력의 제품 누끼 이미지(투명 PNG)와 자산 id. 없거나 파일이 사라졌거나 images.edit 을 못 쓰는 공급자면 (None, None)."""
+    aid = (d.brief or {}).get("product_image_asset_id")
+    if not aid or not imagegen.can_edit():
+        return None, None
+    a = db.get(Asset, aid)
+    if not a or not storage.exists(a.file_path):
+        return None, None
+    im = Image.open(storage.local(a.file_path)).convert("RGBA")
+    im.thumbnail((1024, 1024), Image.LANCZOS)
+    return im, aid
+
+
 def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
-                  final: bool = False, upgrade: bool = False, force_ratio: bool = False) -> tuple[str, Image.Image, str, dict]:
+                  force_ratio: bool = False) -> tuple[str, Image.Image, str, dict]:
     """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (저장소 키, 이미지, 프롬프트, 기록용 layout).
-    final=False 면 초안 품질(IMAGE_QUALITY_DRAFT), True 면 확정 품질(IMAGE_QUALITY). layout.quality 에 남긴다.
+    품질은 항상 imagegen.OPENAI_QUALITY(기본 medium)이며 layout.quality 에 남긴다.
     생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
-    reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다."""
+    reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다.
+    캠페인에 제품 누끼 이미지가 있으면(OpenAI) 참조 이미지로 함께 붙여 장면의 주 피사체로 그리게 한다."""
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
@@ -245,20 +259,21 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     # 참조해 비율군 구도로 1장 더 만들 때(크롭공용 대신 비율군 구도, 참조 변형 허용)
     single = st["bg_mode"] == "single" and not force_ratio
     gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
-    quality = imagegen.quality_for(final)
-    provider = imagegen.provider_for(final)       # 초안 공급자가 FLUX 면 초안은 무료 구간에서, 확정만 OpenAI
+    quality = imagegen.OPENAI_QUALITY
+    provider = imagegen.PROVIDER
     ref_img = None
-    # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 초안→확정 승격(upgrade)은 can_edit
+    # 참조 변형(images.edit)은 OpenAI 로 만들 때만: 비율군 변형은 can_vary, 1장 방식의 보완 변형(force_ratio)은 can_edit
     if reference is not None and storage.exists(reference.file_path) and provider == "openai" \
-            and (imagegen.can_edit() if upgrade else (imagegen.VARIANT and imagegen.can_edit()) if force_ratio
-                 else imagegen.can_vary(st["bg_mode"], final)):
+            and ((imagegen.VARIANT and imagegen.can_edit()) if force_ratio else imagegen.can_vary(st["bg_mode"])):
         ref_img = Image.open(storage.local(reference.file_path))
+    product_img, product_id = _product_image(db, d)
     try:
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single)
+        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
+                                       product=product_img is not None)
         if ref_img is not None:
-            # upgrade: 참조가 같은 비율군의 초안 → 장면·구도를 고정하고 확정 품질로 다시 그린다(새 장면의 시작)
-            prompt = imagegen.build_upgrade_prompt(prompt) if upgrade else imagegen.build_variant_prompt(prompt)
-            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"])
+            prompt = imagegen.build_variant_prompt(prompt)
+        if ref_img is not None or product_img is not None:
+            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"], product=product_img)
         else:
             bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider)
     except imagegen.QuotaExceeded as e:
@@ -267,16 +282,17 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         raise HTTPException(502, _gen_error(e))
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
-              "quality": quality, "draft": imagegen.is_draft(quality), "mode": st["bg_mode"], "provider": provider,
+              "quality": quality, "mode": st["bg_mode"], "provider": provider,
               **({"single_extra": True} if force_ratio else {}),
+              **({"product_asset_id": product_id} if product_img is not None else {}),
               "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
-              # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 승격·독립 생성이면 이 파일이 새 장면의 시작
-              "scene": (_scene(reference) or Path(path).stem) if (ref_img is not None and not upgrade) else Path(path).stem,
-              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, upgrade=upgrade, single=single)}
+              # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 독립 생성이면 이 파일이 새 장면의 시작
+              "scene": (_scene(reference) or Path(path).stem) if ref_img is not None else Path(path).stem,
+              "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, single=single,
+                                              product=product_img is not None)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
-                               "template": (reference.layout or {}).get("template"),
-                               **({"upgraded_from_quality": (reference.layout or {}).get("quality")} if upgrade else {})}
+                               "template": (reference.layout or {}).get("template")}
     return path, bg, prompt, layout
 
 
@@ -286,11 +302,10 @@ def _bg_row(d: Design, pid: int, path: Path | str, bg_w: int, bg_h: int, prompt:
                           width=bg_w, height=bg_h, prompt=prompt, brand_version_id=bv_id, layout=dict(layout))
 
 
-def create_shared_background(db: Session, d: Design, final: bool = False,
+def create_shared_background(db: Session, d: Design,
                              in_use: list[int] | None = None) -> tuple[dict[int, GeneratedImage], list[str]]:
     """배경을 비율군(가로형/정사각/세로형)마다 1장씩 만들고, 같은 비율군의 규격은 같은 파일로 연결한다.
     반환: ({preset_id: 배경 행}, 미뤄 둔 비율군 이름들).
-    final=False(기본)면 초안 품질로 만든다. 형태·구도가 정해지면 final=True 로 한 번만 확정 품질로 다시 만든다.
     첫 비율군(시안의 첫 규격 기준)은 프롬프트로 생성하고, 나머지 비율군은 그 이미지를 참조로 붙여 **같은 장면**을
     각 비율의 구도로 다시 만든다(images.edit, IMAGE_BG_VARIANT=0 이면 독립 생성). 비용은 만든 비율군 수만큼 든다.
     in_use 를 주면 그 지면들이 속한 비율군만 지금 만들고, 나머지 비율군은 미뤄 둔다(그 지면을 합성할 때
@@ -328,22 +343,8 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
     master: GeneratedImage | None = None
     for template, pids in groups.items():
         try:
-            if master is None and final:
-                # 확정 품질: 같은 비율군의 현재 초안이 있으면 그 장면을 참조해 승격한다(초안으로 고른 구도가 유지된다).
-                # 같은 비율군 초안이 없으면(FLUX 초안은 정사각뿐, 1장 방식 등) 현재 장면의 최신 초안을 참조한다.
-                draft = _latest_design_bg(db, d.id, template) or _latest_design_bg(db, d.id)
-                if draft is not None and imagegen.is_draft((draft.layout or {}).get("quality")) and imagegen.can_edit() \
-                        and storage.exists(draft.file_path):
-                    try:
-                        path, bg, prompt, layout = _generate_one(db, d, template, reference=draft, final=True, upgrade=True)
-                    except HTTPException as e:
-                        log.warning("초안 참조 승격 실패 → 새로 생성: %s", e.detail)
-                        path, bg, prompt, layout = _generate_one(db, d, template, final=True)
-                else:
-                    path, bg, prompt, layout = _generate_one(db, d, template, final=True)
-            else:
-                path, bg, prompt, layout = _generate_one(db, d, template, reference=master, final=final,
-                                                         force_ratio=single and master is not None)
+            path, bg, prompt, layout = _generate_one(db, d, template, reference=master,
+                                                     force_ratio=single and master is not None)
         except HTTPException as e:
             if master is None:
                 raise
@@ -357,7 +358,7 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
             db.flush()
             continue
         if master is not None:
-            # 한 번의 재생성에서 만든 배경은 참조 변형이든 독립 생성(FLUX 초안, IMAGE_BG_VARIANT=0)이든 같은 장면으로 묶는다.
+            # 한 번의 재생성에서 만든 배경은 참조 변형이든 독립 생성(FLUX, IMAGE_BG_VARIANT=0)이든 같은 장면으로 묶는다.
             # 그래야 목록·합성이 마지막 비율군만 '현재 장면'으로 보고 나머지를 숨기지 않는다.
             layout = {**layout, "scene": _scene(master) or layout.get("scene")}
         for pid in pids:
@@ -370,14 +371,14 @@ def create_shared_background(db: Session, d: Design, final: bool = False,
 
 
 @router.post("/designs/{design_id}/background/regenerate")
-def regenerate_background(design_id: int, style: str | None = Body(None, embed=True),
-                          final: bool = Body(False, embed=True), db: Session = Depends(get_db)):
+def regenerate_background(design_id: int, style: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """시안 전체의 배경을 비율군마다 새로 생성하고, 같은 비율군 매체가 같은 원본을 공유하도록 연결한다.
     style 을 주면 브리프의 배경 형태(image_style)를 그 값으로 바꾼 뒤 생성한다.
-    final=True 면 확정 품질(IMAGE_QUALITY)로, 아니면 초안 품질(IMAGE_QUALITY_DRAFT)로 만든다.
+    품질은 항상 IMAGE_QUALITY(기본 medium). 검수 완료된 캠페인은 409.
     배경은 **합성본이 있는 지면의 비율군**만 지금 만든다(합성본이 하나도 없으면 모든 비율군). 나머지 비율군은
     그 지면을 합성할 때 현재 장면을 참조해 만든다 → 쓰지 않는 비율군의 호출이 없어진다."""
     d = _design(db, design_id)
+    ensure_unlocked(d)
     if style is not None:
         style = style.strip() or imagegen.AUTO_STYLE
         if style != imagegen.AUTO_STYLE and style not in imagegen.STYLES:
@@ -385,7 +386,7 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
         d.brief = {**(d.brief or {}), "image_style": style}
         db.flush()
     composed = [pid for pid in d.preset_version_ids if _latest(db, design_id, pid, "composite") is not None]
-    rows, deferred = create_shared_background(db, d, final=final, in_use=composed or None)
+    rows, deferred = create_shared_background(db, d, in_use=composed or None)
     # 편집 화면에서 저장한 지면은 자동 합성(make_image)이 409 로 막히므로, 편집 요소를 유지한 채 새 배경으로 여기서 다시 그린다
     from .routers_edit import rerender_edited     # 순환 import 회피 (routers_edit 가 이 모듈을 import 한다)
     applied, skipped = rerender_edited(db, d)
@@ -396,9 +397,9 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
     blur_groups = sorted({r.layout.get("template") for r in rows.values() if r.layout.get("fill") == "blur"})
     return {"preset_ids": list(rows), "generated": len({r.file_path for r in rows.values()}), "deferred": deferred,
             "single_extra": extra_groups, "blur_fill": blur_groups,
-            "applied": applied, "skipped": skipped, "upgraded": bool(first.layout.get("reference", {}).get("upgraded_from_quality")),
+            "applied": applied, "skipped": skipped,
             "style": first.layout.get("style"), "style_reason": first.layout.get("style_reason"),
-            "quality": first.layout.get("quality"), "draft": bool(first.layout.get("draft")),
+            "quality": first.layout.get("quality"),
             "warnings": [f"일부 비율군은 변형 생성에 실패해 첫 배경을 잘라 썼습니다: {m}" for m in fallbacks]}
 
 
@@ -447,6 +448,7 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
 def make_image(design_id: int, preset_id: int, regenerate_background: bool = Body(False, embed=True),
                db: Session = Depends(get_db)):
     d = _design(db, design_id)
+    ensure_unlocked(d)
     if preset_id not in d.preset_version_ids:
         raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
     pv = db.get(PresetVersion, preset_id)
@@ -484,9 +486,6 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     single_master = None     # 1장 방식의 현재 장면 원본(변형의 참조)
     if not regenerate_background:
         latest = _latest_design_bg(db, design_id)
-        # 변형 가능 여부는 현재 배경의 단계로 판단한다: 최신 배경이 확정이면 확정 공급자(OpenAI) 기준, 초안이면 초안 공급자 기준
-        # (FLUX 초안이면 변형 없이 잘라 쓴다)
-        stage_final = latest is not None and not imagegen.is_draft((latest.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
         same = _latest_design_bg(db, design_id, tpl)
         if single:
             # 1장 방식: 같은 비율군 배경(원본이든 손실 보완 변형이든)이 있으면 그대로. 없으면 원본(보완 변형이 아닌 것)을 잘라 쓰되,
@@ -496,7 +495,7 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
             if same is not None:
                 src = same
             elif m is not None and imagegen.lossy_single((m.width, m.height), (w, h)) \
-                    and imagegen.VARIANT and imagegen.can_edit() and imagegen.provider_for(stage_final) == "openai":
+                    and imagegen.VARIANT and imagegen.can_edit():
                 src = None                                   # 아래에서 변형 생성
             else:
                 src = m
@@ -504,7 +503,7 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
         else:
             # 같은 비율군 배경이 있으면 그대로 연결(생성 호출 없음). 없고 다른 비율군 배경만 있으면: 변형 생성이 가능할 때는
             # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
-            src = same or (None if imagegen.can_vary(st["bg_mode"], final=stage_final) else latest)
+            src = same or (None if imagegen.can_vary(st["bg_mode"]) else latest)
         if src is not None and storage.exists(src.file_path):
             bg_row = _latest(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
@@ -518,7 +517,6 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     if bg_row is None:
         # 새로 만들 때 시안에 다른 배경이 있으면 그 장면을 참조해 통일한다. 변형이 실패하면 그 배경을 잘라 쓴다(폴백)
         ref = _latest_design_bg(db, design_id)
-        final = ref is not None and not imagegen.is_draft((ref.layout or {}).get("quality") or imagegen.DRAFT_QUALITY)
         gen_tpl, force_ratio = tpl, False
         if single:
             if single_master is not None and not regenerate_background:
@@ -531,14 +529,14 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
                 gen_tpl, ref = imagegen.best_single_template(sizes), None
         try:
             path, bg, prompt, layout = _generate_one(db, d, gen_tpl, reference=ref if ref and ref.file_path else None,
-                                                     final=final, force_ratio=force_ratio)
+                                                     force_ratio=force_ratio)
             bg_row = _bg_row(d, preset_id, path, bg.width, bg.height, prompt, bv.id, layout)
             if single and not force_ratio and imagegen.lossy_single((bg.width, bg.height), (w, h)):
                 # 방금 만든 원본을 이 지면이 많이 잘라야 하면 원본을 참조한 비율군 변형을 바로 1장 더 (실패하면 블러 채우기)
                 db.add(bg_row); db.flush()
-                if imagegen.VARIANT and imagegen.can_edit() and imagegen.provider_for(final) == "openai":
+                if imagegen.VARIANT and imagegen.can_edit():
                     try:
-                        p2, bg2, pr2, lay2 = _generate_one(db, d, tpl, reference=bg_row, final=final, force_ratio=True)
+                        p2, bg2, pr2, lay2 = _generate_one(db, d, tpl, reference=bg_row, force_ratio=True)
                         bg_row = _bg_row(d, preset_id, p2, bg2.width, bg2.height, pr2, bv.id, lay2)
                     except HTTPException as e2:
                         log.warning("1장 방식 보완 변형 실패 → 블러 채우기: %s", e2.detail)

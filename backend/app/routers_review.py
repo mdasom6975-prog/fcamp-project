@@ -10,6 +10,12 @@ from .routers_assets import get_db
 router = APIRouter(prefix="/api")
 
 
+def ensure_unlocked(d: Design) -> None:
+    """검수가 끝난(검수 완료) 캠페인은 입력 수정·이미지 재생성·편집을 막는다. 되돌리려면 이미지 초기화로 미검수로 돌린다."""
+    if d.status == "검수 완료":
+        raise HTTPException(409, "검수가 완료된 캠페인은 수정하거나 이미지를 다시 만들 수 없습니다")
+
+
 def invalidate_reviews(db: Session, design_id: int, preset_id: int | None = None) -> None:
     """시안·카피·이미지가 바뀌면 기존 검수 결과를 무효화한다 (다시 검수해야 한다)."""
     q = update(ReviewResult).where(ReviewResult.design_id == design_id)
@@ -174,10 +180,6 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
         bg = db.scalar(select(GeneratedImage).where(
             GeneratedImage.design_id == d.id, GeneratedImage.preset_version_id == pid,
             GeneratedImage.kind == "background").order_by(GeneratedImage.id.desc()).limit(1))
-        if bg is not None and (bg.layout or {}).get("draft"):
-            items.append(review.item("이미지", "배경 품질", "경고",
-                                     f"초안 품질({bg.layout.get('quality')})로 만든 배경입니다. 내보내기 전에 "
-                                     f"'확정 품질로 배경 생성'을 실행하세요 (확정: {imagegen.OPENAI_QUALITY})"))
         items += review.review_preset(pv, comp, texts, text_el, logo_el["box"] if logo_el else None,
                                       scrim, font_ref, brand, logo_aspect, sep, assets=text_assets)
         results += [(pid, it) for it in items]

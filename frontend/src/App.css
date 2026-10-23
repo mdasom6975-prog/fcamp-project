@@ -415,6 +415,10 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .info-chip { background: var(--surface-2); color: var(--text-2); font-size: 12px; padding: 3px 10px; border-radius: 999px; }
 .camp-input-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .camp-msg { font-size: 16px; font-weight: 600; }
+.camp-input-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0 0; }
+.camp-input-grid dt { color: var(--muted, #6b7280); font-size: 13px; }
+.camp-input-grid dd { margin: 0; white-space: pre-wrap; }
+.camp-input-grid .prod-thumb { max-height: 96px; max-width: 160px; background: repeating-conic-gradient(#e5e7eb 0 25%, #fff 0 50%) 50% / 12px 12px; border-radius: 6px; }
 .camp-edit { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .camp-edit label { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .camp-edit label input:not([type=checkbox]), .camp-edit textarea { width: 100%; margin-top: 4px; }
@@ -515,7 +519,6 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .img-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .img-tags { position: absolute; left: 6px; top: 6px; display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 70px); }
 .img-tag { font-size: 11px; padding: 2px 6px; border-radius: 999px; background: rgba(15, 23, 42, .75); color: #fff; white-space: nowrap; }
-.img-tag.draft { background: rgba(180, 83, 9, .85); }
 .img-tag.setting { background: rgba(20, 20, 20, .75); }
 .in-image-row { align-items: baseline; }
 .in-image-row select { margin-left: 4px; }

@@ -12,20 +12,10 @@ from PIL import Image
 from . import calllog, prompts, state
 from .copywriter import client  # (load_dotenv 가 copywriter import 시점에 실행된다)
 
-PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare — 확정(내보낼) 배경의 공급자
-# 초안 배경의 공급자. cloudflare(FLUX.1 schnell, 무료 구간)로 두면 형태·구도를 고르는 동안은 OpenAI 호출이 0 이고,
-# '확정 품질로 배경 생성'이 그 초안을 참조해 OpenAI 로 한 번 만든다. 기본은 PROVIDER 와 같다.
-DRAFT_PROVIDER = os.getenv("IMAGE_PROVIDER_DRAFT", PROVIDER).strip().lower()
-
-
-def provider_for(final: bool) -> str:
-    return PROVIDER if final else DRAFT_PROVIDER
+PROVIDER = os.getenv("IMAGE_PROVIDER", "openai").strip().lower()      # openai | cloudflare
 # OpenAI 기본값: gpt-image-1.5 + medium 품질(비교 테스트 결과 반영, 정사각 장당 약 60원)
 OPENAI_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1.5")
-OPENAI_QUALITY = os.getenv("IMAGE_QUALITY", "medium")                 # low | medium | high | auto — 확정 품질(내보낼 배경)
-# 초안 품질: 배경 형태·구도를 고르는 동안 쓰는 값. 마음에 들면 '확정 품질로 배경 생성' 1회만 OPENAI_QUALITY 로 만든다.
-# low 는 medium 의 약 1/4 비용(gpt-image 계열). 같은 값으로 두면 초안/확정 구분이 사라진다.
-DRAFT_QUALITY = os.getenv("IMAGE_QUALITY_DRAFT", "low")
+OPENAI_QUALITY = os.getenv("IMAGE_QUALITY", "medium")                 # low | medium | high | auto — 모든 배경 생성에 쓰는 단일 품질
 OPENAI_SIZE = os.getenv("IMAGE_SIZE", "1024x1024")                    # 비율군별 생성을 끈 경우(또는 3D 아이콘)의 크기
 # 배경을 비율군(가로형/정사각/세로형)마다 모델 지원 크기로 따로 만든다. 0 이면 예전처럼 정사각 1장을 모든 규격이 공유.
 PER_RATIO = os.getenv("IMAGE_BG_PER_RATIO", "1") != "0"
@@ -178,11 +168,12 @@ def pick_style(tone: dict, brief: dict) -> tuple[str, str]:
 
 
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
-                 single: bool = False) -> str:
+                 single: bool = False, product: bool = False) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
     표현 방식(배경 형태)은 prompts/image/style/<형태>.md (style 이 None 이면 pick_style 로 정한다).
+    product=True 면 제품 누끼 이미지를 참조 이미지로 함께 보내므로 prompts/image/product_ref.md 문장을 덧붙인다.
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
     """
     style = style or pick_style(tone, brief)[0]
@@ -192,10 +183,13 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     # single: 한 장을 모든 지면이 잘라 쓰므로 비율군 구도 대신 '어느 방향으로 잘려도 되는' 공용 구도를 쓴다
     composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}")
     style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
-    return prompts.render("image/background", product_name=brief.get("product_name"),
+    text = prompts.render("image/background", product_name=brief.get("product_name"),
                           description=brief.get("description") or "",
                           key_message=brief.get("key_message") or "지정 없음", target=target,
                           tone=tone.get("description") or "지정 없음", composition=composition, style=style_text)
+    if product:
+        text = prompts.render("image/product_ref", product_name=brief.get("product_name"), base=text)
+    return text
 
 
 def build_variant_prompt(base_prompt: str) -> str:
@@ -203,20 +197,13 @@ def build_variant_prompt(base_prompt: str) -> str:
     return prompts.render("image/same_scene", base=base_prompt)
 
 
-def build_upgrade_prompt(base_prompt: str) -> str:
-    """초안 배경(참조 이미지)을 붙여 같은 장면을 확정 품질로 다시 만드는 프롬프트. 문장은 prompts/image/upgrade.md.
-    초안과 확정의 느낌 차이를 줄이기 위해 장면·구도를 고정하고 질감·디테일만 높이게 한다."""
-    return prompts.render("image/upgrade", base=base_prompt)
-
-
-def prompt_refs(template: str, style: str, variant: bool = False, upgrade: bool = False,
-                single: bool = False) -> list[str]:
+def prompt_refs(template: str, style: str, variant: bool = False, single: bool = False,
+                product: bool = False) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
             prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common")]
-    if upgrade:
-        return [prompts.ref("image/upgrade")] + refs
-    return ([prompts.ref("image/same_scene")] + refs) if variant else refs
+    refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs
+    return ([prompts.ref("image/product_ref")] + refs) if product else refs
 
 
 def _openai_png(prompt: str, model: str, quality: str, size: str = OPENAI_SIZE, kind: str = "background",
@@ -238,16 +225,6 @@ def _openai_png(prompt: str, model: str, quality: str, size: str = OPENAI_SIZE, 
     return base64.b64decode(r.data[0].b64_json)
 
 
-def quality_for(final: bool) -> str:
-    """배경 생성 품질. final 이면 확정(OPENAI_QUALITY), 아니면 초안(DRAFT_QUALITY)."""
-    return OPENAI_QUALITY if final else DRAFT_QUALITY
-
-
-def is_draft(quality: str | None) -> bool:
-    """기록된 품질이 확정 품질보다 낮은가. 품질을 모르던 예전 배경(None)은 초안으로 보지 않는다."""
-    return quality is not None and quality != OPENAI_QUALITY
-
-
 def _generate_openai(prompt: str, size: str = OPENAI_SIZE, quality: str = OPENAI_QUALITY,
                      model: str = OPENAI_MODEL) -> Image.Image:
     return Image.open(io.BytesIO(_openai_png(prompt, model, quality, size=size))).convert("RGB")
@@ -259,14 +236,13 @@ def pricing_rate() -> float:
 
 
 def model_options() -> list[dict]:
-    """프론트 선택용: 모델별 정사각 1장의 초안/확정 추정 비용. 요금표에 없는 모델은 estimated=True."""
+    """프론트 선택용: 모델별 정사각 1장의 추정 비용. 요금표에 없는 모델은 estimated=True."""
     from . import pricing
     out = []
     for m in MODELS:
         row = {"ok": True, "api": "images.generate", "provider": "openai", "model": m, "size": "1024x1024"}
-        d, de = pricing.cost_of({**row, "quality": DRAFT_QUALITY})
-        f, fe = pricing.cost_of({**row, "quality": OPENAI_QUALITY})
-        out.append({"model": m, "default": m == OPENAI_MODEL, "draft_usd": d, "final_usd": f, "estimated": de or fe,
+        usd, est = pricing.cost_of({**row, "quality": OPENAI_QUALITY})
+        out.append({"model": m, "default": m == OPENAI_MODEL, "usd": usd, "estimated": est,
                     "input_fidelity": fidelity_supported(m)})
     return out
 
@@ -305,15 +281,15 @@ def _generate_cloudflare(prompt: str) -> Image.Image:
 
 
 def can_edit() -> bool:
-    """참조 이미지를 붙이는 images.edit 을 쓸 수 있는 공급자인가(OpenAI). 초안→확정 승격에 쓴다."""
+    """참조 이미지를 붙이는 images.edit 을 쓸 수 있는 공급자인가(OpenAI). 비율군 변형·제품 누끼 참조에 쓴다."""
     return PROVIDER == "openai"
 
 
-def can_vary(bg_mode: str | None = None, final: bool = True) -> bool:
-    """다른 비율군을 참조 변형(images.edit)으로 만들 수 있는가. 그 단계의 공급자가 OpenAI + 비율군별 방식 + 변형 켜짐.
-    1장 방식(single)은 비율군 변형이 없다(잘라 쓴다). 초안 공급자가 FLUX 면 초안 단계에는 변형이 없다(비율군마다 독립 생성)."""
+def can_vary(bg_mode: str | None = None) -> bool:
+    """다른 비율군을 참조 변형(images.edit)으로 만들 수 있는가. 공급자가 OpenAI + 비율군별 방식 + 변형 켜짐.
+    1장 방식(single)은 비율군 변형이 없다(잘라 쓴다)."""
     mode = bg_mode or default_bg_mode()
-    return VARIANT and mode == "per_ratio" and provider_for(final) == "openai"
+    return VARIANT and mode == "per_ratio" and PROVIDER == "openai"
 
 
 # 모델이 input_fidelity 를 거절한 사실을 모델별로 파일에 기억한다. 메모리 플래그만 쓰면 서버를 재시작할 때마다
@@ -360,24 +336,32 @@ def _is_fidelity_error(e: Exception) -> bool:
     return err.get("param") == "input_fidelity" or "input_fidelity" in str(err.get("message") or "")
 
 
-def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
-                     quality: str = OPENAI_QUALITY, model: str | None = None) -> Image.Image:
-    """참조 이미지와 같은 장면을 (w, h) 크기·다른 구도로 다시 만든다 (OpenAI images.edit). 비용·한도는 생성 1장과 같다."""
+def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
+                     quality: str = OPENAI_QUALITY, model: str | None = None,
+                     product: Image.Image | None = None) -> Image.Image:
+    """참조 이미지와 같은 장면을 (w, h) 크기·다른 구도로 다시 만든다 (OpenAI images.edit). 비용·한도는 생성 1장과 같다.
+    reference 는 다른 비율군의 배경(없으면 None), product 는 제품 누끼 이미지(투명 PNG, 없으면 None).
+    둘 다 주면 [배경, 제품] 순서로 첨부한다. 하나는 있어야 한다."""
     import openai
     if usage("openai")["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
                             "한도를 올리려면 IMAGE_DAILY_LIMIT 을 조정하세요")
-    buf = io.BytesIO()
-    reference.convert("RGB").save(buf, format="PNG")
-    buf.seek(0)
-    buf.name = "reference.png"
+    files = []
+    for name, img, mode in (("reference.png", reference, "RGB"), ("product.png", product, "RGBA")):
+        if img is not None:
+            b = io.BytesIO()
+            img.convert(mode).save(b, format="PNG")
+            files.append((name, b.getvalue(), "image/png"))
+    if not files:
+        raise ValueError("참조 이미지나 제품 이미지가 필요합니다")
     model = model or OPENAI_MODEL
     extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and fidelity_supported(model)) else {}
     def _edit(**kw):
-        with calllog.timed("images.edit", "variant", "openai", model, size=f"{w}x{h}", quality=quality) as info:
+        kind = "variant" if reference is not None else "product"
+        with calllog.timed("images.edit", kind, "openai", model, size=f"{w}x{h}", quality=quality) as info:
             info["prompt_text"] = {"prompt": prompt}
             r = client().with_options(timeout=240.0, max_retries=0).images.edit(
-                model=model, image=buf, prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
+                model=model, image=files if len(files) > 1 else files[0], prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
             calllog.note_image_usage(info, r)
             return r
     try:
@@ -387,7 +371,6 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image,
             # 일부 모델(gpt-image-2.5 계열)은 input_fidelity 를 받지 않는다 → 그 인자만 빼고 한 번 더 (검증 단계 실패라 과금 없음)
             if extra and _is_fidelity_error(e):
                 _remember_fidelity(model, False)      # 이후 호출·다음 프로세스부터는 처음부터 보내지 않는다
-                buf.seek(0)
                 r = _edit()
             else:
                 raise

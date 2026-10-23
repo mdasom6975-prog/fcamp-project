@@ -23,7 +23,7 @@ from . import calllog, copyfields, copywriter, icons, imagegen, llm, phrases, pr
 from . import db as db_module
 from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
-STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant"),
+STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant", "product"),
           "icon": ("icon", "icon_names", "icon_redraw"), "judge": ("judge",)}
 STAGE_OF = {k: st for st, ks in STAGES.items() for k in ks}
 STAGE_LABEL = {"copy": "시안 생성(카피)", "background": "배경 이미지 생성", "icon": "아이콘 생성", "judge": "비전 채점"}
@@ -194,7 +194,7 @@ def _row_entry(r: dict, text: dict) -> dict:
 def _bg_entry(g: GeneratedImage, source: str = "stored") -> dict:
     lay = g.layout or {}
     ref = lay.get("reference") or {}
-    kind = "upgrade" if ref.get("upgraded_from_quality") else "variant" if ref else "background"
+    kind = "variant" if ref else "product" if lay.get("product_asset_id") else "background"
     return {"stage": "background", "kind": kind, "source": source,
             "ts": _utc(g.created_at),
             "provider": lay.get("provider"), "model": lay.get("model"), "quality": lay.get("quality"),

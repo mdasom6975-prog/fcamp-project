@@ -7,7 +7,7 @@ export type ImgOut = {
   layout: {
     warnings?: string[]; template?: string; margin_source?: string; separate_assets?: boolean
     style?: string; style_reason?: string; logo_placement?: { corner: string }
-    quality?: string; draft?: boolean    // 배경 행: 생성 품질과 초안 여부(확정 품질보다 낮게 만들었는가)
+    quality?: string    // 배경 행: 생성 품질
     crop?: { mode?: string }; single_extra?: boolean; fill?: string   // 합성 행: 크롭 방식('블러 채우기' 등) / 배경 행: 1장 방식 보완 변형·블러 표시
   }
 } | null
@@ -62,7 +62,6 @@ export default function ImageGrid({ items, rows, selected, onSelect, badge, dimm
               <span className="img-tags">
                 {it.content_kind === '분리 자산형' && <span className="img-tag">분리 자산형</span>}
                 {inImageTag(it.in_image, it.name) && <span className="img-tag setting" title="이미지 안 문구 설정을 지면 기본값과 다르게 바꿨습니다">{inImageTag(it.in_image, it.name)}</span>}
-                {row?.background?.layout.draft && <span className="img-tag draft" title={`배경을 초안 품질(${row.background.layout.quality})로 만들었습니다. 내보내기 전에 '확정 품질로 배경 생성'을 실행하세요`}>초안 배경</span>}
                 {comp?.layout.crop?.mode === '블러 채우기' && <span className="img-tag" title="보완 변형을 만들지 못해 원본 전체를 넣고 남는 자리를 흐린 확대본으로 채웠습니다">블러 채움</span>}
                 {row?.background?.layout.single_extra && <span className="img-tag" title="1장 방식에서 잘라 쓰면 피사체가 많이 사라져 원본을 참조해 이 비율군용으로 1장 더 만들었습니다">보완 변형</span>}
               </span>

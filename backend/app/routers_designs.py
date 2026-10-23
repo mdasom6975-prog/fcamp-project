@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from . import phrases
 from .models import Asset, Brand, BrandVersion, Design, PresetVersion
 from .routers_assets import get_db
-from .routers_review import invalidate_reviews
+from .routers_review import ensure_unlocked, invalidate_reviews
 
 router = APIRouter(prefix="/api")
 
@@ -202,10 +202,11 @@ def get_design(design_id: int, db: Session = Depends(get_db)):
 
 @router.patch("/designs/{design_id}")
 def update_design(design_id: int, body: DesignPatch, db: Session = Depends(get_db)):
-    """입력(메시지)·규격 수정. 바뀌면 기존 검수 결과는 무효화된다."""
+    """입력(메시지)·규격 수정. 바뀌면 기존 검수 결과는 무효화된다. 검수 완료된 캠페인은 409."""
     d = db.get(Design, design_id)
     if not d:
         raise HTTPException(404, "시안을 찾을 수 없습니다")
+    ensure_unlocked(d)
     if body.brief is not None:
         _check_product_image(body.brief.product_image_asset_id, db)
         dump = body.brief.model_dump()
@@ -226,7 +227,5 @@ def update_design(design_id: int, body: DesignPatch, db: Session = Depends(get_d
         _check_presets(ids, db)
         d.preset_version_ids = ids
     invalidate_reviews(db, d.id)
-    if d.status == "검수 완료":
-        d.status = "수정됨"
     db.commit()
     return _out(d, db)

@@ -13,6 +13,7 @@ from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnap
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
 from .routers_copy import select_variant
+from .routers_review import ensure_unlocked
 from .routers_images import _color, _edit_saved, _img_out, create_shared_background, make_image
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
@@ -287,6 +288,7 @@ def _persist(db, rows, applied):
 @router.put("/designs/{design_id}/presets/{preset_id}/edit")
 def save_edit(design_id: int, preset_id: int, elements: list[dict] = Body(..., embed=True), db: Session = Depends(get_db)):
     d = _design(db, design_id)
+    ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
     if not rows:
@@ -302,6 +304,7 @@ def save_edit(design_id: int, preset_id: int, elements: list[dict] = Body(..., e
 def common_text(design_id: int, text: str = Body(..., embed=True), db: Session = Depends(get_db)):
     """문구를 모든 지면에 적용한다. 잠겼거나 지면별로 따로 수정한 문구는 건드리지 않는다."""
     d = _design(db, design_id)
+    ensure_unlocked(d)
     text = text.strip()
     if not text or len(text) > 300:
         raise HTTPException(400, "문구는 1~300자여야 합니다")
@@ -336,6 +339,7 @@ def common_text(design_id: int, text: str = Body(..., embed=True), db: Session =
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/regenerate")
 def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=True), db: Session = Depends(get_db)):
     d = _design(db, design_id)
+    ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
     if not rows:
@@ -388,6 +392,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
 def reset_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     """편집 내용을 버리고 자동 배치 상태로 되돌린다."""
     d = _design(db, design_id)
+    ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     for r in _els(db, d.id, preset_id):
         db.delete(r)
@@ -457,6 +462,7 @@ def apply_variant(design_id: int, variant_no: int = Body(..., embed=True), overw
     """시안 번호를 모든 지면에 적용하고, 이미 만든 합성본도 새 문구로 다시 합성한다(배경 유지, 이미지 생성 비용 없음).
     편집 화면에서 저장한 지면은 위치·크기·잠금을 그대로 두고 문구만 바꾼다. 직접 고친 문구는 overwrite_custom 일 때만 덮어쓴다."""
     d = _design(db, design_id)
+    ensure_unlocked(d)
     plan = _variant_plan(db, d, variant_no)           # 선택을 바꾸기 전에 이전 선택과 비교해 둔다
     select_variant(design_id, variant_no, db)         # 선택 표시 변경 + 검수 무효화 (404 처리 포함)
     recomposed, kept_custom, skipped = [], [], []

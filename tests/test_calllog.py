@@ -54,15 +54,10 @@ def test_failed_call_is_recorded_but_not_counted(log):
     assert rows[1]["ms"] is None
 
 
-def test_quality_for_and_is_draft(monkeypatch):
+def test_single_quality_has_no_draft_split():
     from app import imagegen
-    monkeypatch.setattr(imagegen, "OPENAI_QUALITY", "medium")
-    monkeypatch.setattr(imagegen, "DRAFT_QUALITY", "low")
-    assert imagegen.quality_for(False) == "low" and imagegen.quality_for(True) == "medium"
-    assert imagegen.is_draft("low") and not imagegen.is_draft("medium")
-    assert not imagegen.is_draft(None)       # 품질을 기록하지 않던 예전 배경은 초안으로 보지 않는다
-    monkeypatch.setattr(imagegen, "DRAFT_QUALITY", "medium")   # 같은 값이면 초안 구분이 없다
-    assert not imagegen.is_draft(imagegen.quality_for(False))
+    assert imagegen.OPENAI_QUALITY == "medium"
+    assert not any(hasattr(imagegen, n) for n in ("DRAFT_QUALITY", "DRAFT_PROVIDER", "quality_for", "is_draft", "provider_for"))
 
 
 def test_cost_estimate_and_tokens(log, tmp_path, monkeypatch):

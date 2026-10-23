@@ -12,7 +12,7 @@ type Pal = { hex: string; share: number }
 type Match = { per_color: { role: string; hex: string; nearest: string; delta_e: number; share: number }[]; coverage: number | null; coverage_roles: string[]; near_de: number }
 type Bg = {
   id: number; file: string; width: number; height: number; template: string | null; style: string | null; kind: string
-  reference: { background_id: number; template?: string; upgraded_from_quality?: string } | null
+  reference: { background_id: number; template?: string } | null
   quality: string | null; provider: string | null; model: string | null; style_reason: string | null; created_at: string | null
   palette: Pal[]; match: Match; exists: boolean
 }
@@ -44,7 +44,7 @@ type BrandLite = { id: number; name: string }
 type DesignLite = { id: number; kind: string; status: string; brief: { product_name?: string }; brand: { name: string; version_no: number }; created_at: string }
 
 const STAGE_LABEL: Record<Entry['stage'], string> = { copy: '시안 생성(카피)', background: '배경 이미지 생성', icon: '아이콘 생성', judge: '비전 채점' }
-const KIND: Record<string, string> = { ...KIND_LABEL, upgrade: '초안→확정 승격', judge: '비전 채점' }
+const KIND: Record<string, string> = { ...KIND_LABEL, judge: '비전 채점' }
 const SOURCE_LABEL: Record<Source, string> = { recorded: '보낸 전문(기록)', stored: '저장된 전문(DB)', reconstructed: '재구성', note: '안내' }
 const SOURCE_HINT: Record<Source, string> = {
   recorded: '호출 시점에 실제로 보낸 문장을 그대로 기록한 것입니다',
@@ -426,7 +426,7 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
                   {data.cost.rows.map((r, i) => (
                     <tr key={i} className={r.ok ? '' : 'bad'}>
                       <td title={r.ts}>{when(r.ts)}</td>
-                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
+                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', product: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
                       <td>{KIND[r.kind] ?? r.kind}</td><td>{r.api}</td><td>{r.model}{r.served_by ? ` → ${r.served_by}` : ''}</td>
                       <td>{r.api === 'chat' ? `${tok(r.tokens_in ?? 0)} / ${tok(r.tokens_out ?? 0)}` : `${r.size ?? ''} ${r.quality ?? ''}`}</td>
                       <td>{sec(r.ms)}</td><td>{usd(r.cost_usd)}{r.estimated ? '*' : ''}</td>

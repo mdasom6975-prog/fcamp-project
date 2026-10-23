@@ -55,7 +55,7 @@ export default function MasterPreview({ data, presets, compact }: { data: Worksp
           <dt>제목</dt><dd>{v ? <>{v.headline} <span className="muted n">{v.headline.length}자 · 이미지 안 + 매체 제목 필드</span></> : <span className="muted">선택된 카피 없음</span>}</dd>
           <dt>본문</dt><dd>{v?.body ? <>{v.body} <span className="muted n">{v.body.length}자 · 매체 '기본 문구/설명' 필드</span></> : <span className="muted">—</span>}</dd>
           <dt>CTA</dt><dd>{v?.cta ? <>{v.cta} <span className="muted n">매체 버튼 설정(카카오 '버튼명' 필드는 글자 수 검수)</span></> : <span className="muted">—</span>}</dd>
-          <dt>배경</dt><dd>{data.backgroundId ? <>{data.backgroundDraft ? '초안 품질' : '확정 품질'}{data.backgroundModel ? ` · ${data.backgroundModel}` : ''}</> : <span className="muted">아직 없음</span>}</dd>
+          <dt>배경</dt><dd>{data.backgroundId ? <>{data.backgroundQuality ?? ''}{data.backgroundModel ? `${data.backgroundQuality ? ' · ' : ''}${data.backgroundModel}` : ''}</> : <span className="muted">아직 없음</span>}</dd>
         </dl>
         <p className="muted master-note">
           위 카드는 실제 합성본 파일을 그대로 보여 주고, 그 아래 텍스트 영역은 매체(Meta·카카오·Google)가 이미지 밖에 그려 주는 부분을 흉내 낸 것입니다.

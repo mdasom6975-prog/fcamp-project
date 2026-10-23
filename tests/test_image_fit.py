@@ -160,10 +160,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(imagegen, "PROVIDER", "openai")
     monkeypatch.setattr(imagegen, "VARIANT", True)
     monkeypatch.setattr(imagegen, "OPENAI_QUALITY", "medium")
-    monkeypatch.setattr(imagegen, "DRAFT_QUALITY", "low")
     calls: list[tuple[int, int]] = []
     variants: list[dict] = []     # 참조 이미지로 만든 변형 호출 기록
-    qualities: list[str] = []     # 호출마다 넘어온 품질(초안 low / 확정 medium)
+    qualities: list[str] = []     # 호출마다 넘어온 품질(항상 medium)
     used: list[str | None] = []    # 호출마다 넘어온 모델
     prompts: list[str] = []        # 호출마다 넘어온 프롬프트
 
@@ -171,9 +170,10 @@ def env(tmp_path, monkeypatch):
         calls.append((w, h)); qualities.append(quality); used.append(model); prompts.append(prompt)
         return _scene(w, h)
 
-    def fake_variant(prompt, w, h, reference, quality="medium", model=None):
+    def fake_variant(prompt, w, h, reference, quality="medium", model=None, product=None):
         calls.append((w, h)); qualities.append(quality); used.append(model); prompts.append(prompt)
-        variants.append({"size": (w, h), "ref_size": reference.size, "prompt": prompt})
+        variants.append({"size": (w, h), "ref_size": reference.size if reference is not None else None,
+                         "product_size": product.size if product is not None else None, "prompt": prompt})
         return _scene(w, h)
     monkeypatch.setattr(imagegen, "generate_background", fake_generate)
     monkeypatch.setattr(imagegen, "generate_variant", fake_variant)
@@ -244,49 +244,25 @@ def test_regenerate_makes_one_background_per_ratio_group(env):
         assert land.layout["reference"]["background_id"] == feed.id and land.layout["reference"]["template"] == "세로형"
         assert land.layout["prompts"][0].startswith("image/same_scene@")
 
-def test_regenerate_uses_draft_quality_unless_final(env):
-    """기본은 초안 품질(low), final=True 면 확정 품질(medium). layout 에 품질·초안 여부가 남고 응답에도 나온다."""
+def test_regenerate_always_uses_medium_quality(env):
+    """품질은 항상 IMAGE_QUALITY(medium) 하나. 초안/확정 구분이 없고, layout 과 응답에 품질만 남는다."""
     c, ids, q = env["client"], env["ids"], env["qualities"]
     out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
-    assert out["quality"] == "low" and out["draft"] is True and q == ["low"] * 3
+    assert out["quality"] == "medium" and "draft" not in out and "upgraded" not in out and q == ["medium"] * 3
     rows = c.get(f"/api/designs/{ids['design']}/images").json()
-    assert all(r["background"]["layout"]["draft"] and r["background"]["layout"]["quality"] == "low" for r in rows)
+    assert all(r["background"]["layout"]["quality"] == "medium" and "draft" not in r["background"]["layout"] for r in rows)
     q.clear()
-    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True}).json()
-    assert out["quality"] == "medium" and out["draft"] is False and q == ["medium"] * 3
-    rows = c.get(f"/api/designs/{ids['design']}/images").json()
-    assert all(not r["background"]["layout"]["draft"] for r in rows)
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()   # 다시 생성해도 medium
+    assert out["quality"] == "medium" and q == ["medium"] * 3
 
 
-def test_new_ratio_group_matches_reference_quality(env):
-    """지면 합성이 새 비율군 배경을 만들 때: 시안의 기존 배경이 확정 품질이면 같은 품질로, 없으면 초안으로."""
-    from sqlalchemy import select
-    c, ids, q, Local, models = env["client"], env["ids"], env["qualities"], env["Local"], env["models"]
+def test_new_ratio_group_uses_medium_quality(env):
+    """지면 합성이 배경을 새로 만들 때도 medium."""
+    c, ids, q = env["client"], env["ids"], env["qualities"]
     pid = ids["presets"]["네이티브 2:1"]
-    # 배경이 하나도 없을 때 첫 합성 → 초안
-    with Local() as db:
-        v = models.CopyVariant(design_id=ids["design"], preset_version_id=pid, batch_no=1, variant_no=1,
-                               headline="제목", body="", cta="", selected=True)
-        db.add(v); db.commit()
+    _select_copy(env, [pid])
     assert c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
-    assert q == ["low"]
-    # 확정 품질로 전체 재생성 후, 배경이 지워진 다른 비율군을 합성하면 참조 품질(medium)을 따른다
-    q.clear()
-    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True})
-    q.clear()
-    with Local() as db:
-        for g in db.scalars(select(models.GeneratedImage).where(models.GeneratedImage.design_id == ids["design"],
-                                                                models.GeneratedImage.kind == "background")).all():
-            if (g.layout or {}).get("template") == "정사각":
-                db.delete(g)
-        db.commit()
-    sq = ids["presets"]["정사각 1:1"]
-    with Local() as db:
-        db.add(models.CopyVariant(design_id=ids["design"], preset_version_id=sq, batch_no=1, variant_no=1,
-                                  headline="제목", body="", cta="", selected=True)); db.commit()
-    assert c.post(f"/api/designs/{ids['design']}/presets/{sq}/image", json={"regenerate_background": False}).status_code == 200
     assert q == ["medium"]
-
 
 
 def test_variant_disabled_generates_independently(env, monkeypatch):
@@ -651,33 +627,6 @@ def test_editor_background_regenerate_makes_only_editing_ratio_groups(env):
     assert rows[pid]["background"] is not None and rows[p["피드 4:5"]]["background"] is None
 
 
-def test_final_quality_upgrades_from_current_draft_scene(env):
-    """확정 품질 생성은 같은 비율군의 현재 초안을 참조해(승격 프롬프트) 장면·구도를 유지하고, 나머지 비율군은 그 결과를 참조한다."""
-    c, ids, calls, variants, q = env["client"], env["ids"], env["calls"], env["variants"], env["qualities"]
-    did = ids["design"]
-    c.post(f"/api/designs/{did}/background/regenerate", json={})
-    calls.clear(); variants.clear(); q.clear()
-    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
-    assert out["upgraded"] is True and out["generated"] == 3 and len(calls) == 3 and q == ["medium"] * 3
-    assert len(variants) == 3, "첫 비율군도 초안을 참조한 변형(승격)으로 만든다"
-    up = variants[0]
-    assert up["size"] == (1024, 1536) and up["ref_size"] == (1024, 1536)
-    assert up["prompt"].startswith("[참조 이미지] 첨부한 이미지는 이 지면의 초안 배경") and "[구도]" in up["prompt"]
-    assert all(v["prompt"].startswith("[참조 이미지] 첨부한 이미지는 같은 캠페인") for v in variants[1:])
-    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
-    feed = rows[ids["presets"]["피드 4:5"]]["background"]["layout"]
-    assert feed["reference"]["upgraded_from_quality"] == "low" and feed["prompts"][0].startswith("image/upgrade@")
-    assert not feed["draft"] and all(not r["background"]["layout"]["draft"] for r in rows.values())
-    # 승격본은 새 장면: 다른 비율군이 모두 그 장면을 따른다
-    assert len({r["background"]["layout"]["scene"] for r in rows.values()}) == 1
-
-
-def test_final_quality_without_draft_generates_fresh(env):
-    c, ids, variants = env["client"], env["ids"], env["variants"]
-    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={"final": True}).json()
-    assert out["upgraded"] is False and len(variants) == 2
-
-
 def test_regenerate_rerenders_presets_with_saved_edits(env):
     """편집 화면에서 저장한 지면은 자동 합성이 막히므로, 배경 재생성이 편집 요소를 유지한 채 새 배경으로 다시 그린다."""
     c, ids = env["client"], env["ids"]
@@ -782,18 +731,6 @@ def test_single_mode_blur_fill_when_variant_fails(env, monkeypatch):
     assert r.status_code == 200 and r.json()["composite"]["layout"]["crop"]["mode"] != "블러 채우기"
 
 
-def test_single_mode_final_upgrades_from_draft(env):
-    c, ids, variants, q = env["client"], env["ids"], env["variants"], env["qualities"]
-    did = ids["design"]
-    c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"})
-    c.post(f"/api/designs/{did}/background/regenerate", json={})
-    variants.clear()
-    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
-    # 승격(원본, 초안 참조) 1 + 손실 큰 가로형 보완 변형(승격본 참조) 1
-    assert out["upgraded"] is True and out["generated"] == 2 and len(variants) == 2 and q[-2:] == ["medium"] * 2
-    assert variants[0]["prompt"].startswith("[참조 이미지] 첨부한 이미지는 이 지면의 초안 배경") and variants[1]["size"] == (1536, 1024)
-
-
 def test_crop_keep_weights_side_loss_less():
     from app import imagegen
     sq = (1024, 1024)
@@ -821,7 +758,7 @@ def test_model_choice_is_saved_and_used(env):
     j = c.get("/api/image-settings").json()
     assert [m["model"] for m in j["models"]][1:] == ["gpt-image-1", "test-model-x"] and j["models"][0]["default"]
     gi1 = next(m for m in j["models"] if m["model"] == "gpt-image-1")
-    assert gi1["draft_usd"] == 0.011 and gi1["final_usd"] == 0.042 and gi1["estimated"] is False
+    assert gi1["usd"] == 0.042 and gi1["estimated"] is False and "draft_usd" not in gi1
     assert c.put(f"/api/designs/{did}/image-settings", json={"image_model": "nope"}).status_code == 400
     assert c.put(f"/api/designs/{did}/image-settings", json={"image_model": "gpt-image-1"}).status_code == 200
     c.post(f"/api/designs/{did}/background/regenerate", json={})
@@ -836,45 +773,6 @@ def test_model_choice_is_saved_and_used(env):
     assert b["image_model"] == "gpt-image-1" and b["key_message"] == "바꾼 메시지"
 
 
-def test_flux_draft_provider_keeps_openai_for_final_only(env, monkeypatch):
-    """IMAGE_PROVIDER_DRAFT=cloudflare: 초안은 비율군마다 FLUX 로 독립 생성(변형 없음, OpenAI 0회), 확정은 초안을 참조해
-    OpenAI 로 승격하고 나머지 비율군은 그 결과를 참조한다."""
-    from app import imagegen
-    c, ids, variants, q, Local, models = env["client"], env["ids"], env["variants"], env["qualities"], env["Local"], env["models"]
-    did = ids["design"]
-    monkeypatch.setattr(imagegen, "DRAFT_PROVIDER", "cloudflare")
-    flux: list[str] = []
-    openai_calls: list[tuple] = []
-    # 픽스처의 가짜 generate_background 대신 공급자 인자로 갈리는 가짜(라우터가 provider 를 바르게 넘기는지 본다)
-    def by_provider(prompt, w, h, quality="medium", model=None, provider=None):
-        if provider == "cloudflare":
-            flux.append(prompt); return _scene(1024, 1024)
-        openai_calls.append((w, h, quality)); return _scene(w, h)
-    monkeypatch.setattr(imagegen, "generate_background", by_provider)
-    out = c.post(f"/api/designs/{did}/background/regenerate", json={}).json()
-    assert out["generated"] == 3 and len(flux) == 3 and openai_calls == [] and variants == []
-    rows = c.get(f"/api/designs/{did}/images").json()
-    assert all(r["background"]["layout"]["provider"] == "cloudflare" and r["background"]["layout"]["draft"] for r in rows)
-    assert rows[0]["background"]["width"] == 1024 and rows[0]["background"]["height"] == 1024, "FLUX 는 정사각"
-    # 합성은 초안 단계 변형이 없으므로 추가 호출 없이 최신 배경을 잘라 쓴다
-    _select_copy(env, ids["presets"].values())
-    pid = ids["presets"]["네이티브 2:1"]
-    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
-    assert len(flux) == 3 and openai_calls == []
-    # 확정: 합성본이 있는 비율군(가로형)만 초안(정사각 FLUX)을 참조해 OpenAI 로 승격, 나머지 비율군은 미룬다
-    out = c.post(f"/api/designs/{did}/background/regenerate", json={"final": True}).json()
-    assert out["upgraded"] is True and out["generated"] == 1 and sorted(out["deferred"]) == ["세로형", "정사각"]
-    assert len(variants) == 1 and variants[0]["ref_size"] == (1024, 1024) and variants[0]["size"] == (1536, 1024)
-    assert len(flux) == 3 and openai_calls == [] and q[-1] == "medium"
-    rows = {r["preset_id"]: r for r in c.get(f"/api/designs/{did}/images").json()}
-    land = rows[pid]["background"]["layout"]
-    assert land["provider"] == "openai" and not land["draft"] and land["reference"]["upgraded_from_quality"] == "low"
-    # 미룬 비율군은 합성할 때 확정 배경을 참조해 OpenAI 변형으로 만든다(확정 품질 유지)
-    feed = ids["presets"]["피드 4:5"]
-    assert c.post(f"/api/designs/{did}/presets/{feed}/image", json={"regenerate_background": False}).status_code == 200
-    assert len(variants) == 2 and variants[-1]["size"] == (1024, 1536) and q[-1] == "medium" and len(flux) == 3
-
-
 def test_generate_background_dispatches_by_provider(monkeypatch):
     from app import imagegen
     monkeypatch.setattr(imagegen, "usage", lambda provider=None: {"exhausted": False})
@@ -882,9 +780,10 @@ def test_generate_background_dispatches_by_provider(monkeypatch):
     monkeypatch.setattr(imagegen, "_generate_openai", lambda prompt, size, quality, model: _scene(*map(int, size.split("x"))))
     assert imagegen.generate_background("p", 1536, 1024, provider="cloudflare").size == (1024, 1024)
     assert imagegen.generate_background("p", 1536, 1024, provider="openai").size == (1536, 1024)
-    monkeypatch.setattr(imagegen, "PROVIDER", "openai"); monkeypatch.setattr(imagegen, "DRAFT_PROVIDER", "cloudflare")
-    assert imagegen.provider_for(True) == "openai" and imagegen.provider_for(False) == "cloudflare"
-    assert not imagegen.can_vary("per_ratio", final=False) and imagegen.can_vary("per_ratio", final=True)
+    monkeypatch.setattr(imagegen, "PROVIDER", "openai")
+    assert imagegen.can_vary("per_ratio") and not imagegen.can_vary("single")
+    monkeypatch.setattr(imagegen, "PROVIDER", "cloudflare")
+    assert not imagegen.can_vary("per_ratio") and not imagegen.can_edit()
 
 
 def _font():
@@ -1005,3 +904,105 @@ def test_editing_validates_and_renders_body_cta():
     assert img.size == (W, H) and measure["cta"]["box"] == [10, 420, 170, 460] and measure["cta"]["contrast"] > 4.5
     assert measure["body"]["lines"] == ["본문 문장"]
     assert img.getpixel((90, 440)) != img.getpixel((5, 440)), "버튼 배경이 그려졌다"
+
+
+# ---- 제품 누끼 이미지 참조 ----
+def _upload_product(env):
+    import io
+    c, ids = env["client"], env["ids"]
+    buf = io.BytesIO()
+    im = Image.new("RGBA", (400, 600), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rounded_rectangle((60, 40, 340, 560), 40, fill=(200, 60, 60, 255))
+    im.save(buf, format="PNG")
+    r = c.post("/api/assets", data={"kind": "product", "brand_id": str(ids["brand"])},
+               files={"file": ("product.png", buf.getvalue(), "image/png")})
+    assert r.status_code < 400, r.text
+    aid = r.json()["id"]
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    r = c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_image_asset_id": aid}})
+    assert r.status_code == 200, r.text
+    return aid
+
+
+def test_product_image_is_attached_to_every_background_call(env):
+    """제품 누끼가 있으면 첫 비율군도 images.edit(제품만 첨부), 나머지 비율군은 [배경, 제품]을 함께 첨부하고
+    프롬프트에 제품 참조 문장이 들어간다. layout 에 제품 자산 id 와 프롬프트 기록이 남는다."""
+    c, ids, variants = env["client"], env["ids"], env["variants"]
+    aid = _upload_product(env)
+    out = c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).json()
+    assert out["generated"] == 3 and len(variants) == 3, "첫 비율군도 제품 참조 호출(generate_variant)로 만든다"
+    first = variants[0]
+    assert first["ref_size"] is None and first["product_size"] is not None and first["size"] == (1024, 1536)
+    assert first["prompt"].startswith("[제품 이미지]") and "리빙 창고 대방출" in first["prompt"] and "[장면]" in first["prompt"]
+    assert all(v["ref_size"] == (1024, 1536) and v["product_size"] is not None for v in variants[1:])
+    assert all("[제품 이미지]" in v["prompt"] and v["prompt"].startswith("[참조 이미지]") for v in variants[1:])
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    lay = rows[0]["background"]["layout"]
+    assert lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_ref@")
+
+
+def test_without_product_image_uses_plain_generation(env):
+    c, ids, variants = env["client"], env["ids"], env["variants"]
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert all(v["product_size"] is None for v in variants)
+    assert len(variants) == 2, "첫 비율군은 generate_background"
+    rows = c.get(f"/api/designs/{ids['design']}/images").json()
+    assert "product_asset_id" not in rows[0]["background"]["layout"]
+
+
+def test_product_image_is_ignored_when_provider_cannot_edit(env, monkeypatch):
+    from app import imagegen
+    c, ids, variants = env["client"], env["ids"], env["variants"]
+    _upload_product(env)
+    monkeypatch.setattr(imagegen, "PROVIDER", "cloudflare")
+    monkeypatch.setattr(imagegen, "generate_background", lambda prompt, w, h, quality="medium", model=None, provider=None: _scene(1024, 1024))
+    assert c.post(f"/api/designs/{ids['design']}/background/regenerate", json={}).status_code == 200
+    assert variants == []
+
+
+# ---- 검수 완료 후 잠금 ----
+def _set_status(env, status):
+    with env["Local"]() as db:
+        d = db.get(env["models"].Design, env["ids"]["design"])
+        d.status = status
+        db.commit()
+
+
+def test_reviewed_campaign_blocks_edit_and_regeneration(env):
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    did, pid = ids["design"], ids["presets"]["피드 4:5"]
+    _select_copy(env, [pid])
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    calls.clear()
+    _set_status(env, "검수 완료")
+    d = c.get(f"/api/designs/{did}").json()
+    assert d["status"] == "검수 완료" and d["brief"]["product_name"]      # 입력 값은 볼 수 있다
+    for r in (c.patch(f"/api/designs/{did}", json={"brief": {**d["brief"], "key_message": "바꿈"}}),
+              c.post(f"/api/designs/{did}/background/regenerate", json={}),
+              c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}),
+              c.put(f"/api/designs/{did}/image-settings", json={"bg_mode": "single"}),
+              c.post(f"/api/designs/{did}/presets/{pid}/edit/reset"),
+              c.post(f"/api/designs/{did}/edit/common-text", json={"text": "다른 제목"})):
+        assert r.status_code == 409 and "검수" in r.json()["detail"], r.text
+    assert calls == [], "잠긴 캠페인은 이미지 호출이 없다"
+    assert c.get(f"/api/designs/{did}").json()["brief"]["key_message"] == "특가"
+
+
+def test_reset_generated_unlocks_reviewed_campaign(env):
+    c, ids = env["client"], env["ids"]
+    did = ids["design"]
+    _set_status(env, "검수 완료")
+    assert c.post(f"/api/designs/{did}/reset-generated", json={}).status_code == 200
+    d = c.get(f"/api/designs/{did}").json()
+    assert d["status"] == "미검수"
+    r = c.patch(f"/api/designs/{did}", json={"brief": {**d["brief"], "key_message": "바꿈"}})
+    assert r.status_code == 200 and r.json()["brief"]["key_message"] == "바꿈"
+
+
+def test_unreviewed_campaign_input_is_editable(env):
+    c, ids = env["client"], env["ids"]
+    did = ids["design"]
+    d = c.get(f"/api/designs/{did}").json()
+    assert d["status"] == "미검수"
+    r = c.patch(f"/api/designs/{did}", json={"brief": {**d["brief"], "description": "설명 추가"}})
+    assert r.status_code == 200 and r.json()["brief"]["description"] == "설명 추가"

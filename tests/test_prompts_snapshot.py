@@ -164,6 +164,15 @@ def test_background_prompt_styles(style):
                      imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "정사각", style) + "\n")
 
 
+def test_background_product_prompt():
+    """제품 누끼 참조 문장 (image/product_ref.md + 정사각 배경 프롬프트), 비율군 변형과 함께 쓸 때."""
+    from app import imagegen
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "정사각", "실사 제품·공간", product=True)
+    _assert_snapshot("image__product_정사각", base + "\n")
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True)
+    _assert_snapshot("image__product_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
+
+
 def test_background_variant_prompt():
     """참조 이미지와 함께 보내는 '같은 장면' 변형 프롬프트 (image/same_scene.md + 가로형 배경 프롬프트)."""
     from app import imagegen

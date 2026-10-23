@@ -52,7 +52,7 @@ backend/.venv/bin/python tools/migrate_to_supabase.py
    install/build 명령과 출력 폴더는 `vercel.json` 에 있다.
 2. Settings → Environment Variables 에 `.env.example` 의 값을 넣는다:
    `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_BUCKET`, 모델 API 키 4개,
-   `IMAGE_DAILY_LIMIT`, `IMAGE_PROVIDER_DRAFT`, `APP_PASSWORD`, `APP_USER`, `APP_PUBLIC=1`.
+   `IMAGE_DAILY_LIMIT`, `APP_PASSWORD`, `APP_USER`, `APP_PUBLIC=1`.
 3. Deploy. 끝나면 확인:
    ```bash
    curl https://<프로젝트>.vercel.app/api/health     # {"status":"ok","presets":N}

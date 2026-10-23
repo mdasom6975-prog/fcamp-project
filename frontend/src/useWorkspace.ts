@@ -12,7 +12,7 @@ export type WorkspaceData = {
   compositeCount: number
   backgroundId: number | null
   backgroundFile: string | null
-  backgroundDraft: boolean
+  backgroundQuality: string | null
   backgroundModel: string | null
   composites: { preset_id: number; id: number; file: string | null; width: number; height: number; separate: boolean; edited: boolean }[]
   iconCount: number
@@ -24,7 +24,7 @@ export type WorkspaceData = {
 
 const EMPTY: WorkspaceData = {
   brandName: '', logoAssetId: null, selected: null, copyCount: 0, presetCount: 0, compositeCount: 0,
-  backgroundId: null, backgroundFile: null, backgroundDraft: false, backgroundModel: null, composites: [],
+  backgroundId: null, backgroundFile: null, backgroundQuality: null, backgroundModel: null, composites: [],
   iconCount: 0, iconTarget: 10, review: null, calls: null, usage: null,
 }
 
@@ -54,7 +54,7 @@ export function useWorkspace(designId: number | null, brandId: number | null, br
       compositeCount: rows.filter((r) => r.composite).length,
       backgroundId: bg?.id ?? null,
       backgroundFile: bg?.file ?? null,
-      backgroundDraft: !!bg?.layout?.draft,
+      backgroundQuality: bg?.layout?.quality ?? null,
       backgroundModel: bg?.layout?.model ?? null,
       composites: rows.filter((r) => r.composite).map((r) => ({
         preset_id: r.preset_id, id: r.composite.id, file: r.composite.file ?? null, width: r.composite.width, height: r.composite.height,
