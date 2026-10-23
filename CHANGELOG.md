@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+### 평가
+- **평가 보고서 스크립트 `eval/run_eval.py`**: 저장된 검수 결과·호출 기록·채점을 모아 `eval/reports/<날짜_시각>/report.html`(+ results.json, summary.csv)을 만든다. 지면 통과율, 위반·확인 유형 집계, 시안별 썸네일과 차단 항목, 종류별·모델별 시간·비용. 외부 API 호출 없음
+
 ### 이미지 생성
 - **제품 누끼 이미지가 배경 생성에 들어간다**: 캠페인에 제품 이미지(투명 PNG)가 있으면 images.edit 참조로 붙여 상품을 장면의 주 피사체로 그린다(`prompts/image/product_ref.md`)
 - **초안/확정 품질 구분 제거**: 배경은 항상 medium 으로 만든다. '확정 품질로 배경 생성' 버튼·초안 배경 표시·검수 '배경 품질' 경고·`IMAGE_PROVIDER_DRAFT`·`IMAGE_QUALITY_DRAFT` 삭제
