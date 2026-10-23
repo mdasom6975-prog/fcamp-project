@@ -1046,6 +1046,35 @@ def test_reviewed_campaign_blocks_edit_and_regeneration(env):
     assert c.get(f"/api/designs/{did}").json()["brief"]["key_message"] == "특가"
 
 
+def test_edit_reset_applies_in_image_body_and_cta_turned_on_after_compose(env):
+    """처음 합성 뒤에 '이미지 안 본문·CTA' 를 켜고 편집 화면에서 처음 상태로 되돌리면 본문·CTA 요소가 생긴다
+    (옛 합성 기록으로 되살리면 제목만 남던 문제). 편집 저장분은 버리고 이미지 생성 호출은 하지 않는다."""
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    did, pid = ids["design"], ids["presets"]["피드 4:5"]
+    _select_copy(env, [pid])
+    with env["Local"]() as db:      # 본문·CTA 가 있는 카피여야 켠 설정이 요소로 나온다
+        for v in db.query(env["models"].CopyVariant).filter_by(design_id=did).all():
+            v.body, v.cta = "본문 문장", "자세히 보기"
+        db.commit()
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    els = c.get(f"/api/designs/{did}/presets/{pid}/edit").json()["elements"]
+    assert not [e for e in els if e["type"] in ("body", "cta")], "기본은 제목만"
+    assert c.put(f"/api/designs/{did}/presets/{pid}/edit", json={"elements": els}).status_code == 200      # 저장한 편집이 있는 상태
+    assert c.put(f"/api/designs/{did}/presets/{pid}/in-image", json={"body": True, "cta": True}).status_code == 200
+    calls.clear()
+    r = c.post(f"/api/designs/{did}/presets/{pid}/edit/reset")
+    assert r.status_code == 200, r.text
+    assert {"text", "body", "cta"} <= {e["type"] for e in r.json()["elements"]}
+    assert calls == [], "배경은 그대로라 이미지 호출이 없다"
+    comp = c.get(f"/api/designs/{did}/presets/{pid}/edit").json()
+    assert not comp["edited"] and {"body", "cta"} <= {e["type"] for e in comp["elements"]}
+    # 되돌린 뒤에는 '문구 다시 합성'이 다시 열린다(스냅샷이 남아 있어도 최근 합성본이 편집본이 아니므로 409 가 아니다)
+    assert c.put(f"/api/designs/{did}/presets/{pid}/in-image", json={"body": True, "cta": False}).status_code == 200
+    r = c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["composite"]["layout"]["in_image"] == ["headline", "body"]
+
+
 def test_reset_generated_unlocks_reviewed_campaign(env):
     c, ids = env["client"], env["ids"]
     did = ids["design"]

@@ -14,7 +14,7 @@ from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnap
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
 from .routers_copy import select_variant
 from .routers_review import ensure_unlocked
-from .routers_images import _color, _edit_saved, _img_out, create_shared_background, make_image
+from .routers_images import _color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 PREVIEW_MAX = 900
@@ -395,14 +395,13 @@ def reset_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     d = _design(db, design_id)
     ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
-    for r in _els(db, d.id, preset_id):
-        db.delete(r)
-    db.flush()
+    # 옛 합성의 기록으로 요소를 되살리면 그 뒤에 켠 '이미지 안 본문·CTA' 설정이 빠진다 → 현재 카피·지면 설정으로 다시 합성한다
+    # (배경은 그대로라 이미지 생성 호출은 없다). 합성이 요소를 비우므로 새 기본 요소는 아래 _bootstrap 이 만든다
+    res = compose_preset(db, design_id, preset_id, discard_edits=True)
     bv = db.get(BrandVersion, d.brand_version_id)
-    rows = _bootstrap(db, d, preset_id, bv)
-    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
+    rows = _els(db, d.id, preset_id) or _bootstrap(db, d, preset_id, bv)
     db.commit()
-    return {**res, "elements": [_el_out(r) for r in rows]}
+    return {**res, "warnings": ((res["composite"] or {}).get("layout") or {}).get("warnings", []), "elements": [_el_out(r) for r in rows]}
 
 
 # ---------- 실행 취소 ----------

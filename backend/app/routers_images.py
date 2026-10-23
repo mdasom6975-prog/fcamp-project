@@ -214,7 +214,14 @@ def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
 
 
 def _edit_saved(db: Session, design_id: int, preset_id: int) -> bool:
-    """이 지면을 편집 화면에서 '저장'한 적이 있는가 (저장 시점마다 DesignSnapshot 이 남는다)."""
+    """이 지면에 편집 화면에서 '저장'한 내용이 지금도 살아 있는가. 저장 시점마다 DesignSnapshot 이 남지만 스냅샷은 되돌리기 뒤에도
+    남으므로(실행 취소용), 스냅샷이 있고 **가장 최근 합성본이 편집본(layout.edited)일 때만** 저장한 편집으로 본다.
+    '처음 상태로 되돌리기'는 편집본이 아닌 새 합성본을 남기므로 그 뒤에는 다시 합성할 수 있다."""
+    latest = db.scalars(select(GeneratedImage).where(
+        GeneratedImage.design_id == design_id, GeneratedImage.preset_version_id == preset_id,
+        GeneratedImage.kind == "composite").order_by(GeneratedImage.id.desc())).first()
+    if latest is not None and not (latest.layout or {}).get("edited"):
+        return False
     for snap in db.scalars(select(DesignSnapshot).where(DesignSnapshot.design_id == design_id)).all():
         if any(e.get("preset_version_id") == preset_id for e in (snap.elements or [])):
             return True
@@ -459,6 +466,13 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
 @router.post("/designs/{design_id}/presets/{preset_id}/image")
 def make_image(design_id: int, preset_id: int, regenerate_background: bool = Body(False, embed=True),
                db: Session = Depends(get_db)):
+    return compose_preset(db, design_id, preset_id, regenerate_background)
+
+
+def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_background: bool = False,
+                   discard_edits: bool = False) -> dict:
+    """지면 하나의 배경(없으면 생성)에 현재 카피·지면 설정(이미지 안 본문·CTA 등)으로 문구를 합성한다.
+    discard_edits 면 편집 화면에서 저장한 내용도 버리고 자동 합성으로 되돌린다('처음 상태로 되돌리기'). 아니면 저장한 편집이 있을 때 409."""
     d = _design(db, design_id)
     ensure_unlocked(d)
     if preset_id not in d.preset_version_ids:
@@ -469,7 +483,7 @@ def make_image(design_id: int, preset_id: int, regenerate_background: bool = Bod
     w, h = pv.production_width, pv.production_height
     els = db.scalars(select(Element).where(Element.design_id == design_id, Element.preset_version_id == preset_id)).all()
     if els:
-        if _edit_saved(db, design_id, preset_id):
+        if _edit_saved(db, design_id, preset_id) and not discard_edits:
             raise HTTPException(409, "편집 화면에서 저장한 내용이 있습니다. 편집 화면의 '처음 상태로 되돌리기' 후 다시 합성해 주세요")
         # 편집 화면을 열기만 하면 기본 요소가 만들어진다. 저장한 적이 없으면 자동 합성으로 되돌려도 잃는 것이 없다
         for e in els:
