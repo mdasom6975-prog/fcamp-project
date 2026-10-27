@@ -1018,6 +1018,9 @@ type Brief = {
   required_phrases: string[]; forbidden_phrases: string[]
 }
 const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', required_phrases: [], forbidden_phrases: [] }
+// 저장된 캠페인 입력을 폼 값으로 (캠페인 열기·수정 취소)
+const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
+  required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
 
@@ -1087,12 +1090,10 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const ws = useWorkspace(active?.id ?? null, active?.brand.id ?? null, active?.brand.name ?? '', `${activeId}-${wsTick}-${copyKey}-${view}-${active?.status}`)
   useEffect(() => { setView('master') }, [activeId])
   useEffect(() => { if (hasCopy === false) setView('setup') }, [hasCopy])
-  useEffect(() => { if (hasCopy === true && view === 'setup' && !editing) setView('copy') }, [hasCopy, editing, view])
 
   const openCampaign = (d: Design) => {
     setActiveId(d.id); setMsg(null)
-    setBrief({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
-      required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
+    setBrief(briefOf(d))
     setPicked(d.presets.map((p) => p.id))
     setEditing(false); setHasCopy(null); setRules(null); setScreen('design'); setEditPreset(null)
     if (d.kind === '광고 이미지') {
@@ -1108,6 +1109,12 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
       setRules({ req: b.version.required_phrases.length, ban: b.version.forbidden_phrases.length })).catch(() => setRules(null))
   }
   const backToList = () => { setActiveId(null); setEditing(false); setMsg(null) }
+  // 수정 취소: 저장하지 않은 입력·규격 선택을 저장된 값으로 되돌리고 입력 요약으로 돌아간다
+  const cancelEdit = () => {
+    if (active) { setBrief(briefOf(active)); setPicked(active.presets.map((p) => p.id)) }
+    setEditing(false)
+  }
+  const reviewed = !!ws.data.review?.reviewed   // 유효한 검수 결과가 있는지 (입력을 저장하면 무효화된다)
   const toggle = (id: number) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
   const createCampaign = async () => {
@@ -1160,8 +1167,10 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     try {
       await patchDesign(active.id, { brief, preset_version_ids: active.kind === '광고 이미지' ? picked : null })
       await loadDesigns()
-      setEditing(false)
-      setMsg({ ok: true, text: '입력을 저장했습니다.' })
+      setEditing(false); setWsTick((t) => t + 1)
+      setMsg({ ok: true, text: reviewed
+        ? '입력을 저장했습니다. 기존 검수 결과는 무효화되었으니 ⑦ 검수·내보내기에서 다시 검수해 주세요.'
+        : '입력을 저장했습니다.' })
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
     } finally {
@@ -1177,7 +1186,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
       await patchDesign(active.id, { brief, preset_version_ids: picked })
       await loadDesigns()
       const j = await post(`/api/designs/${active.id}/copy`, {})
-      setHasCopy(true); setEditing(false); setCopyKey((k) => k + 1)
+      setHasCopy(true); setEditing(false); setCopyKey((k) => k + 1); goView('copy')
       if (j.failures?.length) setMsg({ ok: false, text: `일부 지면의 생성에 실패했습니다: ${j.failures.join(', ')}` })
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
@@ -1311,6 +1320,9 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const setupSteps = (
     <div className="setup-grid">
       <div className="setup-main">
+        {hasCopy && reviewed && (
+          <div className="notice">이미 검수한 캠페인입니다. 입력을 저장하면 기존 검수 결과가 무효화되어 ⑦ 검수·내보내기에서 다시 검수해야 합니다.</div>
+        )}
         <section className="card step-card">
           <header><h3><span className="step-no">①</span> 규격 선택</h3><span className="muted">선택 {picked.length}개</span></header>
           {visiblePlats.length === 0 ? <p className="muted">선택할 수 있는 규격이 없습니다.</p> : (
@@ -1374,6 +1386,11 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
           <label className="msg-field">핵심 메시지 <span className="req">*</span>
             <input value={brief.key_message} maxLength={200} placeholder="예: 오늘 주문하면 내일 아침 신선하게 도착합니다" onChange={(e) => setBrief({ ...brief, key_message: e.target.value })} />
             <span className="counter">{brief.key_message.length}/200</span>
+          </label>
+          <label className="msg-field">상품 설명 <span className="opt">(선택)</span>
+            <textarea value={brief.description} maxLength={1000} rows={3} placeholder="예: 산지 직송 채소와 과일을 새벽 7시 전에 문 앞까지 배송합니다"
+              onChange={(e) => setBrief({ ...brief, description: e.target.value })} />
+            <span className="counter">{brief.description.length}/1000</span>
           </label>
           <label className="msg-field">배경 형태 <span className="opt">(선택)</span>
             <select value={brief.image_style} onChange={(e) => setBrief({ ...brief, image_style: e.target.value })}>
@@ -1444,7 +1461,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             <button className="primary" disabled={!canGenerate} onClick={generateCampaign}>{busy ? '생성 중…' : '시안 생성하기'}</button>
           </div>
           <p className="muted board-foot">브랜드 규칙 + 선택 규격을 함께 반영해 시안 {3}개를 만듭니다. 지면 수에 따라 수십 초 걸릴 수 있습니다.</p>
-          {hasCopy && <button type="button" className="link" onClick={() => setEditing(false)}>입력 닫기</button>}
+          {hasCopy && <button type="button" className="link" disabled={busy} onClick={cancelEdit}>수정 취소</button>}
         </section>
       </aside>
     </div>
@@ -1532,7 +1549,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                   <div className="camp-msg">{d.brief.key_message || d.brief.product_name}</div>
                 </div>
                 <button type="button" disabled={locked} title={locked ? '검수가 완료된 캠페인은 수정할 수 없습니다' : undefined}
-                  onClick={() => { setEditing(true) }}>입력 수정</button>
+                  onClick={() => { setBrief(briefOf(d)); setPicked(d.presets.map((p) => p.id)); setEditing(true) }}>입력 수정</button>
               </div>
               <dl className="camp-input-grid">
                 <dt>서비스·상품</dt><dd>{d.brief.product_name}</dd>
@@ -1547,7 +1564,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <dt>금지 표현</dt><dd>{eff ? (eff.forbidden_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.forbidden_source})</span> : null}</dd>
                 <dt>규격</dt><dd>{d.presets.map((p) => `${p.platform} · ${p.name}`).join(' / ') || '없음'}</dd>
               </dl>
-              {!locked && <p className="muted">검수 전까지는 입력을 수정할 수 있습니다. 입력을 바꿔도 이미 만든 이미지는 자동으로 바뀌지 않으니, 필요하면 배경을 새로 생성하세요.</p>}
+              {!locked && <p className="muted">검수 완료 전까지는 입력을 수정할 수 있습니다. 저장하면 기존 검수 결과는 무효화되어 다시 검수해야 합니다{reviewed ? ' (현재 검수 결과 있음)' : ''}. 입력을 바꿔도 이미 만든 카피·이미지는 자동으로 바뀌지 않으니, 필요하면 다시 생성하세요.</p>}
             </section>
           )
           const panelTitle = view === 'copy' ? '③ 카피·시안 선택' : view === 'images' ? '④ 이미지 생성·편집' : '⑤ 아이콘 세트'
