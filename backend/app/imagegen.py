@@ -3,6 +3,7 @@
 import base64
 import io
 import os
+import re
 import threading
 from datetime import datetime, timezone
 
@@ -233,6 +234,22 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
     return text
+
+
+def prompt_blocks(text: str) -> list[dict]:
+    """프롬프트를 '[태그] 본문' 블록으로 나눈다(대기 화면의 주문서 미리보기용). 태그 없이 이어지는 줄은 앞 블록에 붙인다."""
+    blocks: list[dict] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        m = re.match(r"\s*\[([^\]]+)\]\s*(.*)", line)
+        if m:
+            blocks.append({"tag": m.group(1).strip(), "text": m.group(2).strip()})
+        elif blocks:
+            blocks[-1]["text"] = f"{blocks[-1]['text']}\n{line.strip()}".strip()
+        else:
+            blocks.append({"tag": "", "text": line.strip()})
+    return blocks
 
 
 def build_variant_prompt(base_prompt: str) -> str:

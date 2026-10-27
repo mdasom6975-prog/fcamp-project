@@ -6,11 +6,15 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
    - opts.sketch 를 주면(아이콘 렌더) 그릴 기능명을 연필 스케치 카드로 깔아 둔다. 진행률이 아니라 '무엇을 그리는 중인지'만 보여 준다.
    - setQuizSource 로 퀴즈 문항을 가져오는 함수를 걸어 두면(시안 화면) 덮개를 띄울 때마다 새로 받아 브랜드 퀴즈 카드를 보여 준다.
      문항은 서버가 브랜드 규칙·표현 사전으로 만든다(GET /api/designs/{id}/quiz, 모델 호출 없음).
+   - opts.order 로 주문서(배경 프롬프트 미리보기, GET /api/designs/{id}/background/prompt-preview)를 넘기면
+     'AI 주문서' 카드에 블록별로 타자 치듯 보여 준다. 퀴즈와 함께 있으면 탭으로 나눠 한 번에 하나만 보인다.
    - 작업이 끝났을 때 다른 탭에 가 있으면 탭 제목에 완료/실패를 붙이고, 알림을 허용했다면 브라우저 알림을 띄운다. */
 
 export type SketchCard = { name: string; concept?: string }
 export type QuizItem = { kind: string; question: string; options: { label: string; color?: string }[]; answer: number; explain: string }
-type State = { label: string; since: number; sketch?: SketchCard[]; quiz?: QuizItem[] } | null
+export type Order = { template: string; style: string; model: string; blocks: { tag: string; text: string }[]; colors: { role: string; hex: string }[] }
+type Opts = { sketch?: SketchCard[]; order?: Promise<Order | null> }
+type State = { label: string; since: number; sketch?: SketchCard[]; quiz?: QuizItem[]; order?: Order } | null
 let state: State = null
 let quizSource: (() => Promise<QuizItem[]>) | null = null
 const listeners = new Set<() => void>()
@@ -34,15 +38,17 @@ function announce(label: string, ok: boolean) {
 }
 
 export const busy = {
-  start(label: string, opts: { sketch?: SketchCard[] } = {}) {
-    const mine: State = { label, since: Date.now(), sketch: opts.sketch }
-    state = mine; emit()
-    // 퀴즈는 덮개를 띄운 뒤 받아 붙인다(못 받으면 퀴즈 없이). 그 사이 작업이 끝났으면 버린다
-    quizSource?.().then((quiz) => { if (state === mine && quiz.length) { state = { ...mine, quiz }; emit() } }).catch(() => undefined)
+  start(label: string, opts: Opts = {}) {
+    const since = Date.now()
+    state = { label, since, sketch: opts.sketch }; emit()
+    // 퀴즈·주문서는 덮개를 띄운 뒤 받아 붙인다(못 받으면 없이). 그 사이 작업이 끝났으면 버린다
+    const attach = (patch: Partial<NonNullable<State>>) => { if (state && state.since === since) { state = { ...state, ...patch }; emit() } }
+    quizSource?.().then((quiz) => { if (quiz.length) attach({ quiz }) }).catch(() => undefined)
+    opts.order?.then((order) => { if (order && order.blocks.length) attach({ order }) }).catch(() => undefined)
   },
   setQuizSource(fn: (() => Promise<QuizItem[]>) | null) { quizSource = fn },
   end() { state = null; emit() },
-  async run<T>(label: string, fn: () => Promise<T>, opts: { sketch?: SketchCard[] } = {}): Promise<T> {
+  async run<T>(label: string, fn: () => Promise<T>, opts: Opts = {}): Promise<T> {
     busy.start(label, opts)
     let ok = false
     try { const r = await fn(); ok = true; return r } finally { busy.end(); announce(label, ok) }
@@ -92,6 +98,50 @@ function SketchBoard({ cards }: { cards: SketchCard[] }) {
   )
 }
 
+// 주문서 본문의 hex 색(#RRGGBB)은 색 칩과 함께 보여 준다
+function withChips(text: string) {
+  return text.split(/(#[0-9A-Fa-f]{6})/).map((part, i) => (/^#[0-9A-Fa-f]{6}$/.test(part)
+    ? <span key={i} className="order-hex"><span className="quiz-chip" style={{ background: part }} aria-hidden="true" />{part}</span>
+    : <span key={i}>{part}</span>))
+}
+
+const TYPE_CPS = 40      // 주문서 타자 속도(초당 글자 수). 빠르지 않게, 읽을 수 있는 속도로
+
+// AI 주문서 카드: 배경을 그릴 때 보내는 문장을 블록([표현 방식]·[장면]·[브랜드 색]…)별로 타자 치듯 보여 준다. '전체 보기'로 바로 펼친다
+function OrderCard({ order }: { order: Order }) {
+  const total = order.blocks.reduce((n, b) => n + b.text.length, 0)
+  const [shown, setShown] = useState(0)
+  useEffect(() => {
+    if (shown >= total) return
+    const t = window.setTimeout(() => setShown((v) => Math.min(total, v + Math.ceil(TYPE_CPS / 10))), 100)
+    return () => window.clearTimeout(t)
+  }, [shown, total])
+  // 블록마다 앞 블록까지의 글자 수(시작 위치). shown 이 시작 위치를 넘은 블록만 그만큼 보인다
+  const starts = order.blocks.map((_, i) => order.blocks.slice(0, i).reduce((n, b) => n + b.text.length, 0))
+  return (
+    <div className="busy-order">
+      <div className="quiz-head">
+        <span className="quiz-tag">AI 주문서</span>
+        <span className="muted">{order.template} · {order.style} · {order.model}</span>
+      </div>
+      <p className="muted order-lead">배경을 새로 그릴 때 이미지 모델에 이렇게 주문합니다. 브랜드명·문구는 그림에 글자로 나오지 않게 넣지 않습니다.</p>
+      <div className="order-blocks">
+        {order.blocks.map((b, i) => {
+          if (shown <= starts[i]) return null
+          const part = b.text.slice(0, shown - starts[i])
+          return (
+            <div key={i} className={b.tag === '브랜드 색' ? 'order-block brand' : 'order-block'}>
+              {b.tag && <span className="order-tag">{b.tag}</span>}
+              <span className="order-text">{withChips(part)}{part.length < b.text.length && <span className="order-caret" aria-hidden="true" />}</span>
+            </div>
+          )
+        })}
+      </div>
+      {shown < total && <button type="button" className="quiz-next" onClick={() => setShown(total)}>전체 보기</button>}
+    </div>
+  )
+}
+
 // 브랜드 퀴즈 카드: 한 문제씩. 보기를 누르면 정답·해설을 보여 주고 '다음 문제'로 넘어간다(끝나면 처음부터)
 function QuizCard({ items }: { items: QuizItem[] }) {
   const [idx, setIdx] = useState(0)
@@ -132,6 +182,27 @@ function QuizCard({ items }: { items: QuizItem[] }) {
   )
 }
 
+// 주문서와 퀴즈가 둘 다 있으면 탭으로 나눠 하나만 보인다(처음엔 주문서)
+function Extras({ order, quiz }: { order: Order | null; quiz: QuizItem[] | null }) {
+  const [tab, setTab] = useState<'order' | 'quiz'>('order')
+  const both = !!order && !!quiz
+  const cur = both ? tab : order ? 'order' : quiz ? 'quiz' : null
+  if (!cur) return null
+  return (
+    <div className="busy-extras">
+      {both && (
+        <div className="busy-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={cur === 'order'} className={cur === 'order' ? 'on' : ''} onClick={() => setTab('order')}>AI 주문서</button>
+          <button type="button" role="tab" aria-selected={cur === 'quiz'} className={cur === 'quiz' ? 'on' : ''} onClick={() => setTab('quiz')}>퀴즈</button>
+        </div>
+      )}
+      {/* 탭을 오가도 타자 진행·퀴즈 점수가 유지되게 둘 다 그려 두고 숨긴다 */}
+      {order && <div hidden={cur !== 'order'}><OrderCard order={order} /></div>}
+      {quiz && <div hidden={cur !== 'quiz'}><QuizCard items={quiz} /></div>}
+    </div>
+  )
+}
+
 export default function BusyOverlay() {
   const s = useSyncExternalStore(subscribe, snapshot, snapshot)
   const [, tick] = useState(0)
@@ -152,15 +223,16 @@ export default function BusyOverlay() {
   const mmss = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
   const sketch = s.sketch && s.sketch.length > 0 ? s.sketch : null
   const quiz = s.quiz && s.quiz.length > 0 ? s.quiz : null
+  const order = s.order ?? null
   return (
     <div className="busy-overlay" role="alertdialog" aria-modal="true" aria-live="polite"
       onKeyDown={(e) => e.stopPropagation()}>
-      <div className={sketch || quiz ? 'busy-box wide' : 'busy-box'}>
+      <div className={sketch || quiz || order ? 'busy-box wide' : 'busy-box'}>
         <div className="busy-spinner" aria-hidden="true" />
         <div className="busy-label">{s.label}</div>
         <div className="muted">{mmss} 경과 · 완료될 때까지 기다려 주세요</div>
         {sketch && <SketchBoard cards={sketch} />}
-        {quiz && <QuizCard key={s.since} items={quiz} />}
+        <Extras key={s.since} order={order} quiz={quiz} />
         {canNotify && perm === 'default' && (
           <button type="button" className="busy-notify"
             onClick={() => Notification.requestPermission().then(setPerm).catch(() => undefined)}>끝나면 알림 받기</button>

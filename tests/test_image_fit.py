@@ -1093,3 +1093,28 @@ def test_unreviewed_campaign_input_is_editable(env):
     assert d["status"] == "미검수"
     r = c.patch(f"/api/designs/{did}", json={"brief": {**d["brief"], "description": "설명 추가"}})
     assert r.status_code == 200 and r.json()["brief"]["description"] == "설명 추가"
+
+
+def test_prompt_preview_matches_sent_prompt(env):
+    """대기 화면의 'AI 주문서'(prompt-preview)는 실제로 처음 보내는 배경 프롬프트와 같은 문장이다(모델 호출 없음)."""
+    from app import imagegen
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    pid = ids["presets"]["피드 4:5"]
+    pv = c.get(f"/api/designs/{ids['design']}/background/prompt-preview", params={"preset_id": pid}).json()
+    assert calls == [], "미리보기는 이미지 모델을 부르지 않는다"
+    assert pv["template"] == "세로형" and pv["style"] == "실사 제품·공간"
+    tags = [b["tag"] for b in pv["blocks"]]
+    assert tags[:3] == ["표현 방식", "구도", "장면"] and "반복 확인" in tags
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert imagegen.prompt_blocks(env["prompts"][0]) == pv["blocks"], "첫 비율군(세로형)에 보낸 문장과 같다"
+    # preset_id 가 없으면 시안의 첫 지면, 지면이 없으면 404
+    assert c.get(f"/api/designs/{ids['design']}/background/prompt-preview").json()["template"] == "세로형"
+    assert c.get("/api/designs/9999/background/prompt-preview").status_code == 404
+
+
+def test_prompt_blocks_joins_untagged_lines():
+    from app import imagegen
+    text = "[제품 자리 — 가장 중요한 규칙] 비워 둔다.\n- 구역 안에는 받침만\n- 사람은 바깥\n[장면] 한 장면"
+    assert imagegen.prompt_blocks(text) == [
+        {"tag": "제품 자리 — 가장 중요한 규칙", "text": "비워 둔다.\n- 구역 안에는 받침만\n- 사람은 바깥"},
+        {"tag": "장면", "text": "한 장면"}]

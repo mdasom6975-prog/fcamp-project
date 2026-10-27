@@ -7,7 +7,7 @@ import ImageGrid, { fileUrl, inImageChanged, inImageDefault, type ImgRow, type I
 import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
-import { busy as overlay, type QuizItem, type SketchCard } from './Busy'
+import { busy as overlay, type Order, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
 
 type PresetLite = {
@@ -66,6 +66,11 @@ type Screen = 'design' | 'edit' | 'review'
 type View = 'master' | 'setup' | 'copy' | 'images' | 'icons' | 'edit' | 'review'
 
 type PanelView = 'copy' | 'images' | 'icons'
+// 대기 화면의 'AI 주문서': 이 지면(없으면 첫 지면)의 배경 프롬프트 미리보기(모델 호출 없음). 못 받으면 null
+const orderPreview = (designId: number, presetId?: number): Promise<Order | null> =>
+  fetch(`/api/designs/${designId}/background/prompt-preview${presetId != null ? `?preset_id=${presetId}` : ''}`)
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+
 function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
   designId: number; brandName: string; versionNo: number | null; imageStyle: string
   locked: boolean    // 검수 완료된 캠페인: 이미지 재생성·생성 설정 변경 불가
@@ -167,7 +172,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   })
 
   // 배경은 시안당 1회만 생성하고, 아직 합성이 없는 나머지 매체도 같은 배경을 각 규격 크기로 맞춰 이어서 합성한다(추가 생성 비용 없음).
-  const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate))
+  const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate),
+    { order: orderPreview(designId, presetId) })
   const makeImageInner = async (presetId: number, regenerate: boolean) => {
     setImgBusy(presetId); setImgErr({})
     try {
@@ -193,7 +199,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   // 배경은 합성본이 있는 매체의 비율군만 1장씩 새로 만들고(합성본이 없으면 모든 비율군), 그 매체를 새 배경으로 다시 합성한다.
   // 아직 합성하지 않은 비율군은 나중에 그 매체를 합성할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
   const regenBackground = () => overlay.run(
-    '배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner())
+    '배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner(),
+    { order: orderPreview(designId) })
   const regenBackgroundInner = async () => {
     setBgBusy(true); setBgMsg(null); setBgNote(null)
     try {
