@@ -7,7 +7,7 @@ import ImageGrid, { fileUrl, inImageChanged, inImageDefault, type ImgRow, type I
 import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
-import { busy as overlay } from './Busy'
+import { busy as overlay, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
 
 type PresetLite = {
@@ -766,6 +766,21 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   const [gridLabel, setGridLabel] = useState<string | null>(null)
   const calls = (n: number) => (gridCells >= 2 ? Math.ceil(n / gridCells) : n)
   const [filling, setFilling] = useState(false)
+  const [fresh, setFresh] = useState<number[]>([])   // 방금 렌더된 아이콘 id (등장 애니메이션)
+  const markFresh = (before: IconItem[], after: IconItem[]) => {
+    const old = new Set(before.map((a) => a.id))
+    setFresh(after.filter((a) => !old.has(a.id)).map((a) => a.id))
+  }
+  // 렌더하는 동안 덮개에 깔 스케치 카드: 시안 브리프의 기능명 후보(비용 없음) 중 아직 렌더하지 않은 것. 서버가 고르는 순서와 같다
+  const sketchCands = async (n: number): Promise<SketchCard[]> => {
+    try {
+      const d = await fetch(`/api/designs/${designId}`).then((r) => r.json())
+      const done = new Set(items.map((a) => a.name))
+      const list = ((d?.brief?.icon_candidates ?? []) as { name?: string; concept?: string }[])
+        .filter((c) => c.name && !done.has(c.name)).slice(0, n).map((c) => ({ name: c.name as string, concept: c.concept }))
+      return list.length ? list : Array.from({ length: n }, () => ({ name: '?', concept: '기능명을 정하는 중' }))
+    } catch { return [] }
+  }
   // 기능명 후보(렌더 전, 비용 없음): 카피 호출에서 받은 15개. 사용자가 고른 것만 렌더한다(쓰지 않을 아이콘은 만들지 않음)
   type Cand = { name: string; concept: string; rendered: boolean }
   const [cands, setCands] = useState<Cand[] | null>(null)
@@ -783,12 +798,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     } catch (e) { setCandErr((e as Error).message) }
   }
   const togglePick = (name: string) => setPicked((p) => (p.includes(name) ? p.filter((x) => x !== name) : [...p, name]))
-  const renderPicked = () => overlay.run(`고른 아이콘 ${picked.length}개 렌더하는 중… (1개당 10~20초)`, renderPickedInner)
+  const renderPicked = () => overlay.run(`고른 아이콘 ${picked.length}개 렌더하는 중… (1개당 10~20초)`, renderPickedInner,
+    { sketch: picked.map((n) => ({ name: n, concept: cands?.find((c) => c.name === n)?.concept })) })
   const renderPickedInner = async () => {
     setBusy(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons`, { names: picked })
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       setCands((l) => l && l.map((c) => ({ ...c, rendered: c.rendered || j.icons.some((a: IconItem) => a.name === c.name) })))
       setPicked([])
       if (!j.complete) setNote(`${j.made}개를 렌더했습니다. 세트는 ${j.icons.length}/${j.requested}개 — 검수·내보내기에는 ${j.requested}개가 필요합니다.`)
@@ -822,12 +838,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
   }, [designId])
 
-  const generate = () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner)
+  const generate = async () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner,
+    { sketch: await sketchCands(target) })
   const generateInner = async () => {
     setBusy(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons`, {})
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       if (!j.complete) setNote(`목표 ${j.requested}개 중 ${j.made}개만 만들어졌습니다. 아래 '부족한 아이콘 채우기'로 나머지를 이어서 만들 수 있습니다.`)
     } catch (e) {
       setErr((e as Error).message)
@@ -837,12 +854,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   }
 
   // 세트가 목표 개수에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 이어서 만든다. 아이콘 1개당 이미지 1장 비용
-  const fill = () => overlay.run('부족한 아이콘 채우는 중… (1개당 10~20초)', () => fillInner())
+  const fill = async () => overlay.run('부족한 아이콘 채우는 중… (1개당 10~20초)', () => fillInner(),
+    { sketch: await sketchCands(target - items.length) })
   const fillInner = async () => {
     setFilling(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons/fill`, {})
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       if (!j.complete) setNote(`${j.made}개를 채웠지만 아직 목표 ${j.requested}개 중 ${j.icons.length}개입니다. 다시 시도할 수 있습니다.`)
     } catch (e) {
       setErr((e as Error).message)
@@ -866,12 +884,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     }
   }
 
-  const redraw = (id: number) => overlay.run('아이콘 다시 그리는 중… (10~20초)', () => redrawInner(id))
+  const redraw = (id: number) => overlay.run('아이콘 다시 그리는 중… (10~20초)', () => redrawInner(id), {
+    sketch: items.filter((a) => a.id === id).map((a) => ({ name: a.name, concept: a.concept })) })
   const redrawInner = async (id: number) => {
     setOne(id); setErr(null)
     try {
       const a = await post(`/api/designs/${designId}/icons/${id}/regenerate`, {})
-      setItems((l) => l.map((x) => (x.id === id ? a : x))); setVer((v) => v + 1)
+      setItems((l) => l.map((x) => (x.id === id ? a : x))); setVer((v) => v + 1); setFresh([a.id])
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -963,7 +982,8 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       )}
       <div className="icongrid">
         {items.map((a) => (
-          <figure key={a.id} className="iconcell">
+          <figure key={`${a.id}-${fresh.includes(a.id) ? ver : 0}`} className={fresh.includes(a.id) ? 'iconcell icon-reveal' : 'iconcell'}
+            style={fresh.includes(a.id) ? { animationDelay: `${fresh.indexOf(a.id) * 90}ms` } : undefined}>
             <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} title={a.concept || a.name} />
             <figcaption>{a.position}. {a.name}</figcaption>
             {a.concept && <div className="muted icon-concept">{a.concept}</div>}
