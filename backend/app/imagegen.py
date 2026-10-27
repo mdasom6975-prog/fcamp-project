@@ -41,11 +41,14 @@ def default_bg_mode() -> str:
 SINGLE_COMPOSITION = "크롭공용"      # prompts/image/composition/크롭공용.md — 어느 방향으로 잘려도 되는 구도
 
 
-def settings_for(brief: dict | None) -> dict:
-    """시안 브리프의 생성 설정 {model, bg_mode}. 없거나 허용 목록 밖이면 환경변수 기본값."""
+def settings_for(brief: dict | None, style: str | None = None) -> dict:
+    """시안 브리프의 생성 설정 {model, bg_mode}. 없거나 허용 목록 밖이면 기본값.
+    배경 방식 기본값은 환경변수(default_bg_mode)지만, 사람이 나오는 형태(style 이 NO_PEOPLE_STYLES 밖)면 1장 방식(single):
+    비율군마다 다시 그리면(images.edit 변형) 같은 캠페인의 매체마다 인물의 얼굴·소품이 달라진다. 브리프에 배경 방식을 직접 골랐으면 그 값."""
     b = brief or {}
     model = b.get("image_model") if b.get("image_model") in MODELS else OPENAI_MODEL
-    mode = b.get("bg_mode") if b.get("bg_mode") in BG_MODES else default_bg_mode()
+    default = "single" if style is not None and style not in NO_PEOPLE_STYLES else default_bg_mode()
+    mode = b.get("bg_mode") if b.get("bg_mode") in BG_MODES else default
     return {"model": model, "bg_mode": mode}
 
 

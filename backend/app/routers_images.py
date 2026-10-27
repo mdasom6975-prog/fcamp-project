@@ -143,6 +143,12 @@ def layout_options() -> list[dict]:
     return sorted(out, key=lambda o: o["name"] != compose.DEFAULT_LAYOUT)
 
 
+def design_settings(db: Session, d: Design) -> dict:
+    """imagegen.settings_for 에 이 시안의 배경 형태(브리프 지정 또는 브랜드 톤으로 자동)를 넘겨 부른다."""
+    bv = db.get(BrandVersion, d.brand_version_id)
+    return imagegen.settings_for(d.brief, imagegen.pick_style((bv.image_tone if bv else None) or {}, d.brief or {})[0])
+
+
 @router.put("/designs/{design_id}/image-settings")
 def set_image_settings(design_id: int, image_model: str | None = Body(None, embed=True),
                        bg_mode: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
@@ -160,7 +166,13 @@ def set_image_settings(design_id: int, image_model: str | None = Body(None, embe
         brief["bg_mode"] = bg_mode
     d.brief = brief
     db.commit()
-    return {"settings": imagegen.settings_for(d.brief), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode")}
+    return {"settings": design_settings(db, d), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode")}
+
+
+@router.get("/designs/{design_id}/image-settings")
+def get_image_settings(design_id: int, db: Session = Depends(get_db)):
+    """이 시안에 실제로 적용되는 생성 설정. 배경 방식을 고르지 않았으면 배경 형태(자동 포함)로 정한 기본값이다."""
+    return {"settings": design_settings(db, get_design(db, design_id, ad_only=True))}
 
 
 @router.put("/designs/{design_id}/presets/{preset_id}/in-image")
@@ -289,7 +301,7 @@ def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False,
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
-    st = imagegen.settings_for(d.brief)
+    st = imagegen.settings_for(d.brief, style)
     # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등). force_ratio 는 1장 방식에서 손실이 큰 비율군을 그 1장을
     # 참조해 비율군 구도로 1장 더 만들 때(크롭공용 대신 비율군 구도, 참조 변형 허용)
     single = st["bg_mode"] == "single" and not force_ratio
@@ -317,7 +329,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다.
     캠페인에 제품 누끼 이미지가 있으면(OpenAI) 참조 이미지로 함께 붙여 장면의 주 피사체로 그리게 한다.
     프롬프트는 _bg_prompt 가 만든다."""
-    st = imagegen.settings_for(d.brief)
+    st = design_settings(db, d)
     gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
     quality = imagegen.OPENAI_QUALITY
     provider = imagegen.PROVIDER
@@ -388,7 +400,7 @@ def create_shared_background(db: Session, d: Design,
     groups: dict[str, list[int]] = {}
     for pid, w, h in sizes:
         groups.setdefault(compose.template_for(w, h), []).append(pid)
-    single = imagegen.settings_for(d.brief)["bg_mode"] == "single"
+    single = design_settings(db, d)["bg_mode"] == "single"
     if single:
         # 1장 방식: 가장 적게 잘리는 비율군 한 장을 모든 지면이 잘라 쓴다. 다만 그 한 장을 잘라서 피사체가 많이 사라지는
         # 비율군(crop_keep < IMAGE_SINGLE_MIN_KEEP, 보통 정사각→가로형)은 그 1장을 참조해 비율군 구도로 1장 더 만든다.
@@ -571,7 +583,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
     # 배경은 비율군(템플릿)마다 1장 생성하고, 같은 비율군 매체는 같은 원본을 각 규격 크기에 맞춰 자른다(cover_crop).
     # 다시 만들기를 요청했거나 이 시안에 배경이 하나도 없을 때만 새로 생성한다. 같은 비율군 배경이 없으면
     # (예: 예전에 정사각 1장만 만든 시안) 추가 생성 없이 시안의 최신 배경을 그대로 자른다.
-    st = imagegen.settings_for(d.brief)
+    st = design_settings(db, d)
     single = st["bg_mode"] == "single"
     tpl = compose.template_for(w, h)
     bg_row = None

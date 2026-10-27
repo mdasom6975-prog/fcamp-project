@@ -1206,3 +1206,13 @@ def test_directions_of_no_people_styles_do_not_mention_people():
         meta = prompts.load(f"image/style/{imagegen.STYLES[name]}").meta
         for option in meta.get("directions", "").split("|"):
             assert not any(w in option for w in imagegen.TONE_PEOPLE_WORDS), (name, option)
+
+
+def test_bg_mode_default_is_single_for_people_styles(monkeypatch):
+    from app import imagegen
+    monkeypatch.setattr(imagegen, "PER_RATIO", True)
+    assert imagegen.settings_for({}, "실사 인물")["bg_mode"] == "single"
+    assert imagegen.settings_for({}, "플랫 일러스트")["bg_mode"] == "single"
+    assert imagegen.settings_for({}, "실사 제품·공간")["bg_mode"] == "per_ratio"
+    assert imagegen.settings_for({}, None)["bg_mode"] == "per_ratio"
+    assert imagegen.settings_for({"bg_mode": "per_ratio"}, "실사 인물")["bg_mode"] == "per_ratio"

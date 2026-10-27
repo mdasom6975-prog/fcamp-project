@@ -90,7 +90,12 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null)
   useEffect(() => { fetch('/api/image-settings').then((r) => r.json()).then((j: ImgSettings) => j?.models && setImgSettings(j)).catch(() => undefined) }, [])
   const curModel = genSettings.image_model ?? imgSettings?.models.find((m) => m.default)?.model ?? ''
-  const curMode = genSettings.bg_mode ?? imgSettings?.default_mode ?? 'per_ratio'
+  // 배경 방식을 고르지 않았으면 서버가 배경 형태(자동 포함)로 정한 값: 사람이 나오는 형태는 1장 방식
+  const [autoMode, setAutoMode] = useState<string | null>(null)
+  useEffect(() => {
+    fetch(`/api/designs/${designId}/image-settings`).then((r) => r.json()).then((j) => setAutoMode(j?.settings?.bg_mode ?? null)).catch(() => undefined)
+  }, [designId, imageStyle, genSettings.bg_mode])
+  const curMode = genSettings.bg_mode ?? autoMode ?? imgSettings?.default_mode ?? 'per_ratio'
   const saveSettings = async (patch: { image_model?: string; bg_mode?: string }) => {
     setSettingsMsg(null)
     try {

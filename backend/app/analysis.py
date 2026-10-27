@@ -386,7 +386,7 @@ def build(db: Session, d: Design) -> dict:
     return {
         "design": {"id": d.id, "kind": d.kind, "status": d.status, "created_at": d.created_at.isoformat(), "brief": brief,
                    "presets": [p for p in (_preset_lite(db.get(PresetVersion, pid)) for pid in d.preset_version_ids) if p],
-                   "settings": imagegen.settings_for(brief), "style": style, "style_reason": reason},
+                   "settings": imagegen.settings_for(brief, style), "style": style, "style_reason": reason},
         "brand": {"id": brand.id, "name": brand.name, "description": brand.description, "version_no": bv.version_no,
                   "colors": brand_colors, "fonts": bv.fonts or [], "icon_style": bv.icon_style or {}, "image_tone": bv.image_tone or {},
                   "voice": bv.voice or {}, "levels": bv.levels or {}, "logo_position": bv.logo_position,
