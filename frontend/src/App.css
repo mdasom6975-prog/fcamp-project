@@ -338,12 +338,19 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .tag-note { background: var(--surface-2); color: var(--text-2); font-size: 12px; padding: 2px 8px; border-radius: 999px; }
 .logo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .logo-box { width: 176px; height: 80px; display: grid; place-items: center; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; }
+/* 상자 자체가 파일 선택 버튼: 전역 button 의 둥근 모양·여백·굵기를 지우고 hover 에 테두리만 진하게 */
+button.logo-box { padding: 0; font-weight: 400; font-size: 13px; }
+button.logo-box:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent); }
+button.logo-box:active:not(:disabled) { transform: none; }
 .logo-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .logo-info { min-width: 0; font-size: 14px; color: var(--text-2); }
 .logo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logo-ratio { margin-left: 8px; font-size: 12px; color: var(--text-3); }
 .logo-help { font-size: 12px; color: var(--text-3); margin-top: 2px; }
 .logo-btn { margin-top: 8px; padding: 4px 12px; font-size: 12px; border-radius: 999px; }
+/* 로고 칸 아래 업로드 안내(정사각으로 만듦 등)·오류 */
+.logo-note { margin-top: 8px; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px; white-space: normal; background: var(--warn-bg); color: var(--warn-fg); }
+.logo-note.err { background: var(--bad-bg); color: var(--bad-fg); }
 .logo-margin { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); }
 .logo-margin input { display: block; width: 120px; margin-top: 4px; padding: 6px 10px; font-size: 14px; }
 
