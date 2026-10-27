@@ -17,7 +17,11 @@ from .routers_review import ensure_unlocked
 from .routers_images import _color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
+# 편집 미리보기 크기(긴 변 px). 화면이 보여 줄 크기 × 픽셀 배율(max_px)을 보내면 그 크기로, 안 보내면 PREVIEW_MAX.
+# 레티나 화면에서 900px 고정이면 브라우저가 키워 보여 줘 흐렸다(편집 화면 폭 436px × 2 = 872px, 세로형은 긴 변 1092px)
 PREVIEW_MAX = 900
+PREVIEW_RANGE = (400, 1600)
+PREVIEW_JPEG_QUALITY = 90
 
 
 # ---------- 공통 보조 ----------
@@ -248,7 +252,8 @@ def _apply_payload(db, rows: list[Element], payload: list[dict], canvas) -> list
 
 
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/preview")
-def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., embed=True), db: Session = Depends(get_db)):
+def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., embed=True),
+            max_px: int | None = Body(None, embed=True), db: Session = Depends(get_db)):
     d = _design(db, design_id)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
@@ -265,10 +270,11 @@ def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., emb
                                  {c["hex"].upper() for c in (bv.colors or []) if c.get("hex")},
                                  phrases.effective(bv, d.brief)["forbidden_phrases"], txt["props"]["text"] if txt else None, img,
                                  txt["props"]["color"] if txt else None)
+    side = min(max(max_px, PREVIEW_RANGE[0]), PREVIEW_RANGE[1]) if max_px else PREVIEW_MAX
     small = img.copy()
-    small.thumbnail((PREVIEW_MAX, PREVIEW_MAX))
+    small.thumbnail((side, side))           # 원본보다 크게 키우지는 않는다
     buf = io.BytesIO()
-    small.save(buf, "JPEG", quality=85)
+    small.save(buf, "JPEG", quality=PREVIEW_JPEG_QUALITY)
     L, T, R, B, _ = compose._margins(W, H, pv.safe_area)
     return {"image": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
             "warnings": warns, "size": [W, H], "boxes": element_boxes([(a["row"].id, a["row"].type) for a in applied], measure),

@@ -180,3 +180,19 @@ def test_undo_refused_after_review_complete(env):
     d.status = "검수 완료"
     sess.commit()
     assert c.post(env["base"] + "/undo").status_code == 409
+
+
+def test_preview_size_follows_requested_screen_pixels(env):
+    """미리보기는 화면이 보낸 긴 변(max_px, 표시 크기 × 픽셀 배율)으로 줄인다. 범위는 400~1600, 원본보다 키우지 않고, 안 보내면 900."""
+    import base64
+    import io
+    from PIL import Image
+    c, els = env["client"], _els(env)
+    def size(**kw):
+        j = c.post(env["base"] + "/preview", json={"elements": _payload(els), **kw}).json()
+        return Image.open(io.BytesIO(base64.b64decode(j["image"].split(",", 1)[1]))).size
+    long = max(W, H)
+    assert max(size()) == min(900, long)
+    assert max(size(max_px=1092)) == min(1092, long)
+    assert max(size(max_px=100)) == min(400, long)
+    assert max(size(max_px=5000)) == min(1600, long)

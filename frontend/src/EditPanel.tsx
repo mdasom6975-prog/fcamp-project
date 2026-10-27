@@ -72,7 +72,11 @@ export default function EditPanel({ designId, presetId, onClose, onSaved }: {
     timer.current = window.setTimeout(async () => {
       const mine = ++seq.current
       try {
-        const j = await call('POST', `${base}/preview`, { elements: payload(els) })
+        // 미리보기가 화면에 그려질 긴 변 × 픽셀 배율(레티나 2배)만큼 받아야 브라우저가 키우지 않아 흐리지 않다
+        const cw = stage.current?.clientWidth || 440
+        const ratio = data.canvas[0] / data.canvas[1]
+        const maxPx = Math.ceil(Math.max(cw, cw / ratio) * (window.devicePixelRatio || 1))
+        const j = await call('POST', `${base}/preview`, { elements: payload(els), max_px: maxPx })
         if (mine !== seq.current) return
         setPreview(j.image); setWarns(j.warnings); setBoxes(j.boxes ?? {}); setMargins(j.margins ?? [0, 0, 0, 0])
         setMsg((m) => (m && !m.ok ? null : m))
