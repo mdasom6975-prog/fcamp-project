@@ -747,7 +747,8 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
 type IconItem = {
   id: number; position: number; name: string; concept?: string; width: number; height: number
   render: '3d' | 'svg'; has_svg: boolean; has_source: boolean
-  style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[] }
+  style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[]
+    origin?: { grid?: string } | null; source_size?: number[] }
   violations: { detail: string }[]
 }
 
@@ -880,6 +881,12 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
 
   if (!loaded) return null
   const st = items[0]?.style
+  // 3D 원본 표기: 1장 렌더는 1024, 격자 렌더는 잘라낸 조각이라 아이콘마다 크기가 다르다(source_size 가 없는 예전 아이콘은 대략값)
+  const srcGrid = st?.origin?.grid
+  const srcLong = items.map((i) => i.style.source_size).filter((v): v is number[] => !!v).map((v) => Math.max(v[0], v[1]))
+  const srcText = !srcGrid ? '원본 1024'
+    : srcLong.length === items.length ? `원본: ${srcGrid} 격자에서 잘라낸 ${Math.min(...srcLong)}~${Math.max(...srcLong)}px 조각`
+    : `원본: ${srcGrid} 격자에서 잘라낸 약 200~350px 조각`
   const vLabel = versionNo ? `브랜드 규칙 v${versionNo}` : '이 브랜드 규칙 버전'
 
   // 아직 세트가 없을 때: 광고 이미지가 있어야 생성 여부를 묻는다
@@ -947,7 +954,7 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       {items.length < target && candidatePicker(target - items.length)}
       {st && items[0].render === '3d' ? (
         <p className="muted">
-          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px (원본 1024)
+          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px ({srcText})
         </p>
       ) : st && (
         <p className="muted">

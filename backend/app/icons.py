@@ -403,6 +403,15 @@ def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:
     return canvas, {"scale": round(s, 4), "bbox": [round(v, 2) for v in bbox], "transparent": transparent, "clipped": clipped}
 
 
+def source_desc(style: dict | None, size: tuple[int, int] | list[int] | None) -> str:
+    """3D 아이콘 원본(source_path) 설명. 1장 렌더면 1024 정사각, 격자 렌더면 격자에서 잘라낸 조각이라 크기가 아이콘마다 다르다."""
+    grid = ((style or {}).get("origin") or {}).get("grid")
+    dims = f"{size[0]}×{size[1]}" if size else None
+    if grid:
+        return f"{dims or '크기 미상'}, 투명, {grid} 격자에서 잘라냄"
+    return f"{dims or '1024×1024'}, 투명"
+
+
 def png_bytes(im: Image.Image) -> bytes:
     b = io.BytesIO()
     im.save(b, "PNG")

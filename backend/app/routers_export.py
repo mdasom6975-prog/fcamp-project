@@ -1,11 +1,13 @@
+import io
 import json
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import copyfields, exporter, storage
+from . import copyfields, exporter, icons as icon_lib, storage
 from .models import Asset, Brand, BrandVersion, Design, Export, PresetVersion
 from .routers_assets import get_db
 from .routers_review import _brand_dict, _collect, gather, version_icon_set
@@ -102,15 +104,20 @@ def make_export(design_id: int, preset_ids: list[int] | None = Body(None), draft
                  "카피(CSV)")
     if icons:
         grp = by_pid.get(None)
+        source_sizes = []
         for a in icons:
             base = f"{a.position:02d}_{exporter.safe(a.name, 30)}"
             if a.svg:   # svg 방식만 원본 SVG 가 있다
                 pack.add(f"icons/svg/{base}.svg", a.svg.encode("utf-8"), "아이콘 SVG(원본)")
             pack.add(f"icons/png/{base}.png", storage.read_bytes(a.png_path), "아이콘 PNG")
-            if a.source_path and storage.exists(a.source_path):   # 3d 방식: 1024 투명 원본
-                pack.add(f"icons/src/{base}.png", storage.read_bytes(a.source_path), "아이콘 원본 PNG(1024, 투명)")
+            if a.source_path and storage.exists(a.source_path):   # 3d 방식 원본: 1장 렌더면 1024, 격자면 잘라낸 조각
+                data = storage.read_bytes(a.source_path)
+                size = (a.style or {}).get("source_size") or list(Image.open(io.BytesIO(data)).size)   # 예전 아이콘은 파일에서 잰다
+                source_sizes.append({"position": a.position, "name": a.name, "size": size})
+                pack.add(f"icons/src/{base}.png", data, f"아이콘 원본 PNG({icon_lib.source_desc(a.style, size)})")
         manifest_presets.append({"name": "아이콘 세트", "count": len(icons), "size": [icons[0].width, icons[0].height],
                                  "render": (icons[0].style or {}).get("render", "svg"), "style": icons[0].style,
+                                 "source_sizes": source_sizes or None,
                                  "prompts": sorted({a.prompt for a in icons if a.prompt}) if icons[0].prompt else None,
                                  "review": grp["summary"] if grp else None, "ready": bool(grp and grp["export_ready"])})
 

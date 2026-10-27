@@ -80,7 +80,8 @@ def _old_files(a: IconAsset | None) -> list[str]:
 
 
 def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w, h, forbidden, existing=None, origin=None):
-    """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 원본(1장 렌더 1024 또는 격자에서 잘라낸 조각)은 source_path 에 따로 둔다.
+    """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 원본(1장 렌더 1024 또는 격자에서 잘라낸 조각)은 source_path 에 따로 두고
+    그 크기를 style.source_size 에 남긴다(격자 조각은 아이콘마다 크기가 달라 화면·내보내기 표기에 쓴다).
     origin: 격자에서 온 아이콘이면 {"grid": "4x3", "cell": k, "method": ..., "mismatch": bool} — 분석용. 수가 안 맞은 격자는 위반으로 알린다."""
     fitted, info = icons.fit_alpha(im, w, h)
     uid = uuid.uuid4().hex[:10]
@@ -98,6 +99,7 @@ def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w,
           "corner": style["corner"], "material": style.get("material") or "자동",
           "colors": [c["hex"] for c in palette] or [style["color"]],
           "bbox": info["bbox"], "scale": info["scale"], "transparent": info["transparent"], "clipped": info["clipped"],
+          "source_size": [im.width, im.height],
           "viewBox": icons.VIEW, "live_area": icons.LIVE}
     fields = dict(name=name[:60], concept=(concept or "")[:200], elements=[], style=st, svg="",
                   png_path=path, source_path=src, prompt=prompt, width=w, height=h, violations=viol)
@@ -477,7 +479,7 @@ def icon_png(icon_id: int, db: Session = Depends(get_db)):
 
 @router.get("/icons/{icon_id}/source")
 def icon_source(icon_id: int, db: Session = Depends(get_db)):
-    """3D 아이콘의 1024 원본(투명 PNG)."""
+    """3D 아이콘의 원본(투명 PNG). 1장 렌더면 1024, 격자 렌더면 격자에서 잘라낸 조각(style.source_size)."""
     a = db.get(IconAsset, icon_id)
     if not a or not a.source_path or not storage.exists(a.source_path):
         raise HTTPException(404, "원본 파일이 없는 아이콘입니다")

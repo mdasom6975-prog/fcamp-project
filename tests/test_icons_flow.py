@@ -104,6 +104,30 @@ def test_export_draft_includes_icon_files(env):
     assert "검수결과.csv" in z.namelist()
 
 
+def test_export_labels_real_source_size(env):
+    """원본 PNG 설명은 '1024' 고정이 아니라 실제 크기다. 격자에서 잘라낸 조각이면 격자도 적고, manifest 에 source_sizes 가 들어간다."""
+    from app import routers_icons
+    c, did, models, Local = env["client"], env["ids"]["design"], env["models"], env["Local"]
+    env["add_icons"](1)                                   # 1장 렌더(origin 없음)
+    with Local() as db:
+        d = db.get(models.Design, did); bv = db.get(models.BrandVersion, env["ids"]["bv"])
+        piece = _blob().crop((350, 300, 650, 550))            # 격자에서 잘라낸 조각처럼 작은 원본
+        routers_icons._save3d(db, d, bv, 1, 2, "기능2", "오브젝트 2", "prompt 2", piece, routers_icons._style(bv),
+                              routers_icons._palette(bv), 256, 256, bv.forbidden_phrases,
+                              origin={"grid": "4x3", "cell": 2, "method": "order", "mismatch": False})
+        db.commit()
+    c.post(f"/api/designs/{did}/review")
+    e = c.post(f"/api/designs/{did}/export", json={"draft": True}).json()
+    z = zipfile.ZipFile(io.BytesIO(c.get(e["download_url"]).content))
+    manifest = json.loads(z.read("manifest.json"))
+    roles = {f["path"]: f["role"] for f in manifest["files"] if f["path"].startswith("icons/src/")}
+    w, h = _blob().size
+    assert roles["icons/src/01_기능1.png"] == f"아이콘 원본 PNG({w}×{h}, 투명)"
+    assert roles["icons/src/02_기능2.png"] == "아이콘 원본 PNG(300×250, 투명, 4x3 격자에서 잘라냄)"
+    entry = next(p for p in manifest["presets"] if p["name"] == "아이콘 세트")
+    assert [s["size"] for s in entry["source_sizes"]] == [[w, h], [300, 250]]
+
+
 def test_export_without_icons_or_presets_is_rejected(env):
     c, did = env["client"], env["ids"]["design"]
     r = c.post(f"/api/designs/{did}/export", json={"draft": True})
