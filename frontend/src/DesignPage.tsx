@@ -467,7 +467,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
 
           {view === 'icons' && <IconPanel key={iconKey} designId={designId} versionNo={versionNo} ask
             ready={groups.some((g) => imgs[g.preset_id]?.composite)} onCount={setIconCount} />}
-          {view === 'icons' && <PinPanel designId={designId} iconCount={iconCount} />}
+          {SHOW_PINS && view === 'icons' && <PinPanel designId={designId} iconCount={iconCount} />}
 
           {view !== 'icons' && <div className="pick-bar">
             <span className="pick-text">
@@ -1012,6 +1012,9 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
     </div>
   )
 }
+
+// 핀 뱃지 세트 영역 표시 여부. 아직 상품성이 부족해 화면에서만 숨긴다(백엔드 API·코드는 그대로)
+const SHOW_PINS = false
 
 type PinPiece = { slot: number; kind: 'logo' | 'word' | 'name' | 'topic'; label: string; width?: number; height?: number; missing?: boolean; retried?: boolean }
 type PinItem = { id: number; width: number; height: number; created_at: string; pins: PinPiece[]
@@ -1668,7 +1671,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
           <section className="card" id="sec-copy">
             <header><h3>아이콘 세트</h3></header>
             <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} onCount={setIconCount} />
-            <PinPanel designId={d.id} iconCount={iconCount} />
+            {SHOW_PINS && <PinPanel designId={d.id} iconCount={iconCount} />}
           </section>
         ) : hasCopy === null ? (
           <p className="muted">불러오는 중…</p>
