@@ -128,17 +128,19 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None
               "elements": [], "margin_source": "편집됨"}
     for r in rows:
         if r.type == "shape":
-            layout["scrim"] = {"mode": r.props["mode"], "color": r.props["color"], "opacity": r.props["opacity"]}
+            layout["scrim"] = {"mode": r.props["mode"], "color": r.props["color"], "opacity": r.props["opacity"],
+                               **{k: r.props[k] for k in ("side", "extent") if k in r.props}}
         elif r.type == "logo" and measure.get("logo", {}).get("box"):
             layout["elements"].append({"type": "logo", "box": measure["logo"]["box"], "locked": r.locked})
         elif r.type == "text":
             layout["elements"].append({"type": "text", "text": r.props["text"], "box": measure["text"]["box"],
                                        "font_size": r.props["font_size"], "color": r.props["color"],
-                                       "locked": r.locked})
+                                       "align": r.props["align"], "locked": r.locked})
         elif r.type == "body" and measure.get("body"):       # 본문·CTA 도 저장 레이아웃에 남긴다(편집 전 합성과 같은 모양)
             layout["elements"].append({"type": "body", "role": "본문", "text": r.props["text"], "lines": measure["body"]["lines"],
                                        "box": measure["body"]["box"], "font_size": r.props["font_size"],
-                                       "color": r.props["color"], "cut": measure["body"]["cut"], "locked": r.locked})
+                                       "color": r.props["color"], "cut": measure["body"]["cut"], "align": r.props["align"],
+                                       "locked": r.locked})
         elif r.type == "cta" and measure.get("cta"):
             layout["elements"].append({"type": "cta", "role": "CTA", "text": r.props["text"], "box": measure["cta"]["box"],
                                        "font_size": r.props["font_size"], "bg_color": r.props["bg_color"],

@@ -27,7 +27,10 @@ def template_for(w: int, h: int) -> str:
 LAYOUTS_PATH = Path(__file__).with_name("layouts.json")
 DEFAULT_LAYOUT = "기본"
 CORNERS = ("좌상단", "우상단", "좌하단", "우하단")
-SCRIM_SIDES = ("bottom", "left")
+# 문구 자리(text.side): 세로형·정사각은 피사체의 위/아래, 가로형은 왼쪽/오른쪽 열. 스크림은 문구 쪽이 진하다
+TEXT_SIDES = {VERTICAL: ("bottom", "top"), SQUARE: ("bottom", "top"), HORIZONTAL: ("left", "right")}
+SCRIM_SIDES = ("bottom", "top", "left", "right")
+TEXT_ALIGNS = {"left": "왼쪽", "center": "가운데"}     # 토큰 값 → 편집 요소 align 값
 
 
 def _check_layout(name: str, tpl: str, t: dict) -> None:
@@ -51,10 +54,13 @@ def _check_layout(name: str, tpl: str, t: dict) -> None:
     corners = t.get("logo_corners") or []
     if not corners or any(c not in CORNERS for c in corners):
         raise ValueError(f"{where}: logo_corners 는 {list(CORNERS)} 중에서 하나 이상이어야 합니다: {corners!r}")
+    tx = t.get("text") or {}
+    if tx.get("side") not in TEXT_SIDES[tpl]:
+        raise ValueError(f"{where}: text.side 는 {list(TEXT_SIDES[tpl])} 중 하나여야 합니다: {tx.get('side')!r}")
+    if tx.get("align") not in TEXT_ALIGNS:
+        raise ValueError(f"{where}: text.align 은 {list(TEXT_ALIGNS)} 중 하나여야 합니다: {tx.get('align')!r}")
     sc = t.get("scrim") or {}
-    if sc.get("side") not in SCRIM_SIDES:
-        raise ValueError(f"{where}: scrim.side 는 {list(SCRIM_SIDES)} 중 하나여야 합니다: {sc.get('side')!r}")
-    for key in ("extent", "top_extent", "opacity"):
+    for key in ("extent", "opacity"):
         frac(f"scrim.{key}", sc.get(key))
 
 
@@ -338,20 +344,30 @@ def _wrap(draw, text: str, font, max_w: int) -> list[str]:
     return lines or [""]
 
 
-def apply_scrim(canvas: Image.Image, tpl: str, color_hex: str, opacity: float, top: bool = False) -> Image.Image:
-    """가독성을 위한 그라디언트 막. 진한 쪽과 덮는 범위는 토큰 scrim(side·extent) — 기본은 가로형 왼쪽, 그 외 아래쪽.
-    top=True 면 문구를 위에 둘 때 위쪽이 진하다(top_extent, 아래쪽 막일 때만)."""
+def apply_scrim(canvas: Image.Image, tpl: str, color_hex: str, opacity: float, top: bool = False,
+                side: str | None = None, extent: float | None = None) -> Image.Image:
+    """가독성을 위한 그라디언트 막. side(bottom·top·left·right) 쪽이 진하고 extent(그 방향 길이 대비 비율)만큼 덮는다.
+    side·extent 를 안 주면 기본 레이아웃의 토큰(문구 방향·scrim.extent) — 가로형 왼쪽, 그 외 아래쪽.
+    top=True 는 예전 호출용으로, 아래쪽 막을 위쪽으로 바꾼다."""
     w, h = canvas.size
-    sc = layout_tokens(tpl)["scrim"]
+    tk = layout_tokens(tpl)
+    side = side or tk["text"]["side"]
+    if top and side == "bottom":
+        side = "top"
+    ext = tk["scrim"]["extent"] if extent is None else extent
     grad = Image.new("L", (w, h), 0)
     ramp = Image.linear_gradient("L")            # 위(0) → 아래(255)
-    if sc["side"] == "left":
-        gw = max(1, round(w * sc["extent"]))
-        grad.paste(ramp.transpose(Image.ROTATE_270).resize((gw, h), Image.BILINEAR), (0, 0))  # 왼쪽 255 → 오른쪽 0
-    elif top:
-        grad.paste(ramp.transpose(Image.FLIP_TOP_BOTTOM).resize((w, max(1, round(h * sc["top_extent"]))), Image.BILINEAR), (0, 0))
+    if side in ("left", "right"):
+        gw = max(1, round(w * ext))
+        band = ramp.transpose(Image.ROTATE_270).resize((gw, h), Image.BILINEAR)   # 왼쪽 255 → 오른쪽 0
+        if side == "left":
+            grad.paste(band, (0, 0))
+        else:
+            grad.paste(band.transpose(Image.FLIP_LEFT_RIGHT), (w - gw, 0))
+    elif side == "top":
+        grad.paste(ramp.transpose(Image.FLIP_TOP_BOTTOM).resize((w, max(1, round(h * ext))), Image.BILINEAR), (0, 0))
     else:
-        y0 = round(h * (1 - sc["extent"]))
+        y0 = round(h * (1 - ext))
         grad.paste(ramp.resize((w, max(1, h - y0)), Image.BILINEAR), (0, y0))
     grad = grad.point(lambda v: int(v * max(0.0, min(1.0, opacity))))
     out = canvas.copy()
@@ -557,9 +573,10 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
             scrim_hex: str | None, fill_blur: bool = False, body: str | None = None, cta: str | None = None,
             body_font_path: str | None = None, accent_hex: str | None = None, corner: str = "둥근",
-            logo_position: str | None = None) -> tuple[Image.Image, dict]:
+            logo_position: str | None = None, layout: str = DEFAULT_LAYOUT) -> tuple[Image.Image, dict]:
     """배경 위에 로고·제목(+선택: 본문·CTA 버튼)을 합성한다. 본문·CTA 는 지면 설정(in_image)이 켜진 경우에만 받는다.
     logo_position: 브랜드 설정의 로고 자리(좌상단·우상단·좌하단·우하단). None/'자동'이면 배경이 가장 단순한 모서리를 고른다.
+    layout: layouts.json 의 레이아웃 이름. 문구 자리(text.side)·정렬(text.align)·크기 값을 정한다.
     문구 블록은 제목 → 본문 → CTA 순으로 아래에서 위로 쌓고, 자리가 모자라면 본문을 먼저 뺀다(제목·CTA 우선).
     띠 배너(가로세로 2.6 이상)는 CTA 를 오른쪽에 두고 본문은 1줄만."""
     bg = bg.convert("RGB")
@@ -580,8 +597,10 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         nw, nh, x, y, crop = crop_window(bg, w, h)
         canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
     tpl = template_for(w, h)
-    tk = layout_tokens(tpl)                      # 배치 토큰(layouts.json)
+    tk = layout_tokens(tpl, layout)              # 배치 토큰(layouts.json)
     lh_k = tk["type"]["line_height"]
+    side = tk["text"]["side"]                    # 세로형·정사각: bottom|top(피사체 아래/위), 가로형: left|right(열)
+    center = tk["text"]["align"] == "center"
     L, T, R, B, safe_src = _margins(w, h, safe)
     cl, ct, cr, cb = L, T, w - R, h - B          # 콘텐츠 영역
     report: dict = {"template": tpl, "canvas": [w, h], "content_box": [cl, ct, cr, cb],
@@ -614,50 +633,63 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             report["logo_placement"] = {"corner": logo_corner, "busyness": round(score, 2), "mode": "브랜드 고정"}
         else:
             cands = {k: all_cands[k] for k in tk["logo_corners"]}
-            # 가로형은 문구가 왼쪽 55%에 있어 좌하단은 후보에서 뺀다
+            # 후보 모서리는 토큰(logo_corners): 기본 가로형은 문구가 왼쪽 55%에 있어 좌하단을 뺀다
             logo_corner, score, scores = pick_logo_corner(canvas, cands, pad)
-            # 세로형·정사각에서 피사체가 아래 자리를 비워 두면(위 모서리가 피사체와 안 겹치고 단순하면) 위 모서리를 우선한다 —
-            # 아래 띠는 문구 자리라 로고까지 두면 문구가 피사체 위로 밀려 올라간다
+            # 세로형·정사각에서 문구 쪽(기본은 아래) 모서리가 골렸으면, 반대쪽 모서리가 피사체와 안 겹치고 단순할 때 그쪽을 우선한다 —
+            # 문구 띠에 로고까지 두면 문구가 피사체 쪽으로 밀려난다
             subj_box = crop.get("content_box_canvas")
-            if tpl != HORIZONTAL and subj_box and logo_corner in ("좌하단", "우하단"):
+            text_corners = ("좌상단", "우상단") if side == "top" else ("좌하단", "우하단")
+            if tpl != HORIZONTAL and subj_box and logo_corner in text_corners:
                 sx0, sy0, sx1, sy1 = subj_box
-                tops = {k: v for k, v in cands.items() if k in ("좌상단", "우상단")
-                        and (v[3] + pad < sy0 or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
-                if tops:
-                    logo_corner = min(tops, key=scores.get)
+                clear_y = (lambda v: v[1] - pad > sy1) if side == "top" else (lambda v: v[3] + pad < sy0)
+                others = {k: v for k, v in cands.items() if k not in text_corners
+                          and (clear_y(v) or v[2] + pad < sx0 or v[0] - pad > sx1) and scores[k] < 0.35}
+                if others:
+                    logo_corner = min(others, key=scores.get)
                     score = scores[logo_corner]
             report["logo_placement"] = {"corner": logo_corner, "busyness": round(score, 2), "mode": "자동"}
         logo_box = all_cands[logo_corner]
-    left_logo = bool(logo_box) and logo_box[0] <= cl + 1
-    # 로고가 아래 모서리면 문구는 그 위에 쌓는다. 가로형은 문구가 왼쪽 열이라 왼쪽 아래 로고만 해당한다
-    bottom_logo = bool(logo_box) and logo_box[1] > ct + 1 and (tpl != HORIZONTAL or left_logo)
-
-    # 2) 문구 영역
-    tx0, tx1 = cl, cl + round((cr - cl) * tk["text_column"])     # 가로형은 왼쪽 열(text_column), 그 외 전체 폭
+    # 2) 문구 영역: 가로형은 한쪽 열(text_column, side 가 left 면 왼쪽·right 면 오른쪽), 그 외 전체 폭
+    col = round((cr - cl) * tk["text_column"])
+    tx0, tx1 = (cr - col, cr) if side == "right" else (cl, cl + col)
+    # 로고가 문구 열 안에 있으면 문구와 위아래로 나눠 쓴다(아래 모서리면 문구는 그 위에, 위 모서리면 그 아래에)
+    in_col = bool(logo_box) and logo_box[0] < tx1 and logo_box[2] > tx0
+    bottom_logo = in_col and logo_box[1] > ct + 1
     gap = pad + round(h * tk["text_gap"])
-    if bottom_logo:                         # 세로형·정사각에서 로고가 아래 모서리면 문구는 그 위에 쌓는다
+    if bottom_logo:
         ty0, ty1 = ct, logo_box[1] - gap
-    elif logo_box and (left_logo or tpl != HORIZONTAL):   # 문구는 로고 아래에서 시작한다
+    elif in_col:
         ty0, ty1 = logo_box[3] + gap, cb
-    else:                                   # 로고가 오른쪽이고 문구가 왼쪽 55%인 가로형은 겹치지 않아 위까지 쓴다
+    else:                                   # 로고가 문구 열 밖(가로형의 반대쪽 모서리)이면 위아래 전부 쓴다
         ty0, ty1 = ct, cb
-    # 문구는 피사체(내용 상자)를 덮지 않는다: 세로형·정사각은 피사체 아래에서 시작, 가로형은 피사체 왼쪽까지만.
-    # 남는 자리가 너무 작으면(세로 25%·가로 30% 미만) 무리하지 않고 크기 맞춤·경고에 맡긴다.
+    # 문구는 피사체(내용 상자)를 덮지 않는다: 세로형·정사각은 피사체 아래(top 이면 위), 가로형은 피사체 옆 열까지만.
+    # 남는 자리가 너무 작으면(한 줄도 안 들어가거나 가로 30% 미만) 무리하지 않고 크기 맞춤·경고에 맡긴다.
     min_size = max(16, round(min(w, h) * tk["type"]["title_min"]))
-    ty0_top = ty0            # 피사체 조정 전의 위쪽 끝(문구를 피사체 위에 둘 때 쓴다)
+    ty0_full, ty1_full = ty0, ty1            # 피사체 조정 전의 위·아래 끝(반대쪽 자리를 써 볼 때 쓴다)
+    narrow = "문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)"
     subj = crop.get("content_box_canvas")
     if subj:
         sx0, sy0, sx1, sy1 = subj
-        if tpl != HORIZONTAL and sy1 + gap > ty0 and sy0 < ty1:
+        if side == "bottom" and sy1 + gap > ty0 and sy0 < ty1:
             if ty1 - (sy1 + gap) >= round(min_size * lh_k):      # 최소 글자 크기 한 줄이라도 들어가면 피사체 아래로
                 ty0 = sy1 + gap
             else:
-                report["warnings"].append("문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)")
-        elif tpl == HORIZONTAL and sx0 - gap < tx1:
+                report["warnings"].append(narrow)
+        elif side == "top" and sy0 - gap < ty1 and sy1 > ty0:
+            if (sy0 - gap) - ty0 >= round(min_size * lh_k):      # 피사체 위로
+                ty1 = sy0 - gap
+            else:
+                report["warnings"].append(narrow)
+        elif side == "left" and sx0 - gap < tx1:
             if sx0 - gap - tx0 >= 0.3 * (cr - cl):
                 tx1 = sx0 - gap
             else:
-                report["warnings"].append("문구 자리가 좁아 피사체와 겹칠 수 있습니다 (편집에서 위치를 조정하세요)")
+                report["warnings"].append(narrow)
+        elif side == "right" and sx1 + gap > tx0:
+            if tx1 - (sx1 + gap) >= 0.3 * (cr - cl):
+                tx0 = sx1 + gap
+            else:
+                report["warnings"].append(narrow)
     # 띠 배너: CTA 는 문구 열 오른쪽에 세로 가운데, 문구 열은 그만큼 좁아진다
     cta_h = 0
     if cta:
@@ -716,18 +748,20 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             ok = bh <= ah and all(draw.textlength(ln, font=f) <= avail_w for ln in ls)
         return sz, ls, bl, bs, ok, kept, bh
     size, lines, body_lines, body_size, fits, kept, block_h = fit_block(avail_h)
-    # 4-1) 피사체 아래 자리가 모자라면(본문이 빠지거나 넘칠 때) 피사체 위쪽 자리를 써 본다. 더 잘 들어갈 때만 옮긴다.
-    top_zone = False
-    if (not fits or not kept) and tpl != HORIZONTAL and not strip and subj:
-        above_h = (subj[1] - gap) - ty0_top
-        if above_h > avail_h:
-            alt = fit_block(above_h)
+    top_zone = side == "top"
+    if top_zone:
+        ty1 = ty0 + block_h                  # 위쪽 자리는 위에서부터 쌓는다
+    # 4-1) 피사체 아래(top 이면 위) 자리가 모자라면(본문이 빠지거나 넘칠 때) 반대쪽 자리를 써 본다. 더 잘 들어갈 때만 옮긴다.
+    if (not fits or not kept) and side in ("bottom", "top") and not strip and subj:
+        a0, a1 = (subj[3] + gap, ty1_full) if top_zone else (ty0_full, subj[1] - gap)
+        if a1 - a0 > avail_h:
+            alt = fit_block(a1 - a0)
             if (alt[4], alt[5]) > (fits, kept):
                 size, lines, body_lines, body_size, fits, kept, block_h = alt
-                avail_h, ty0 = above_h, ty0_top
-                ty1 = ty0 + block_h          # 위에서부터 쌓는다
-                top_zone = True
-                report["text_zone"] = "위"
+                avail_h, top_zone = a1 - a0, not top_zone
+                ty0, ty1 = (a0, a0 + block_h) if top_zone else (a0, a1)
+    if top_zone:
+        report["text_zone"] = "위"
     body_dropped = bool(body) and not kept
     if body_dropped:
         body, body_lines = None, []
@@ -736,9 +770,10 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     if not fits:
         report["warnings"].append("문구가 영역을 넘칠 수 있습니다 (최소 글자 크기에서도 맞지 않음)")
     scrim_opacity = tk["scrim"]["opacity"]
-    canvas = apply_scrim(canvas, tpl, scrim_hex or "#000000", scrim_opacity, top=top_zone)
+    scrim_side = side if side in ("left", "right") else "top" if top_zone else "bottom"
+    canvas = apply_scrim(canvas, tpl, scrim_hex or "#000000", scrim_opacity, side=scrim_side, extent=tk["scrim"]["extent"])
     report["scrim"] = {"mode": tpl, "color": (scrim_hex or "#000000").upper(), "opacity": scrim_opacity,
-                       **({"position": "위"} if top_zone else {})}
+                       "side": scrim_side, "extent": tk["scrim"]["extent"], **({"position": "위"} if top_zone else {})}
     draw = ImageDraw.Draw(canvas)
     if body and len(body_lines) > body_max_lines:
         report["warnings"].append(f"본문이 {body_max_lines}줄을 넘습니다 (말줄임 없이 전부 표시). 편집에서 줄이거나 본문을 끄세요")
@@ -750,7 +785,8 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         probe_font = ImageFont.truetype(font_path, cta_font_size)
         cw = round(draw.textlength(cta, font=probe_font) + cta_h)
         cw = min(cw, round(avail_w * 0.7)) if cw > avail_w * 0.7 else cw
-        cta_box = [tx0, y_cursor - cta_h, tx0 + cw, y_cursor]
+        cx0 = tx0 + (tx1 - tx0 - cw) // 2 if center else tx0
+        cta_box = [cx0, y_cursor - cta_h, cx0 + cw, y_cursor]
         y_cursor = cta_box[1] - inner_gap
     body_box: list[int] | None = None
     if body:
@@ -771,7 +807,8 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     # 5-1) 가독성 보강: 스크림은 평균을 맞출 뿐이라 사진의 밝은 조각(피부·하늘) 위에서는 글자가 묻힌다.
     #      문구 블록을 칸으로 나눠 가장 약한 칸의 대비가 4.5:1 에 못 미치거나 배경이 복잡하면, 블록 뒤에 흐린 판을 한 장 더 깐다.
     block_bottom = y_cursor if not cta_box or strip else cta_box[3]
-    block = [tx0, ty, max(tx1, cta_box[2] if cta_box and not strip else tx1), block_bottom]
+    block = [min(tx0, cta_box[0] if cta_box and not strip else tx0), ty,
+             max(tx1, cta_box[2] if cta_box and not strip else tx1), block_bottom]
     tb_pad = round(size * 0.5)
     tb_box = [max(0, block[0] - tb_pad), max(0, block[1] - tb_pad), min(w, block[2] + tb_pad), min(h, block[3] + tb_pad)]
     tb_region = canvas.crop(tuple(tb_box))
@@ -785,12 +822,17 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                                   "weakest_contrast": round(weakest, 2)}
     if fallback:
         report["warnings"].append("브랜드 텍스트색의 대비가 부족해 흰색/검정으로 대체했습니다")
-    canvas = draw_text_soft(canvas, [(tx0, ty + i * round(size * lh_k), ln) for i, ln in enumerate(lines)], font, color)
+    def line_x(ln: str, f) -> int:
+        """줄의 왼쪽 x. 가운데 정렬이면 문구 열 안에서 가운데(편집 화면 editing._placed 와 같은 계산)."""
+        return int(tx0 + (tx1 - tx0 - draw.textlength(ln, font=f)) / 2) if center else tx0
+    align = TEXT_ALIGNS[tk["text"]["align"]]
+    canvas = draw_text_soft(canvas, [(line_x(ln, font), ty + i * round(size * lh_k), ln) for i, ln in enumerate(lines)], font, color)
     if body and body_box:
         bf = ImageFont.truetype(body_font_path, body_size)
-        canvas = draw_text_soft(canvas, [(tx0, body_box[1] + i * round(body_size * lh_k), ln) for i, ln in enumerate(body_lines)], bf, color)
+        canvas = draw_text_soft(canvas, [(line_x(ln, bf), body_box[1] + i * round(body_size * lh_k), ln)
+                                         for i, ln in enumerate(body_lines)], bf, color)
         report["elements"].append({"type": "body", "role": "본문", "text": body, "lines": body_lines, "box": body_box,
-                                   "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": False})
+                                   "font_size": body_size, "color": "#%02X%02X%02X" % color, "cut": False, "align": align})
     draw = ImageDraw.Draw(canvas)
     if cta and cta_box:
         cta_bg, cta_fg = cta_colors(accent_hex, color)
@@ -812,5 +854,6 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                                    "note": "원본 비율 유지"})
     report["elements"].append({"type": "text", "role": "제목", "text": headline, "lines": lines,
                                "box": text_box, "font_size": size, "color": "#%02X%02X%02X" % color,
-                               "color_fallback": fallback, "fits": fits})
+                               "color_fallback": fallback, "fits": fits, "align": align})
+    report["layout"] = {"name": tk["layout"], "version": tk["version"]}
     return canvas, report

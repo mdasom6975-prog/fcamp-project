@@ -57,7 +57,7 @@ def test_layout_tokens_merge_common_with_template():
     v, h = compose.layout_tokens(compose.VERTICAL), compose.layout_tokens(compose.HORIZONTAL)
     assert v["margin"] == h["margin"]                     # common 값
     assert v["text_column"] == 1.0 and h["text_column"] == 0.55   # 비율군 값이 덮어쓴다
-    assert h["scrim"]["side"] == "left" and v["scrim"]["side"] == "bottom"
+    assert h["text"]["side"] == "left" and v["text"]["side"] == "bottom"
     assert compose.layout_tokens(compose.SQUARE, "없는 레이아웃") is compose.layout_tokens(compose.SQUARE)
     assert compose.PRODUCT_SLOT[compose.VERTICAL] == tuple(v["product_slot"])
 
@@ -73,6 +73,90 @@ def test_layouts_reject_bad_values(tmp_path):
         raw["기본"]["가로형"]["logo_corners"] = ["가운데"]
     def bad_fraction(raw):
         raw["기본"]["common"]["margin"] = 6
-    for change, msg in ((missing_tpl, "정사각"), (bad_slot, "product_slot"), (bad_corner, "logo_corners"), (bad_fraction, "margin")):
+    def bad_side(raw):
+        raw["기본"]["가로형"]["text"] = {"side": "top", "align": "left"}     # 가로형은 left/right 만
+    def bad_align(raw):
+        raw["기본"]["common"]["text"] = {"side": "bottom", "align": "justify"}
+    for change, msg in ((missing_tpl, "정사각"), (bad_slot, "product_slot"), (bad_corner, "logo_corners"), (bad_fraction, "margin"),
+                        (bad_side, "text.side"), (bad_align, "text.align")):
         with pytest.raises(ValueError, match=msg):
             compose.load_layouts(_layouts_file(tmp_path, change))
+
+
+# 문구 방향·정렬(text.side·align): 기본 레이아웃 값을 바꾼 시험용 레이아웃으로 합성해 본다
+def _textured(size, box) -> Image.Image:
+    """단색 바탕의 box 안에만 질감 많은 피사체가 있는 배경."""
+    rnd = random.Random(2)
+    im = Image.new("RGB", size, (236, 220, 196))
+    d = ImageDraw.Draw(im)
+    x0, y0, x1, y1 = box
+    for _ in range(1500):
+        x, y = rnd.randint(x0, x1 - 60), rnd.randint(y0, y1 - 60)
+        d.ellipse([x, y, x + rnd.randint(10, 60), y + rnd.randint(10, 60)], fill=tuple(rnd.randint(120, 255) for _ in range(3)))
+    return im
+
+
+def _with_layout(tmp_path, monkeypatch, tpl, **text):
+    from app import compose
+    def change(raw):
+        raw["기본"][tpl]["text"] = {**raw["기본"]["common"]["text"], **raw["기본"][tpl].get("text", {}), **text}
+        if text.get("side") == "right":
+            raw["기본"][tpl]["logo_corners"] = ["우상단", "좌상단", "좌하단"]
+    monkeypatch.setattr(compose, "LAYOUTS", compose.load_layouts(_layouts_file(tmp_path, change)))
+    return compose
+
+
+def _logo():
+    im = Image.new("RGBA", (300, 120), (0, 0, 0, 0))
+    ImageDraw.Draw(im).rectangle([10, 10, 290, 110], fill=(20, 60, 200, 255))
+    return im
+
+
+def _overlap(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_text_top_center_sits_above_subject(tmp_path, monkeypatch):
+    compose = _with_layout(tmp_path, monkeypatch, "세로형", side="top", align="center")
+    _, rep = compose.compose(_textured((1024, 1536), (150, 820, 870, 1450)), 1080, 1350, "이번 주말, 누구일까", FONT, _logo(),
+                             None, None, None, None, body=BODY, cta="쿠챠에서 만나기", accent_hex="#3B5BFF")
+    els = {e["type"]: e for e in rep["elements"]}
+    subj = rep["crop"]["content_box_canvas"]
+    assert rep.get("text_zone") == "위" and rep["scrim"]["side"] == "top"
+    assert els["cta"]["box"][3] <= subj[1]                       # 문구 블록 전체가 피사체 위에
+    assert els["text"]["align"] == "가운데" and els["body"]["align"] == "가운데"
+    tx0, _, tx1, _ = els["text"]["box"]
+    c0, _, c1, _ = els["cta"]["box"]
+    assert abs((c0 - tx0) - (tx1 - c1)) <= 1                     # CTA 버튼도 가운데
+    assert not _overlap(els["logo"]["box"], els["text"]["box"])
+
+
+def test_text_right_column_avoids_left_subject(tmp_path, monkeypatch):
+    compose = _with_layout(tmp_path, monkeypatch, "가로형", side="right")
+    _, rep = compose.compose(_textured((1536, 1024), (80, 120, 760, 900)), 1200, 628, "이번 주말, 누구일까", FONT, _logo(),
+                             None, None, None, None, body=BODY, cta="쿠챠에서 만나기", accent_hex="#3B5BFF")
+    els = {e["type"]: e for e in rep["elements"]}
+    subj = rep["crop"]["content_box_canvas"]
+    cl, ct, cr, cb = rep["content_box"]
+    assert rep["scrim"]["side"] == "right"
+    assert els["text"]["box"][0] >= subj[2]                      # 피사체 오른쪽 열
+    assert els["text"]["box"][2] <= cr and els["cta"]["box"][2] <= cr
+    assert not _overlap(els["logo"]["box"], els["text"]["box"])
+
+
+def test_editing_keeps_scrim_side_and_align(tmp_path, monkeypatch):
+    import pytest
+    from app import editing
+    compose = _with_layout(tmp_path, monkeypatch, "가로형", side="right", align="center")
+    _, rep = compose.compose(_textured((1536, 1024), (80, 120, 760, 900)), 1200, 628, "이번 주말", FONT, None,
+                             None, None, None, None)
+    font = {"source": "provided", "name": "Pretendard"}
+    els = {e["type"]: e for e in editing.default_elements(rep, font, None)}
+    assert els["shape"]["props"]["side"] == "right" and els["shape"]["props"]["extent"] == rep["scrim"]["extent"]
+    assert els["text"]["props"]["align"] == "가운데"
+    assert editing.validate_props("shape", els["shape"]["props"], (1200, 628))["side"] == "right"
+    with pytest.raises(ValueError):
+        editing.validate_props("shape", {**els["shape"]["props"], "side": "가운데"}, (1200, 628))
+    # 예전 기록: 문구를 위로 옮긴 합성은 position '위' 만 남아 있다 → 편집에서도 위쪽 스크림
+    old = {"template": "세로형", "scrim": {"mode": "세로형", "color": "#000000", "opacity": 0.62, "position": "위"}, "elements": []}
+    assert editing.default_elements(old, font, None)[1]["props"]["side"] == "top"

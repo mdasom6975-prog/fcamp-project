@@ -15,8 +15,11 @@ def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None, bo
                         "props": {"zoom": float(crop.get("zoom", 1.0)), "cx": float(crop.get("cx", 0.5)),
                                   "cy": float(crop.get("cy", 0.5))}}]
     sc = layout.get("scrim") or {"mode": layout.get("template", "정사각"), "color": "#000000", "opacity": 0.62}
+    # 스크림 방향·범위: 합성 기록의 side·extent. 예전 기록은 문구를 위에 둔 경우 position '위' 만 있어 위쪽으로 본다
+    side = sc.get("side") or ("top" if sc.get("position") == "위" else None)
     els.append({"type": "shape", "role": "스크림", "locked": False, "z_index": 1,
-                "props": {"mode": sc["mode"], "color": sc["color"], "opacity": sc["opacity"]}})
+                "props": {"mode": sc["mode"], "color": sc["color"], "opacity": sc["opacity"],
+                          **({"side": side} if side else {}), **({"extent": sc["extent"]} if "extent" in sc else {})}})
     for e in layout.get("elements", []):
         if e["type"] == "logo":
             x0, y0, x1, _ = e["box"]
@@ -26,12 +29,12 @@ def default_elements(layout: dict, font_ref: dict, logo_asset_id: int | None, bo
             x0, y0, x1, _ = e["box"]
             els.append({"type": "text", "role": "제목", "locked": False, "z_index": 3,
                         "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "font_size": e["font_size"],
-                                  "color": e["color"], "align": "왼쪽", "font": font_ref, "text_override": False}})
+                                  "color": e["color"], "align": e.get("align", "왼쪽"), "font": font_ref, "text_override": False}})
         elif e["type"] == "body":
             x0, y0, x1, _ = e["box"]
             els.append({"type": "body", "role": "본문", "locked": False, "z_index": 4,
                         "props": {"text": e["text"], "x": x0, "y": y0, "w": x1 - x0, "font_size": e["font_size"],
-                                  "color": e["color"], "align": "왼쪽", "font": body_font_ref or font_ref,
+                                  "color": e["color"], "align": e.get("align", "왼쪽"), "font": body_font_ref or font_ref,
                                   "max_lines": max(1, len(e.get("lines") or [1])), "text_override": False}})
         elif e["type"] == "cta":
             x0, y0, x1, y1 = e["box"]
@@ -72,7 +75,14 @@ def validate_props(el_type: str, p: dict, canvas: tuple[int, int]) -> dict:
             raise ValueError("color 는 #RRGGBB 형식이어야 합니다")
         if p.get("mode") not in (compose.HORIZONTAL, compose.SQUARE, compose.VERTICAL):
             raise ValueError("mode 가 올바르지 않습니다")
-        return {"mode": p["mode"], "color": p["color"].upper(), "opacity": num("opacity", 0.0, 1.0)}
+        out = {"mode": p["mode"], "color": p["color"].upper(), "opacity": num("opacity", 0.0, 1.0)}
+        if p.get("side") is not None:
+            if p["side"] not in compose.SCRIM_SIDES:
+                raise ValueError(f"side 는 {compose.SCRIM_SIDES} 중 하나")
+            out["side"] = p["side"]
+        if p.get("extent") is not None:
+            out["extent"] = num("extent", 0.0, 1.0)
+        return out
     if el_type == "logo":
         return {"x": num("x", -W, 2 * W, int), "y": num("y", -H, 2 * H, int), "w": num("w", 8, 2 * W, int),
                 "asset_id": p.get("asset_id")}
@@ -173,7 +183,7 @@ def render(bg: Image.Image, W: int, H: int, elements: list[dict], font_path_of, 
     for e in els:
         p = e["props"]
         if e["type"] == "shape":
-            canvas = compose.apply_scrim(canvas, p["mode"], p["color"], p["opacity"])
+            canvas = compose.apply_scrim(canvas, p["mode"], p["color"], p["opacity"], side=p.get("side"), extent=p.get("extent"))
         elif e["type"] == "logo":
             logo = logo_of(p.get("asset_id"))
             if logo is None:
