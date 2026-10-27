@@ -6,8 +6,10 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import calllog, icons, imagegen, phrases, prompts, storage
-from .models import Brand, BrandVersion, Design, GeneratedImage, IconAsset
+from PIL import Image
+
+from . import calllog, compose, icons, imagegen, phrases, prompts, storage
+from .models import Asset, Brand, BrandVersion, Design, GeneratedImage, IconAsset, PinSheet
 from .routers_assets import get_db
 from .routers_review import invalidate_icon_reviews, version_icon_set
 
@@ -484,3 +486,100 @@ def icon_source(icon_id: int, db: Session = Depends(get_db)):
     if not a or not a.source_path or not storage.exists(a.source_path):
         raise HTTPException(404, "원본 파일이 없는 아이콘입니다")
     return storage.response(a.source_path, "image/png")
+
+
+# ---- 핀 뱃지 세트 ---- 4:5 한 장에 에나멜 핀 8개(로고 중간 1 · 단어 작은 1 · 이름 작은 1 · 관심 주제 5). 이미지 1장 비용
+def _pin_out(p: PinSheet) -> dict:
+    return {"id": p.id, "width": p.width, "height": p.height, "meta": p.meta, "created_at": p.created_at.isoformat()}
+
+
+def _pin_refs(db: Session, d: Design, bv: BrandVersion) -> tuple[Image.Image | None, Image.Image | None]:
+    """첨부할 (상품 사진, 로고). images.edit 을 못 쓰는 공급자거나 파일이 없으면 None. 사진은 흰 바탕에 얹어 불투명으로 보낸다."""
+    if not imagegen.can_edit():
+        return None, None
+    photo = logo = None
+    pa = db.get(Asset, (d.brief or {}).get("product_image_asset_id") or 0)
+    if pa and storage.exists(pa.file_path):
+        im = Image.open(storage.local(pa.file_path)).convert("RGBA")
+        im.thumbnail((1024, 1024), Image.LANCZOS)
+        photo = Image.new("RGB", im.size, (255, 255, 255))
+        photo.paste(im, (0, 0), im)
+    la = db.get(Asset, bv.logo_asset_id or 0)
+    if la and storage.exists(la.file_path):
+        logo = compose.load_logo(la.file_path, la.mime)
+        logo.thumbnail((1024, 1024), Image.LANCZOS)
+    return photo, logo
+
+
+@router.get("/designs/{design_id}/pins")
+def list_pins(design_id: int, db: Session = Depends(get_db)):
+    """이 캠페인의 핀 뱃지 세트(최근 것부터)와 입력 기본값(이름 = 브랜드 이름, 단어 = 말투 설명의 첫 키워드)."""
+    d = _design(db, design_id)
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand = db.get(Brand, d.brand_id)
+    rows = db.scalars(select(PinSheet).where(PinSheet.design_id == d.id).order_by(PinSheet.id.desc())).all()
+    return {"pins": [_pin_out(p) for p in rows], "defaults": {"name": brand.name, "word": icons.pin_word_default(bv.voice)},
+            "has_logo": bool(bv.logo_asset_id), "has_photo": bool((d.brief or {}).get("product_image_asset_id")),
+            "size": list(icons.PIN_OUT)}
+
+
+@router.post("/designs/{design_id}/pins")
+def create_pins(design_id: int, name: str | None = Body(None), word: str | None = Body(None), db: Session = Depends(get_db)):
+    """핀 뱃지 세트 1장을 만든다. 로고·상품 사진이 있으면 참조 이미지로 붙인다(images.edit, [사진, 로고] 순서)."""
+    d = _design(db, design_id)
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand = db.get(Brand, d.brand_id)
+    name = (name or "").strip() or brand.name
+    word = (word or "").strip() or icons.pin_word_default(bv.voice)
+    if not word:
+        raise HTTPException(400, "브랜드를 표현하는 단어를 입력해 주세요")
+    if len(name) > 20 or len(word) > 12:
+        raise HTTPException(400, "이름은 20자, 단어는 12자 이내로 입력해 주세요 (핀에 새길 글자입니다)")
+    forbidden = phrases.effective(bv, d.brief)["forbidden_phrases"]
+    hit = [p for p in forbidden if p and (p in name or p in word)]
+    if hit:
+        raise HTTPException(400, f"금지 표현이 들어 있습니다: {hit}")
+    photo, logo = _pin_refs(db, d, bv)
+    photo_n = 1 if photo is not None else None
+    logo_n = (2 if photo is not None else 1) if logo is not None else None
+    prompt = icons.pin_prompt(name, word, brand.description, d.brief or {}, bv.voice, bv.image_tone, bv.colors,
+                              forbidden, logo_n, photo_n)
+    model = imagegen.settings_for(d.brief)["model"]
+    w, h = icons.PIN_GEN
+    try:
+        if photo is not None or logo is not None:
+            im = imagegen.generate_variant(prompt, w, h, photo, model=model, product=logo, kind="pin")
+        else:
+            im = imagegen.generate_background(prompt, w, h, model=model, kind="pin")
+    except imagegen.QuotaExceeded as e:
+        raise HTTPException(429, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"핀 뱃지 생성에 실패했습니다 ({type(e).__name__})")
+    out = icons.crop_pin_sheet(im)
+    path = storage.put_image(f"pins_{uuid.uuid4().hex[:10]}.png", out)
+    p = PinSheet(design_id=d.id, brand_version_id=bv.id, file_path=path, width=out.width, height=out.height, prompt=prompt,
+                 meta={"name": name, "word": word, "logo": logo is not None, "photo": photo is not None, "model": model,
+                       "quality": imagegen.OPENAI_QUALITY, "prompt_ref": prompts.ref("icons/pin_badges"),
+                       "generated_size": [im.width, im.height]})
+    db.add(p)
+    db.commit()
+    return _pin_out(p)
+
+
+@router.delete("/designs/{design_id}/pins/{pin_id}")
+def delete_pin(design_id: int, pin_id: int, db: Session = Depends(get_db)):
+    p = db.get(PinSheet, pin_id)
+    if not p or p.design_id != design_id:
+        raise HTTPException(404, "핀 뱃지 세트를 찾을 수 없습니다")
+    storage.delete(p.file_path)
+    db.delete(p)
+    db.commit()
+    return {"deleted": pin_id}
+
+
+@router.get("/pins/{pin_id}/png")
+def pin_png(pin_id: int, db: Session = Depends(get_db)):
+    p = db.get(PinSheet, pin_id)
+    if not p or not storage.exists(p.file_path):
+        raise HTTPException(404, "핀 뱃지 세트를 찾을 수 없습니다")
+    return storage.response(p.file_path, "image/png")

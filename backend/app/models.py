@@ -222,6 +222,21 @@ class IconAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class PinSheet(Base):
+    """핀 뱃지 세트 1장(4:5). 에나멜 핀 8개 — 로고(중간) · 브랜드를 표현하는 단어 · 브랜드 이름(작은 핀) + 관심 주제 5개.
+    아이콘 세트와 달리 캠페인(시안)마다 여러 장을 둘 수 있다. meta: name, word, 첨부(logo·photo), 모델·품질, prompt_ref."""
+    __tablename__ = "pin_sheets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    design_id: Mapped[int] = mapped_column(ForeignKey("designs.id"))
+    brand_version_id: Mapped[int] = mapped_column(Integer)
+    file_path: Mapped[str] = mapped_column(String(500))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    prompt: Mapped[str] = mapped_column(Text)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class SourceCheck(Base):
     """규격 공식 페이지 확인 이력. 규격 수치는 자동으로 바꾸지 않고, 원문 변경 여부만 기록한다."""
     __tablename__ = "source_checks"

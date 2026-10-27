@@ -144,6 +144,19 @@ def test_icon3d_render_prompt_minimal():
     _assert_snapshot("icons3d__render_minimal", icons.render_prompt("보관함", "", vars) + "\n")
 
 
+def test_pin_badges_prompt():
+    """핀 뱃지 세트: 상품 사진(1번)·로고(2번) 첨부."""
+    from app import icons
+    _assert_snapshot("pins__badges", icons.pin_prompt("쿠챠", "호기심", BRAND["description"], BRIEF, BRAND["voice"],
+                                                     BRAND["image_tone"], BRAND["colors"], ["최저가"], 2, 1) + "\n")
+
+
+def test_pin_badges_prompt_minimal():
+    """로고·사진·브랜드 색·톤이 없을 때의 분기(모노그램 로고 핀, '없음')."""
+    from app import icons
+    _assert_snapshot("pins__badges_minimal", icons.pin_prompt("쿠챠", "호기심", "", BRIEF_MIN, {}, {}, [], [], None, None) + "\n")
+
+
 # ---- 배경 이미지 (imagegen) ----
 @pytest.mark.parametrize("template", ["가로형", "정사각", "세로형"])
 def test_background_prompt(template):

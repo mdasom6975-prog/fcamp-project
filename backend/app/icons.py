@@ -412,6 +412,50 @@ def source_desc(style: dict | None, size: tuple[int, int] | list[int] | None) ->
     return f"{dims or '1024×1024'}, 투명"
 
 
+# ---- 핀 뱃지 세트 ---- (문장은 prompts/icons/pin_badges + _pin_logo_attached·_pin_logo_none·_pin_photo)
+# 이미지 모델에는 4:5 크기가 없어 2:3 세로(1024×1536)로 만들고 가운데 4:5(1024×1280)를 잘라 쓴다. 프롬프트가 위아래 10%를 비우게 한다
+PIN_GEN = (1024, 1536)
+PIN_OUT = (1024, 1280)
+PIN_COLOR_ROLES = ("주조색", "보조색", "강조색")
+
+
+def pin_word_default(voice: dict | None) -> str:
+    """'나를 표현하는 단어' 기본값: 브랜드 말투 설명의 첫 키워드(예: '명확함 · 호기심 · …' → '명확함'). 없으면 빈 문자열."""
+    desc = str((voice or {}).get("description") or "")
+    first = re.split(r"[·,./\n]", desc, maxsplit=1)[0].strip()
+    return first if 0 < len(first) <= 12 else ""
+
+
+def pin_prompt(name: str, word: str, brand_desc: str, brief: dict, voice: dict | None, tone: dict | None,
+               colors: list[dict] | None, forbidden: list[str], logo_n: int | None, photo_n: int | None) -> str:
+    """핀 뱃지 세트 1장의 이미지 프롬프트. logo_n·photo_n 은 첨부 이미지 번호(없으면 None) — 첨부 순서는 호출자가 정한다."""
+    cols = [f"{c['hex']}({c['role']})" for role in PIN_COLOR_ROLES for c in (colors or []) if c.get("role") == role and c.get("hex")]
+    bg = next((c["hex"] for c in (colors or []) if c.get("role") == "배경색" and c.get("hex")), None)
+    logo_pin = (prompts.render("icons/_pin_logo_attached", n=logo_n) if logo_n
+                else prompts.render("icons/_pin_logo_none", name=name))
+    return prompts.render(
+        "icons/pin_badges", name=name, word=word, description=brand_desc or "없음",
+        product_name=brief.get("product_name") or "없음", product_desc=brief.get("description") or "없음",
+        key_message=brief.get("key_message") or "없음", target=brief.get("target") or "없음",
+        voice=(voice or {}).get("description") or "없음", tone=(tone or {}).get("description") or "지정 없음",
+        colors=", ".join(cols) or "밝고 채도 높은 색", background=f"브랜드 배경색 {bg}" if bg else "밝은 중성색",
+        forbidden=", ".join(forbidden) or "없음", logo_pin=logo_pin,
+        photo_hint=prompts.render("icons/_pin_photo", n=photo_n) if photo_n else "")
+
+
+def crop_pin_sheet(im: Image.Image) -> Image.Image:
+    """생성된 2:3 세로 이미지에서 가운데 4:5 를 잘라 PIN_OUT 크기로 맞춘다(다른 크기로 와도 비율만 맞춰 자른다)."""
+    im = im.convert("RGB")
+    tw, th = PIN_OUT
+    if im.width * th > im.height * tw:       # 더 넓으면 좌우를 자른다
+        w = round(im.height * tw / th)
+        box = ((im.width - w) // 2, 0, (im.width - w) // 2 + w, im.height)
+    else:
+        h = round(im.width * th / tw)
+        box = (0, (im.height - h) // 2, im.width, (im.height - h) // 2 + h)
+    return im.crop(box).resize(PIN_OUT, Image.LANCZOS)
+
+
 def png_bytes(im: Image.Image) -> bytes:
     b = io.BytesIO()
     im.save(b, "PNG")

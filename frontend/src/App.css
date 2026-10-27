@@ -233,6 +233,13 @@ ul.plain { padding-left: 18px; margin: 4px 0; font-size: 14px; }
 .iconcell figcaption { margin: 6px 0; font-weight: 600; }
 .iconcell .icon-concept { font-size: 12px; margin: -2px 0 6px; line-height: 1.35; }
 .iconcell .row { justify-content: center; margin-bottom: 4px; }
+.pin-form { align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.pin-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.pingrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 10px; }
+.pincell { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--surface); font-size: 13px; }
+.pincell img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--radius-sm); display: block; }
+.pincell figcaption { margin: 6px 0; }
+.pincell .row { justify-content: space-between; }
 
 /* 편집 */
 .editor { margin-top: 12px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
@@ -602,10 +609,10 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .sketch-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; line-height: 1.2; color: var(--text); }
 .sketch-concept { font-size: 11px; color: var(--text-3); line-height: 1.3; margin-top: 2px; }
 /* 방금 렌더된 아이콘: 스케치 카드가 뒤집히며 나타나듯 차례로 등장 */
-.iconcell.icon-reveal { animation: icon-reveal .6s cubic-bezier(.2, .8, .3, 1.2) both; }
+.iconcell.icon-reveal, .pincell.icon-reveal { animation: icon-reveal .6s cubic-bezier(.2, .8, .3, 1.2) both; }
 @keyframes icon-reveal { from { opacity: 0; transform: perspective(600px) rotateY(80deg) scale(.9); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .sketch-card, .sketch-card path, .iconcell.icon-reveal { animation: none; }
+  .sketch-card, .sketch-card path, .iconcell.icon-reveal, .pincell.icon-reveal { animation: none; }
   .sketch-card path { stroke-dashoffset: 0; }
 }
 

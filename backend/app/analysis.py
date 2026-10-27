@@ -25,7 +25,7 @@ from . import db as db_module
 from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
 STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant", "product"),
-          "icon": ("icon", "icon_names", "icon_redraw"), "judge": ("judge",)}
+          "icon": ("icon", "icon_names", "icon_redraw", "pin"), "judge": ("judge",)}
 STAGE_OF = {k: st for st, ks in STAGES.items() for k in ks}
 STAGE_LABEL = {"copy": "시안 생성(카피)", "background": "배경 이미지 생성", "icon": "아이콘 생성", "judge": "비전 채점"}
 NEAR_DE = 20.0            # 이 ΔE 이하면 '브랜드 색에 가깝다'고 본다 (CIE76: 10 이하 거의 같은 색, 20 이하 같은 계열)

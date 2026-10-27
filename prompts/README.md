@@ -12,6 +12,8 @@
 | `icons/render3d.md` | 3D 아이콘 1개 이미지 프롬프트(투명 PNG). 다시 그리기도 같은 문장 | `icons.render_prompt` |
 | `icons/_3d_style.md` | 3D 공통 스타일 블록 (partial, render3d 가 include) — 카메라·광원·모서리·색·재질 | — |
 | `icons/_3d_output_spec.md` | 3D 제안 출력 JSON 규격 (partial, propose3d·more3d System 이 include) | — |
+| `icons/pin_badges.md` | 핀 뱃지 세트 1장(4:5, 에나멜 핀 8개: 로고 중간 1 · 단어·이름 작은 핀 2 · 관심 주제 5). 2:3 으로 생성해 가운데 4:5 로 자른다 | `icons.pin_prompt` |
+| `icons/_pin_logo_attached.md` · `_pin_logo_none.md` · `_pin_photo.md` | 핀 뱃지의 로고 핀 줄(로고 첨부 / 없으면 모노그램)과 상품 사진 힌트 (partial, 변수로 넣는다) | `icons.pin_prompt` |
 | `icons/propose_system.md` · `propose_user.md` | (svg 방식, `ICON_RENDER=svg`) 기능명 10개 제안 + 도형 | `icons.propose_and_draw` |
 | `icons/redraw_system.md` · `redraw_user.md` | (svg) 아이콘 하나 다시 그리기 | `icons.redraw_one` |
 | `icons/more_system.md` · `more_user.md` | (svg) 부족한 기능 추가 제안 | `icons.propose_more` |

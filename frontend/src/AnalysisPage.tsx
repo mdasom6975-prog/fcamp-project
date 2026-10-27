@@ -426,7 +426,7 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
                   {data.cost.rows.map((r, i) => (
                     <tr key={i} className={r.ok ? '' : 'bad'}>
                       <td title={r.ts}>{when(r.ts)}</td>
-                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', product: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
+                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', product: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', pin: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
                       <td>{KIND[r.kind] ?? r.kind}</td><td>{r.api}</td><td>{r.model}{r.served_by ? ` → ${r.served_by}` : ''}</td>
                       <td>{r.api === 'chat' ? `${tok(r.tokens_in ?? 0)} / ${tok(r.tokens_out ?? 0)}` : `${r.size ?? ''} ${r.quality ?? ''}`}</td>
                       <td>{sec(r.ms)}</td><td>{usd(r.cost_usd)}{r.estimated ? '*' : ''}</td>

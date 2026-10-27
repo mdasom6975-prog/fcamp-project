@@ -45,7 +45,7 @@ const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플�
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
   calls?: { total: number; images: number; chats: number; by_kind: Record<string, { count: number }> }
   quality?: string }
-const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', product: '배경(제품 참조)', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
+const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', product: '배경(제품 참조)', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성', pin: '핀 뱃지' }
 type ImgSettings = {
   models: { model: string; default: boolean; usd: number | null; estimated: boolean; input_fidelity: boolean }[]
   modes: string[]; default_mode: string; quality: string; provider: string; usd_krw: number
@@ -466,6 +466,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
 
           {view === 'icons' && <IconPanel key={iconKey} designId={designId} versionNo={versionNo} ask
             ready={groups.some((g) => imgs[g.preset_id]?.composite)} />}
+          {view === 'icons' && <PinPanel designId={designId} />}
 
           {view !== 'icons' && <div className="pick-bar">
             <span className="pick-text">
@@ -1010,6 +1011,83 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   )
 }
 
+type PinItem = { id: number; width: number; height: number; created_at: string
+  meta: { name: string; word: string; logo: boolean; photo: boolean; model?: string; quality?: string } }
+
+// 핀 뱃지 세트: 4:5 한 장에 에나멜 핀 8개 — 로고(중간) · 브랜드를 표현하는 단어 · 브랜드 이름(작은 핀) + 관심 주제 5개. 1장당 이미지 1장 비용
+function PinPanel({ designId }: { designId: number }) {
+  const [pins, setPins] = useState<PinItem[]>([])
+  const [info, setInfo] = useState<{ has_logo: boolean; has_photo: boolean } | null>(null)
+  const [name, setName] = useState('')
+  const [word, setWord] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [fresh, setFresh] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/designs/${designId}/pins`).then((r) => r.json()).then((j) => {
+      if (!Array.isArray(j?.pins)) return
+      setPins(j.pins); setInfo({ has_logo: j.has_logo, has_photo: j.has_photo })
+      setName(j.defaults?.name ?? ''); setWord(j.defaults?.word ?? '')
+    }).catch(() => undefined)
+  }, [designId])
+
+  const make = () => overlay.run('핀 뱃지 세트 만드는 중… 핀 8개를 한 장에 그립니다 (30초~1분)', makeInner, {
+    sketch: [{ name: '로고', concept: '중간 핀' }, { name: word || '단어', concept: '작은 핀' }, { name: name || '이름', concept: '작은 핀' },
+      ...Array.from({ length: 5 }, (_, i) => ({ name: `관심 주제 ${i + 1}`, concept: '그림 핀' }))] })
+  const makeInner = async () => {
+    setBusy(true); setErr(null)
+    try {
+      const p: PinItem = await post(`/api/designs/${designId}/pins`, { name, word })
+      setPins((l) => [p, ...l]); setFresh(p.id)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async (id: number) => {
+    if (!window.confirm('이 핀 뱃지 세트를 지웁니다. 계속할까요?')) return
+    const r = await fetch(`/api/designs/${designId}/pins/${id}`, { method: 'DELETE' })
+    if (r.ok) setPins((l) => l.filter((p) => p.id !== id))
+    else setErr('지우지 못했습니다')
+  }
+
+  if (!info) return null
+  const refs = [info.has_photo && '상품 사진', info.has_logo && '로고'].filter(Boolean).join('·')
+  return (
+    <div className="imgblock icon-step">
+      <strong>핀 뱃지 세트</strong>
+      <DevStats designId={designId} kinds={['pin']} label="핀 뱃지 생성" refreshKey={`${busy}-${pins.length}`} />
+      <p className="muted">
+        브랜드 설명·상품·타깃을 바탕으로 극사실주의 일러스트 에나멜 핀 8개를 4:5 이미지 한 장에 그립니다.
+        중간 핀 1개는 브랜드 로고, 작은 핀 2개는 아래 단어와 이름이고 나머지 5개는 관심 주제입니다.
+        {refs ? ` 참고 이미지(${refs})를 함께 보냅니다.` : ' 로고가 없어 이름 첫 글자 모노그램으로 대신합니다.'} 1장당 이미지 1장 비용입니다.
+      </p>
+      <div className="row pin-form">
+        <label>이름 핀 <input value={name} maxLength={20} disabled={busy} onChange={(e) => setName(e.target.value)} /></label>
+        <label>나를 표현하는 단어 <input value={word} maxLength={12} disabled={busy} placeholder="예: 호기심" onChange={(e) => setWord(e.target.value)} /></label>
+        <button className="primary" disabled={busy || !word.trim()} onClick={make}>{pins.length ? '한 장 더 만들기' : '핀 뱃지 세트 만들기'} (이미지 1장)</button>
+      </div>
+      {err && <div className="notice err">{err}</div>}
+      {pins.length > 0 && (
+        <div className="pingrid">
+          {pins.map((p) => (
+            <figure key={p.id} className={fresh === p.id ? 'pincell icon-reveal' : 'pincell'}>
+              <a href={`/api/pins/${p.id}/png`} target="_blank" rel="noreferrer"><img src={`/api/pins/${p.id}/png`} alt={`핀 뱃지 세트: ${p.meta.name}`} /></a>
+              <figcaption className="muted">“{p.meta.name}” · “{p.meta.word}” · {p.width}×{p.height}px · {fmtDate(p.created_at)}</figcaption>
+              <div className="row">
+                <a href={`/api/pins/${p.id}/png`} download={`pins_${p.id}.png`}>PNG 내려받기</a>
+                <button type="button" onClick={() => remove(p.id)}>지우기</button>
+              </div>
+            </figure>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const fmtDate = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -1525,6 +1603,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
           <section className="card" id="sec-copy">
             <header><h3>아이콘 세트</h3></header>
             <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} />
+            <PinPanel designId={d.id} />
           </section>
         ) : hasCopy === null ? (
           <p className="muted">불러오는 중…</p>
