@@ -280,7 +280,8 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     composite = pmode == "composite"
     try:
         prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
-                                       product=product_img is not None, variant=ref_img is not None, composite=composite)
+                                       product=product_img is not None, variant=ref_img is not None, composite=composite,
+                                       colors=bv.colors)
         if ref_img is not None:
             prompt = imagegen.build_variant_prompt(prompt)
         if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
@@ -308,7 +309,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or Path(path).stem) if ref_img is not None else Path(path).stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, single=single,
-                                              product=product_img is not None, composite=composite)}
+                                              product=product_img is not None, composite=composite, colors=bv.colors)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
                                "template": (reference.layout or {}).get("template")}

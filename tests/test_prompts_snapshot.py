@@ -180,6 +180,20 @@ def test_background_variant_prompt():
     _assert_snapshot("image__variant_가로형", imagegen.build_variant_prompt(base) + "\n")
 
 
+def test_background_brand_colors_prompt():
+    """[브랜드 색] 문장 (image/_brand_colors.md): 브랜드 배경색이 있을 때 / 없을 때(밝은 중성색) / 강조색이 없을 때(주조색)."""
+    from app import imagegen
+    _assert_snapshot("image__brand_colors_세로형",
+                     imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", colors=BRAND["colors"]) + "\n")
+    no_bg = [c for c in BRAND["colors"] if c["role"] != "배경색"]
+    no_accent = [c for c in BRAND["colors"] if c["role"] != "강조색"]
+    _assert_snapshot("image__brand_colors_lines",
+                     imagegen.brand_color_line(no_bg).strip() + "\n" + imagegen.brand_color_line(no_accent).strip() + "\n")
+    assert imagegen.brand_color_line([{"role": "배경색", "hex": "#FFFFFF"}]) == ""
+    assert (imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", colors=[])
+            == imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형"))
+
+
 # ---- 분석 화면 비전 채점 (analysis): 이미지는 보내지 않고 문장만 고정한다 ----
 def test_judge_prompt():
     from app import analysis, prompts

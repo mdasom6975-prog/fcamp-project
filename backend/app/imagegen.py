@@ -183,8 +183,23 @@ PRODUCT_ATTACH_VARIANT = ("첨부한 이미지는 두 장이다. 1번은 장면 
                           "모양이 부정확하므로 따라 그리지 말고, 1번에서는 장면·소품·조명·색만 참조한다. 상품은 반드시 2번 제품 원본을 따른다.")
 
 
+def brand_color_line(colors: list[dict] | None) -> str:
+    """background.md 의 {{brand_colors}} 값. 강조색(없으면 주조색)은 포인트로만, 큰 면은 브랜드 배경색(없으면 밝은 중성색).
+    문장은 prompts/image/_brand_colors.md, 분기는 여기서 계산한다. 강조·주조색이 모두 없으면 빈칸(1.7 과 같은 프롬프트)."""
+    by_role = {c.get("role"): c["hex"] for c in colors or [] if c.get("hex")}
+    accent = by_role.get("강조색") or by_role.get("주조색")
+    if not accent:
+        return ""
+    sub = [f"{by_role[r]}({r})" for r in ("주조색", "보조색") if r in by_role and by_role[r] != accent]
+    field = (f"{by_role['배경색']}(브랜드 배경색) 계열의 색" if by_role.get("배경색")
+             else "흰색, 밝은 회색, 연한 크림 같은 밝은 중성색")
+    return "\n" + prompts.render("image/_brand_colors", accent=accent, field=field,
+                                 sub=f"{', '.join(sub)} 는 쓰더라도 아주 작게 쓴다. " if sub else "")
+
+
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
-                 single: bool = False, product: bool = False, variant: bool = False, composite: bool = False) -> str:
+                 single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
+                 colors: list[dict] | None = None) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
@@ -195,6 +210,7 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     composite=True 면 제품을 이미지에 그리지 않고 제품 구역(compose.PRODUCT_SLOT)을 비워 두게 한다(product_slot.md). 제품 누끼는 생성 뒤 코드가
     그 자리에 그대로 붙이므로 참조 이미지로 첨부하지 않는다(product 는 무시).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
+    colors 는 브랜드 허용 색상(BrandVersion.colors). 주면 [브랜드 톤] 뒤에 [브랜드 색] 문장이 붙는다(brand_color_line).
     """
     style = style or pick_style(tone, brief)[0]
     if style not in STYLES:
@@ -207,7 +223,8 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     text = prompts.render("image/background", product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
                           description="" if composite else brief.get("description") or "",
                           key_message=brief.get("key_message") or "지정 없음", target=target,
-                          tone=tone.get("description") or "지정 없음", composition=composition, style=style_text)
+                          tone=tone.get("description") or "지정 없음", composition=composition, style=style_text,
+                          brand_colors=brand_color_line(colors))
     if composite:
         x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
         text = prompts.render("image/product_slot",
@@ -224,10 +241,12 @@ def build_variant_prompt(base_prompt: str) -> str:
 
 
 def prompt_refs(template: str, style: str, variant: bool = False, single: bool = False,
-                product: bool = False, composite: bool = False) -> list[str]:
+                product: bool = False, composite: bool = False, colors: list[dict] | None = None) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
             prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common")]
+    if brand_color_line(colors):
+        refs.append(prompts.ref("image/_brand_colors"))
     refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs
     if composite:
         return [prompts.ref("image/product_slot")] + refs
