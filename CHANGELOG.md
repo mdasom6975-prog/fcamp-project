@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 정리: 안 쓰는 함수와 끝난 비교 스크립트
+- 지운 함수: `icons.png_bytes`·`calllog.note_usage`(부르는 곳 없음, 채팅 토큰 기록은 `llm._note_usage`), `calllog.current_design`·`prompts.list_names`(테스트에서만 사용 — 테스트는 `calllog._design`·프롬프트 폴더 목록으로 바꿈)
+- 지운 스크립트: `backend/scripts/compare_prompts.py`(10/16 프롬프트 v1·v2 비교, `background.md` 1.1 에 반영), `backend/scripts/compare_brand_colors.py`(브랜드 색 비교, `background.md` 1.8 에 반영). README·`image/_brand_colors.md` 설명에서 경로를 뺐다
+
+### 편집 미리보기 해상도
+- 편집 미리보기를 화면에 그려질 긴 변 × 픽셀 배율(`max_px`, 400~1600px)로 받아 레티나 화면에서 흐리지 않게 했다(JPEG 품질 85 → 90). 테스트 `test_edit_boxes.py::test_preview_size_follows_requested_screen_pixels`
+
 ### 지면마다 제품 누끼를 다시 붙여 잘리지 않게
 - 문제: 투명 누끼는 비율군 배경(예: 가로형 1536×1024)에 붙인 뒤 지면마다 잘라 썼다. 가로형 제품 구역은 세로 80%라, PMax 1.91:1(세로 약 78%만 남음)·2:1 지면에서 캐리어 바퀴가 잘렸다(시안 17)
 - `compose.crop_scene`: 크롭 위치는 누끼를 붙인 배경으로 정하고(예전과 같은 위치), 그림은 누끼 없는 원본(`clean_file`)을 잘라 그 위에 누끼를 지면 크기로 다시 붙인다. 넘치면 비율을 지켜 줄이고 바닥·가로 중심을 지킨다(`fit_product_box`). 다 들어가는 지면은 크기·위치가 그대로다

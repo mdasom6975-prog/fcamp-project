@@ -77,8 +77,3 @@ def render(name: str, /, **vars) -> str:
 
 def ref(name: str) -> str:
     return load(name).ref
-
-
-def list_names() -> list[str]:
-    return sorted(str(q.relative_to(PROMPTS_DIR).with_suffix("")) for q in PROMPTS_DIR.rglob("*.md")
-                  if q.name != "README.md")

@@ -25,11 +25,11 @@ def test_dependency_passes_design_id_to_sync_endpoint_and_threads(log):
         ctx = copy_context()
         with ThreadPoolExecutor(max_workers=2) as ex:
             list(ex.map(lambda i: ctx.copy().run(calllog.record, "images.generate", "icon", "openai", "m"), range(3)))
-        return {"design": calllog.current_design()}
+        return {"design": calllog._design.get()}
 
     @r.get("/other")
     def other():
-        return {"design": calllog.current_design()}
+        return {"design": calllog._design.get()}
 
     app.include_router(r)
     c = TestClient(app)

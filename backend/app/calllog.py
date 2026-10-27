@@ -37,10 +37,6 @@ async def track_design(request: Request) -> None:
         _design.set(None)
 
 
-def current_design() -> int | None:
-    return _design.get()
-
-
 def record(api: str, kind: str, provider: str, model: str, ok: bool = True, ms: int | None = None,
            error: str | None = None, **extra) -> None:
     """호출 1건을 기록한다. 실패해도 남긴다(과금 여부는 ok 로 구분). 기록 실패가 생성 흐름을 막지 않게 DB 오류는 삼킨다."""
@@ -101,15 +97,6 @@ def timed(api: str, kind: str, provider: str, model: str, **extra):
                error=f"{type(e).__name__}: {e}", **extra, **info)
         raise
     record(api, kind, provider, model, ms=int((time.monotonic() - t0) * 1000), **extra, **info)
-
-
-def note_usage(info: dict, response) -> None:
-    """OpenAI 채팅 응답의 토큰 사용량을 기록 dict 에 넣는다. usage 가 없으면 아무것도 하지 않는다."""
-    u = getattr(response, "usage", None)
-    if u is None:
-        return
-    info["tokens_in"] = getattr(u, "prompt_tokens", None)
-    info["tokens_out"] = getattr(u, "completion_tokens", None)
 
 
 def note_image_usage(info: dict, response) -> None:

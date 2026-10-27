@@ -493,9 +493,3 @@ def compose_pin_sheet(pins: list[Image.Image | None], bg_hex: str | None) -> Ima
         layer.paste(pin, (x, y), pin)
         sheet = Image.alpha_composite(sheet, layer)
     return sheet.convert("RGB")
-
-
-def png_bytes(im: Image.Image) -> bytes:
-    b = io.BytesIO()
-    im.save(b, "PNG")
-    return b.getvalue()

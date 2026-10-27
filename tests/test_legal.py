@@ -40,7 +40,8 @@ def test_image_prompt_has_common_legal_rules():
 
 
 def test_every_legal_file_records_law_and_status():
-    names = [n for n in prompts.list_names() if n.startswith("legal/")]
+    names = sorted(str(q.relative_to(prompts.PROMPTS_DIR / "legal").with_suffix("")) for q in (prompts.PROMPTS_DIR / "legal").rglob("*.md"))
+    names = [f"legal/{n}" for n in names]
     assert {n.split("/")[-1] for n in names if "industry" in n} == set(legal.INDUSTRY_KEYWORDS)
     for n in names:
         meta = prompts.load(n).meta

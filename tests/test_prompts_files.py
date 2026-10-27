@@ -17,11 +17,6 @@ def test_every_prompt_has_version_and_description(path):
     assert p.body.strip(), "본문이 비어 있다"
 
 
-def test_loader_lists_all_files():
-    from app import prompts
-    assert prompts.list_names() == sorted(str(p.relative_to(ROOT / "prompts").with_suffix("")) for p in PROMPT_FILES)
-
-
 def test_missing_variable_fails_loudly():
     from app import prompts
     with pytest.raises(KeyError):
