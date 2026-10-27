@@ -291,8 +291,13 @@ def paste_product(bg: Image.Image, product: Image.Image, template: str,
     bg = bg.convert("RGB")
     W, H = bg.size
     placed = product_box(W, H, product, template, size, layout)
-    x, y, x1, y1 = placed["box"]
-    pw, ph = x1 - x, y1 - y
+    return paste_cutout(bg, product, placed["box"]), placed
+
+
+def paste_cutout(bg: Image.Image, product: Image.Image, box: list[int]) -> Image.Image:
+    """누끼(여백을 잘라낸 원본)를 box 크기로 맞춰 붙이고 발밑에 접지 그림자를 깐다. 반환: RGB."""
+    x, y, x1, y1 = box
+    pw, ph = max(1, x1 - x), max(1, y1 - y)
     prod = trim_cutout(product).resize((pw, ph), Image.LANCZOS)
     canvas = bg.convert("RGBA")
     # 접지 그림자: 발밑의 납작한 타원을 흐려 깐다(제품이 허공에 뜨지 않게)
@@ -304,7 +309,58 @@ def paste_product(bg: Image.Image, product: Image.Image, template: str,
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     layer.paste(prod, (x, y))
     canvas = Image.alpha_composite(canvas, layer)
-    return canvas.convert("RGB"), placed
+    return canvas.convert("RGB")
+
+
+PRODUCT_FIT_PAD = 0.02     # 지면에 맞춰 줄일 때 가장자리에서 누끼까지 남기는 여백(짧은 변 대비)
+
+
+def fit_product_box(placed: dict, s: float, ox: float, oy: float, w: int, h: int) -> tuple[list[int], float]:
+    """배경 좌표의 누끼 상자(placed['box'])를 지면 캔버스 좌표로 옮긴다. 캔버스 = 배경을 s 배로 키워 (ox, oy) 부터 자른 것
+    (블러 채우기처럼 배경이 캔버스 안쪽에 놓이면 ox·oy 가 음수). 캔버스 안에 다 들어가면 그대로, 넘치면 비율을 지켜 줄이고
+    바닥(아랫변)·가로 중심을 지키며 안쪽으로만 옮긴다(배경이 비워 둔 자리에서 덜 벗어나게). 반환: (상자, 축소 배율 ≤ 1)."""
+    bx0, by0, bx1, by1 = placed["box"]
+    x0, y0, x1, y1 = bx0 * s - ox, by0 * s - oy, bx1 * s - ox, by1 * s - oy
+    if x0 >= 0 and y0 >= 0 and x1 <= w and y1 <= h:
+        return [round(x0), round(y0), round(x1), round(y1)], 1.0
+    pad = min(w, h) * PRODUCT_FIT_PAD
+    bw, bh = x1 - x0, y1 - y0
+    bottom = min(y1, h - pad)
+    k = min(1.0, (bottom - pad) / bh, (w - 2 * pad) / bw)
+    nw, nh = bw * k, bh * k
+    cx = min(max((x0 + x1) / 2, pad + nw / 2), w - pad - nw / 2)
+    return [round(cx - nw / 2), round(bottom - nh), round(cx + nw / 2), round(bottom)], round(k, 3)
+
+
+def crop_scene(bg: Image.Image, w: int, h: int, layout: str = DEFAULT_LAYOUT, fill_blur: bool = False,
+               clean: Image.Image | None = None, product: Image.Image | None = None,
+               placed: dict | None = None) -> tuple[Image.Image, dict, dict | None]:
+    """배경을 지면 (w, h) 에 맞춘다(내용 상자 기준 크롭, fill_blur 면 전체를 넣고 흐린 확대본으로 채움).
+    clean·product·placed 를 주면(투명 누끼를 붙인 배경) 크롭 위치는 누끼가 붙은 bg 로 정하고, 그림은 누끼 없는 clean 을 잘라
+    그 위에 누끼를 지면 크기에 맞춰 다시 붙인다 — 같은 비율군이라도 지면마다 잘리는 양이 달라 붙인 채로 자르면 제품이 잘린다.
+    반환: (캔버스 RGB, crop 기록, product_fit 기록 또는 None). 누끼 자리는 crop['content_box_canvas'] 에도 더한다(문구가 덮지 않게)."""
+    bg = bg.convert("RGB")
+    refit = clean is not None and product is not None and bool(placed)
+    src = clean.convert("RGB").resize(bg.size) if refit and clean.size != bg.size else (clean.convert("RGB") if refit else bg)
+    if fill_blur:
+        canvas = fit_blur(src, w, h)
+        s = min(w / bg.width, h / bg.height)
+        fw, fh = round(bg.width * s), round(bg.height * s)
+        ox, oy = (w - fw) // 2, (h - fh) // 2
+        crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [ox, oy, ox + fw, oy + fh]}
+        ox, oy = -ox, -oy
+    else:
+        nw, nh, ox, oy, crop = crop_window(bg, w, h, layout=layout)
+        canvas = src.resize((nw, nh), Image.LANCZOS).crop((ox, oy, ox + w, oy + h))
+        s = nw / bg.width
+    if not refit:
+        return canvas, crop, None
+    box, k = fit_product_box(placed, s, ox, oy, w, h)
+    canvas = paste_cutout(canvas, product, box)
+    cb = crop.get("content_box_canvas")
+    crop["content_box_canvas"] = [min(cb[0], box[0]), min(cb[1], box[1]), max(cb[2], box[2]), max(cb[3], box[3])] if cb else box
+    fit = {"box": box, "scale": k, **({"note": f"제품이 잘리지 않게 {round(k * 100)}% 크기로 줄였습니다"} if k < 1 else {})}
+    return canvas, crop, fit
 
 
 def load_logo(path: str, mime: str) -> Image.Image:
@@ -478,14 +534,16 @@ def draw_text_soft(canvas: Image.Image, items: list[tuple[int, int, str]], font,
 
 def compose_strip(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo: Image.Image | None,
                   safe: dict | None, text_color_hex: str | None, scrim_hex: str | None, body: str | None, cta: str | None,
-                  body_font_path: str, accent_hex: str | None, corner: str) -> tuple[Image.Image, dict]:
+                  body_font_path: str, accent_hex: str | None, corner: str, clean: Image.Image | None = None,
+                  product: Image.Image | None = None, placed: dict | None = None) -> tuple[Image.Image, dict]:
     """띠 배너(가로세로 2.6 이상, 예: 320×100). 왼쪽 30% 는 피사체 중심으로 자른 이미지 조각, 오른쪽은 같은 이미지를 흐리고
     어둡게 깐 바탕 위에 로고 · 제목(+본문 1줄) · CTA 버튼을 한 줄로 놓는다. 세로가 낮아 문구를 쌓지 않는다."""
     bg = bg.convert("RGB")
     L, T, R, B, safe_src = _margins(w, h, safe)
-    canvas = fit_blur(bg, w, h)
+    canvas = fit_blur(clean if clean is not None and product is not None and placed else bg, w, h)
     left_w = round(w * 0.3)
-    canvas.paste(cover_crop(bg, left_w, h), (0, 0))
+    piece, _, product_fit = crop_scene(bg, left_w, h, clean=clean, product=product, placed=placed)
+    canvas.paste(piece, (0, 0))
     scrim = _hex(scrim_hex or "#000000")
     mask = Image.new("L", (w - left_w, h), round(255 * 0.55))
     canvas.paste(Image.new("RGB", (w - left_w, h), scrim), (left_w, 0), mask)
@@ -493,6 +551,8 @@ def compose_strip(bg: Image.Image, w: int, h: int, headline: str, font_path: str
                     "margin_source": safe_src, "warnings": [], "elements": [],
                     "crop": {"mode": "띠형", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [0, 0, left_w, h]},
                     "scrim": {"mode": "띠형", "color": (scrim_hex or "#000000").upper(), "opacity": 0.55}}
+    if product_fit:
+        report["product_fit"] = product_fit
     gap = round(h * 0.08)
     x = left_w + gap
     cy = h / 2
@@ -586,10 +646,12 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             safe: dict | None, logo_margin_pct: float | None, text_color_hex: str | None,
             scrim_hex: str | None, fill_blur: bool = False, body: str | None = None, cta: str | None = None,
             body_font_path: str | None = None, accent_hex: str | None = None, corner: str = "둥근",
-            logo_position: str | None = None, layout: str = DEFAULT_LAYOUT) -> tuple[Image.Image, dict]:
+            logo_position: str | None = None, layout: str = DEFAULT_LAYOUT, clean: Image.Image | None = None,
+            product: Image.Image | None = None, placed: dict | None = None) -> tuple[Image.Image, dict]:
     """배경 위에 로고·제목(+선택: 본문·CTA 버튼)을 합성한다. 본문·CTA 는 지면 설정(in_image)이 켜진 경우에만 받는다.
     logo_position: 브랜드 설정의 로고 자리(좌상단·우상단·좌하단·우하단). None/'자동'이면 배경이 가장 단순한 모서리를 고른다.
     layout: layouts.json 의 레이아웃 이름. 문구 자리(text.side)·정렬(text.align)·크기 값을 정한다.
+    clean·product·placed: 투명 누끼를 붙인 배경이면 누끼 없는 원본·누끼·배경에서의 누끼 상자. 지면마다 누끼를 다시 붙여 잘리지 않게 한다(crop_scene).
     문구 블록은 제목 → 본문 → CTA 순으로 아래에서 위로 쌓고, 자리가 모자라면 본문을 먼저 뺀다(제목·CTA 우선).
     띠 배너(가로세로 2.6 이상)는 CTA 를 오른쪽에 두고 본문은 1줄만."""
     bg = bg.convert("RGB")
@@ -598,17 +660,10 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     body_font_path = body_font_path or font_path
     if is_strip(w, h):
         return compose_strip(bg, w, h, headline, font_path, logo, safe, text_color_hex, scrim_hex, body, cta,
-                             body_font_path, accent_hex, corner)
+                             body_font_path, accent_hex, corner, clean=clean, product=product, placed=placed)
     strip = False
-    if fill_blur:        # 블러 채우기: 자르지 않고 전체를 넣는다(1장 방식 폴백). 내용 상자는 전체로 본다
-        canvas = fit_blur(bg, w, h)
-        s = min(w / bg.width, h / bg.height)
-        fw, fh = round(bg.width * s), round(bg.height * s)
-        ox, oy = (w - fw) // 2, (h - fh) // 2
-        crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [ox, oy, ox + fw, oy + fh]}
-    else:
-        nw, nh, x, y, crop = crop_window(bg, w, h, layout=layout)
-        canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
+    # 블러 채우기: 자르지 않고 전체를 넣는다(1장 방식 폴백). 내용 상자는 전체로 본다
+    canvas, crop, product_fit = crop_scene(bg, w, h, layout, fill_blur, clean, product, placed)
     tpl = template_for(w, h)
     tk = layout_tokens(tpl, layout)              # 배치 토큰(layouts.json)
     lh_k = tk["type"]["line_height"]
@@ -618,6 +673,8 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     cl, ct, cr, cb = L, T, w - R, h - B          # 콘텐츠 영역
     report: dict = {"template": tpl, "canvas": [w, h], "content_box": [cl, ct, cr, cb],
                     "margin_source": safe_src, "crop": crop, "warnings": [], "elements": []}
+    if product_fit:
+        report["product_fit"] = product_fit
     if crop.get("cut", {}).get("top") or crop.get("cut", {}).get("bottom"):
         report["warnings"].append("배경의 피사체가 이 규격 비율에 다 담기지 않아 위/아래가 일부 잘렸습니다")
 

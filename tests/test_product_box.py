@@ -66,3 +66,38 @@ def test_product_scale_shrinks_slot_on_the_same_floor():
     prod = _cutout(400, 600, (0, 0, 399, 599))
     big, small = (compose.product_box(1024, 1536, prod, "세로형", s) for s in ("크게", "작게"))
     assert big["box"][3] == small["box"][3] and (small["box"][3] - small["box"][1]) < (big["box"][3] - big["box"][1]) * 0.6
+
+
+# ---- 지면마다 누끼 다시 붙이기(compose.crop_scene·fit_product_box): 같은 비율군이라도 지면 비율에 따라 잘리는 양이 다르다 ----
+def test_fit_product_box_keeps_inside_or_shrinks_on_floor():
+    from app import compose
+    placed = {"box": [800, 80, 1260, 900]}          # 1536×1024 가로형 배경에서 세로 80%를 차지하는 누끼
+    # 1200×628 로 자를 때(배율 0.78125, 위 12px 부터): 아래가 넘쳐 비율을 지켜 줄이고 바닥은 캔버스 안쪽에
+    box, k = compose.fit_product_box(placed, 1200 / 1536, 0, 12, 1200, 628)
+    assert k < 1 and 0 <= box[1] and box[3] <= 628 - 628 * compose.PRODUCT_FIT_PAD + 1
+    w0, h0 = 460, 820
+    assert abs((box[2] - box[0]) / (box[3] - box[1]) - w0 / h0) < 0.01          # 비율 유지
+    assert abs((box[0] + box[2]) / 2 - (800 + 1260) / 2 * 1200 / 1536) <= 1      # 가로 중심 유지
+    # 다 들어가는 지면은 그대로(배율 1, 옮기지 않음)
+    box, k = compose.fit_product_box(placed, 1080 / 1024, 300, 0, 1080, 1080)
+    assert k == 1.0 and box == [round(800 * 1080 / 1024 - 300), round(80 * 1080 / 1024), round(1260 * 1080 / 1024 - 300), round(900 * 1080 / 1024)]
+    # 옆으로만 넘치면 크기는 그대로 두고 안쪽으로 옮긴다
+    box, k = compose.fit_product_box(placed, 1080 / 1024, 20, 0, 1080, 1080)
+    assert k == 1.0 and box[2] <= 1080 and box[2] - box[0] == round(460 * 1080 / 1024)
+
+
+def test_crop_scene_repastes_cutout_so_it_is_not_cut():
+    from PIL import Image, ImageDraw
+    from app import compose
+    clean = Image.new("RGB", (1536, 1024), (200, 210, 220))
+    product = Image.new("RGBA", (400, 800), (0, 0, 0, 0))
+    ImageDraw.Draw(product).rectangle([20, 20, 380, 780], fill=(230, 90, 70, 255))
+    bg, placed = compose.paste_product(clean, product, "가로형")
+    old, _, _ = compose.crop_scene(bg, 1200, 628)
+    new, crop, fit = compose.crop_scene(bg, 1200, 628, clean=clean, product=product, placed=placed)
+    red = lambda im: (im.convert("RGB").getchannel("R").point(lambda v: 255 if v > 225 else 0).getbbox())
+    assert red(old)[3] == 628                                   # 붙인 채로 자르면 아래가 잘린다
+    x0, y0, x1, y1 = red(new)
+    assert y0 > 0 and y1 < 628 and fit["scale"] < 1 and "줄였습니다" in fit["note"]
+    cb = crop["content_box_canvas"]
+    assert cb[0] <= fit["box"][0] and cb[3] >= fit["box"][3]    # 문구가 피하는 내용 상자에 누끼 자리가 들어간다

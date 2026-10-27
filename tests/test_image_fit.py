@@ -1174,3 +1174,18 @@ def test_layout_in_brief_drives_prompt_product_slot_and_compose(env):
     c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "layout": "기본"}})
     j = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False}).json()
     assert any("'상단 문구' 레이아웃 구도" in w for w in j["composite"]["layout"]["warnings"])
+
+
+def test_composite_repastes_cutout_per_placement(env):
+    """투명 누끼 배경: 가로형 배경을 2:1 지면으로 자를 때 누끼를 다시 붙여 잘리지 않게 하고 기록(product_fit)을 남긴다."""
+    c, ids = env["client"], env["ids"]
+    p = ids["presets"]
+    _upload_product(env)
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    _select_copy(env, [p["네이티브 2:1"], p["피드 4:5"]])
+    for name in ("네이티브 2:1", "피드 4:5"):
+        j = c.post(f"/api/designs/{ids['design']}/presets/{p[name]}/image", json={"regenerate_background": False}).json()
+        lay = j["composite"]["layout"]
+        W, H = lay["canvas"]
+        x0, y0, x1, y1 = lay["product_fit"]["box"]
+        assert 0 <= x0 < x1 <= W and 0 <= y0 < y1 <= H, (name, lay["product_fit"])

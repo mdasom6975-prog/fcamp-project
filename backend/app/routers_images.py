@@ -264,6 +264,21 @@ def _product_image(db: Session, d: Design) -> tuple[Image.Image | None, int | No
     return im, aid
 
 
+def _cutout_parts(db: Session, bg_row: GeneratedImage) -> dict:
+    """투명 누끼를 코드로 붙인 배경이면 지면마다 누끼를 다시 붙일 재료 {clean, product, placed}(compose.crop_scene 인자), 아니면 {}.
+    누끼는 배경을 만들 때 쓴 자산(layout.product_asset_id)을 _product_image 와 같은 크기로 읽는다(그 뒤 캠페인 제품을 바꿔도 이 배경과 짝이 맞게)."""
+    lay = bg_row.layout or {}
+    clean, placed, aid = lay.get("clean_file"), lay.get("product_placed"), lay.get("product_asset_id")
+    if lay.get("product_mode") != "composite" or not (clean and placed and aid) or not storage.exists(clean):
+        return {}
+    a = db.get(Asset, aid)
+    if not a or not storage.exists(a.file_path):
+        return {}
+    product = Image.open(storage.local(a.file_path)).convert("RGBA")
+    product.thumbnail((1024, 1024), Image.LANCZOS)
+    return {"clean": Image.open(storage.local(clean)), "product": product, "placed": placed}
+
+
 def layout_name(d: Design) -> str:
     """캠페인 입력의 레이아웃. 예전 캠페인처럼 값이 없거나 지금 없는 이름이면 기본."""
     v = (d.brief or {}).get("layout")
@@ -645,17 +660,14 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
     bg_img = Image.open(storage.local(bg_row.file_path))
     # 블러 채우기: 1장 방식에서 손실 큰 비율군의 변형을 못 만들었을 때. 전체를 넣고 남는 자리는 흐린 확대본 (피사체 손실 없음)
     fill_blur = (bg_row.layout or {}).get("fill") == "blur"
+    # 누끼를 붙인 배경은 붙인 채로 자르면 지면 비율에 따라 제품이 잘린다 → 누끼 없는 원본을 자르고 지면마다 다시 붙인다
+    parts = _cutout_parts(db, bg_row)
 
     if separate:
         # 분리 자산형: 텍스트 없는 이미지만. 로고·카피는 내보내기에서 별도 파일로 제공한다.
-        if fill_blur:
-            out_img = compose.fit_blur(bg_img, w, h)
-            crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5}
-        else:
-            nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h, layout=layout_name(d))
-            out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
+        out_img, crop, product_fit = compose.crop_scene(bg_img, w, h, layout_name(d), fill_blur, **parts)
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
-                  "crop": crop, "warnings": [], "elements": []}
+                  "crop": crop, "warnings": [], "elements": [], **({"product_fit": product_fit} if product_fit else {})}
         kind_path = storage.put_image(f"sep_{uuid.uuid4().hex[:10]}.png", out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
                              file_path=kind_path, width=w, height=h, brand_version_id=bv.id, layout=report)
@@ -674,7 +686,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
             body=sel.body if ii["body"] else None, cta=sel.cta if ii["cta"] else None,
             body_font_path=_font_path(bv, "본문", db), accent_hex=_color(bv, "주조색"),
             corner=(bv.icon_style or {}).get("corner") or "둥근", logo_position=bv.logo_position or "좌상단",
-            layout=layout_name(d))
+            layout=layout_name(d), **parts)
         report["in_image_setting"] = {"body": ii["body"], "cta": ii["cta"], "default": ii["default"]}
         # 배경은 만든 때의 레이아웃 구도로 그려져 있다. 그 뒤 레이아웃을 바꿨으면 문구 자리와 피사체가 어긋날 수 있다
         bg_lay = ((bg_row.layout or {}).get("layout") or {}).get("name") or compose.DEFAULT_LAYOUT
