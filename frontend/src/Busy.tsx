@@ -4,11 +4,15 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
    - busy.run(라벨, 작업) 으로 감싸면 작업이 끝날 때까지 다른 버튼·탭을 누를 수 없고, 창을 닫거나 새로고침하면 확인창이 뜬다.
    - 카피 생성·배경/이미지 생성·아이콘 생성/채우기/다시 그리기·편집 재생성에 쓴다.
    - opts.sketch 를 주면(아이콘 렌더) 그릴 기능명을 연필 스케치 카드로 깔아 둔다. 진행률이 아니라 '무엇을 그리는 중인지'만 보여 준다.
+   - setQuizSource 로 퀴즈 문항을 가져오는 함수를 걸어 두면(시안 화면) 덮개를 띄울 때마다 새로 받아 브랜드 퀴즈 카드를 보여 준다.
+     문항은 서버가 브랜드 규칙·표현 사전으로 만든다(GET /api/designs/{id}/quiz, 모델 호출 없음).
    - 작업이 끝났을 때 다른 탭에 가 있으면 탭 제목에 완료/실패를 붙이고, 알림을 허용했다면 브라우저 알림을 띄운다. */
 
 export type SketchCard = { name: string; concept?: string }
-type State = { label: string; since: number; sketch?: SketchCard[] } | null
+export type QuizItem = { kind: string; question: string; options: { label: string; color?: string }[]; answer: number; explain: string }
+type State = { label: string; since: number; sketch?: SketchCard[]; quiz?: QuizItem[] } | null
 let state: State = null
+let quizSource: (() => Promise<QuizItem[]>) | null = null
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 
@@ -30,7 +34,13 @@ function announce(label: string, ok: boolean) {
 }
 
 export const busy = {
-  start(label: string, opts: { sketch?: SketchCard[] } = {}) { state = { label, since: Date.now(), sketch: opts.sketch }; emit() },
+  start(label: string, opts: { sketch?: SketchCard[] } = {}) {
+    const mine: State = { label, since: Date.now(), sketch: opts.sketch }
+    state = mine; emit()
+    // 퀴즈는 덮개를 띄운 뒤 받아 붙인다(못 받으면 퀴즈 없이). 그 사이 작업이 끝났으면 버린다
+    quizSource?.().then((quiz) => { if (state === mine && quiz.length) { state = { ...mine, quiz }; emit() } }).catch(() => undefined)
+  },
+  setQuizSource(fn: (() => Promise<QuizItem[]>) | null) { quizSource = fn },
   end() { state = null; emit() },
   async run<T>(label: string, fn: () => Promise<T>, opts: { sketch?: SketchCard[] } = {}): Promise<T> {
     busy.start(label, opts)
@@ -82,6 +92,46 @@ function SketchBoard({ cards }: { cards: SketchCard[] }) {
   )
 }
 
+// 브랜드 퀴즈 카드: 한 문제씩. 보기를 누르면 정답·해설을 보여 주고 '다음 문제'로 넘어간다(끝나면 처음부터)
+function QuizCard({ items }: { items: QuizItem[] }) {
+  const [idx, setIdx] = useState(0)
+  const [picked, setPicked] = useState<number | null>(null)
+  const [score, setScore] = useState({ right: 0, done: 0 })
+  const q = items[idx % items.length]
+  const pick = (i: number) => {
+    if (picked !== null) return
+    setPicked(i)
+    setScore((s) => ({ right: s.right + (i === q.answer ? 1 : 0), done: s.done + 1 }))
+  }
+  const next = () => { setPicked(null); setIdx((v) => v + 1) }
+  return (
+    <div className="busy-quiz">
+      <div className="quiz-head">
+        <span className="quiz-tag">기다리는 동안 퀴즈</span>
+        {score.done > 0 && <span className="muted">맞힌 문제 {score.right}/{score.done}</span>}
+      </div>
+      <div className="quiz-q">{q.question}</div>
+      <div className={q.kind === 'color' ? 'quiz-opts colors' : 'quiz-opts'}>
+        {q.options.map((o, i) => {
+          const cls = picked === null ? '' : i === q.answer ? ' right' : i === picked ? ' wrong' : ' dim'
+          return (
+            <button key={`${idx}-${i}`} type="button" className={`quiz-opt${cls}`} disabled={picked !== null} onClick={() => pick(i)}>
+              {o.color && <span className="quiz-chip" style={{ background: o.color }} aria-hidden="true" />}
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+      {picked !== null && (
+        <div className="quiz-explain">
+          <strong>{picked === q.answer ? '정답이에요!' : '아쉬워요.'}</strong> {q.explain}
+          <button type="button" className="quiz-next" onClick={next}>다음 문제</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function BusyOverlay() {
   const s = useSyncExternalStore(subscribe, snapshot, snapshot)
   const [, tick] = useState(0)
@@ -101,14 +151,16 @@ export default function BusyOverlay() {
   const sec = Math.floor((Date.now() - s.since) / 1000)
   const mmss = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
   const sketch = s.sketch && s.sketch.length > 0 ? s.sketch : null
+  const quiz = s.quiz && s.quiz.length > 0 ? s.quiz : null
   return (
     <div className="busy-overlay" role="alertdialog" aria-modal="true" aria-live="polite"
       onKeyDown={(e) => e.stopPropagation()}>
-      <div className={sketch ? 'busy-box wide' : 'busy-box'}>
+      <div className={sketch || quiz ? 'busy-box wide' : 'busy-box'}>
         <div className="busy-spinner" aria-hidden="true" />
         <div className="busy-label">{s.label}</div>
         <div className="muted">{mmss} 경과 · 완료될 때까지 기다려 주세요</div>
         {sketch && <SketchBoard cards={sketch} />}
+        {quiz && <QuizCard key={s.since} items={quiz} />}
         {canNotify && perm === 'default' && (
           <button type="button" className="busy-notify"
             onClick={() => Notification.requestPermission().then(setPerm).catch(() => undefined)}>끝나면 알림 받기</button>

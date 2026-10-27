@@ -7,7 +7,7 @@ import ImageGrid, { fileUrl, inImageChanged, inImageDefault, type ImgRow, type I
 import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
-import { busy as overlay, type SketchCard } from './Busy'
+import { busy as overlay, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
 
 type PresetLite = {
@@ -1078,6 +1078,12 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   useEffect(() => { setActiveId(null); setEditing(false); setBrandPanel(false); loadDesigns() }, [loadDesigns])
 
   const active = designs.find((d) => d.id === activeId) ?? null
+  // 이 시안의 생성 작업을 기다리는 동안 덮개에 브랜드 퀴즈를 띄운다(덮개를 띄울 때마다 새로 받음, 비용 없음)
+  useEffect(() => {
+    if (activeId === null) return
+    overlay.setQuizSource(() => fetch(`/api/designs/${activeId}/quiz`).then((r) => r.json()).then((j) => (j.items ?? []) as QuizItem[]))
+    return () => overlay.setQuizSource(null)
+  }, [activeId])
   const ws = useWorkspace(active?.id ?? null, active?.brand.id ?? null, active?.brand.name ?? '', `${activeId}-${wsTick}-${copyKey}-${view}-${active?.status}`)
   useEffect(() => { setView('master') }, [activeId])
   useEffect(() => { if (hasCopy === false) setView('setup') }, [hasCopy])

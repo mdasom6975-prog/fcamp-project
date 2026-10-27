@@ -200,6 +200,17 @@ def get_design(design_id: int, db: Session = Depends(get_db)):
     return _out(d, db)
 
 
+@router.get("/designs/{design_id}/quiz")
+def design_quiz(design_id: int, db: Session = Depends(get_db)):
+    """생성 대기 화면의 브랜드 퀴즈(비용 없음, 모델 호출 없음). 문항은 quiz.build."""
+    from . import quiz
+    d = db.get(Design, design_id)
+    if not d:
+        raise HTTPException(404, "시안을 찾을 수 없습니다")
+    bv, brand = db.get(BrandVersion, d.brand_version_id), db.get(Brand, d.brand_id)
+    return {"items": quiz.build(brand.name if brand else "브랜드", bv, d.brief) if bv else []}
+
+
 @router.patch("/designs/{design_id}")
 def update_design(design_id: int, body: DesignPatch, db: Session = Depends(get_db)):
     """입력(메시지)·규격 수정. 바뀌면 기존 검수 결과는 무효화된다. 검수 완료된 캠페인은 409."""

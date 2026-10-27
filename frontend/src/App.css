@@ -562,7 +562,21 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .busy-note { font-size: 12px; }
 .busy-spinner { width: 36px; height: 36px; border-radius: 50%; border: 4px solid var(--line); border-top-color: var(--accent); animation: busy-spin .9s linear infinite; }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
-.busy-box.wide { max-width: 640px; }
+.busy-box.wide { max-width: 640px; max-height: 92vh; overflow: auto; }
+/* 브랜드 퀴즈 카드 (대기 화면) */
+.busy-quiz { width: 100%; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); padding: 12px 14px; margin-top: 6px; }
+.quiz-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.quiz-tag { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--accent); }
+.quiz-q { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+.quiz-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.quiz-opt { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; font-size: 13px; font-weight: 500; border-radius: var(--radius-sm); background: var(--surface); border-color: var(--line-strong); }
+.quiz-opt:disabled { cursor: default; opacity: 1; }
+.quiz-opt.right { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-fg); }
+.quiz-opt.wrong { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-fg); }
+.quiz-opt.dim { opacity: .55; }
+.quiz-chip { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .12); flex: none; }
+.quiz-explain { margin-top: 10px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.quiz-next { display: block; margin: 8px 0 0 auto; padding: 4px 14px; font-size: 12px; }
 .busy-notify { padding: 4px 12px; font-size: 12px; }
 /* 아이콘 스케치판: 그릴 기능명을 연필 스케치 카드로. 흔들림 없이 한 번에 카드 하나만 차례로 그려진다(장식, 진행률 아님).
    키프레임(sketch-draw·sketch-turn)은 카드 수에 따라 Busy.tsx 의 SketchBoard 가 만든다 */
