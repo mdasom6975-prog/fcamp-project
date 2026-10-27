@@ -1,6 +1,7 @@
 """배경 이미지 생성. IMAGE_PROVIDER 로 OpenAI(기본) / Cloudflare Workers AI(FLUX.1 schnell)를 전환한다.
 텍스트·로고는 그리지 않게 하고 합성은 compose 에서 한다."""
 import base64
+import hashlib
 import io
 import os
 import re
@@ -230,6 +231,16 @@ def tone_text(style: str, description: str | None) -> str:
     return " ".join(kept).rstrip(". ") or "지정 없음"
 
 
+def pick_direction(style: str, brief: dict) -> str:
+    """[연출] 후보(prompts/image/style/<형태>.md 의 meta directions, ' | ' 로 구분) 중 이 캠페인의 것 하나.
+    상품명·핵심 메시지·타깃의 해시로 정해 같은 캠페인은 다시 만들어도 같은 연출이고, 캠페인마다 고르게 갈린다. 후보가 없으면 빈 문자열."""
+    options = [o.strip() for o in prompts.load(f"image/style/{STYLES[style]}").meta.get("directions", "").split("|") if o.strip()]
+    if not options:
+        return ""
+    key = "|".join(str(brief.get(k) or "") for k in ("product_name", "key_message", "target"))
+    return options[int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % len(options)]
+
+
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
                  single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
                  colors: list[dict] | None = None, placed: dict | None = None, layout: str = compose.DEFAULT_LAYOUT) -> str:
@@ -254,7 +265,7 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     # single: 한 장을 모든 지면이 잘라 쓰므로 비율군 구도 대신 '어느 방향으로 잘려도 되는' 공용 구도를 쓴다
     composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}",
                                  **composition_vars(template, layout))
-    style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
+    style_text = prompts.render(f"image/style/{STYLES[style]}", target=target, direction=pick_direction(style, brief))
     # composite: 상품명·설명이 장면에 들어가면 모델이 비워 둔 구역에 같은 종류의 물건을 그린다 → 중립어로 바꾸고 설명은 뺀다
     pv = people_vars(style)
     scene = prompts.render(f"image/{scene_name(style, composite)}",

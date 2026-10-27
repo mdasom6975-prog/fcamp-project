@@ -137,7 +137,7 @@ def test_build_prompt_rejects_unknown_style():
 def test_style_prompt_files_do_not_mention_people_except_person_style():
     from app import imagegen, prompts
     for name, file in imagegen.STYLES.items():
-        text = prompts.render(f"image/style/{file}", target="20대")
+        text = prompts.render(f"image/style/{file}", target="20대", direction="")
         if name == "실사 인물":
             assert "인물" in text
         else:
@@ -1189,3 +1189,20 @@ def test_composite_repastes_cutout_per_placement(env):
         W, H = lay["canvas"]
         x0, y0, x1, y1 = lay["product_fit"]["box"]
         assert 0 <= x0 < x1 <= W and 0 <= y0 < y1 <= H, (name, lay["product_fit"])
+
+
+def test_pick_direction_is_stable_per_campaign_and_varies_across_campaigns():
+    from app import imagegen
+    brief = {"product_name": "텀블러", "key_message": "출근길 한 잔", "target": "직장인"}
+    assert imagegen.pick_direction("실사 제품·공간", brief) == imagegen.pick_direction("실사 제품·공간", dict(brief))
+    picked = {imagegen.pick_direction("실사 제품·공간", {**brief, "product_name": f"상품{i}"}) for i in range(30)}
+    assert len(picked) >= 3
+    assert imagegen.pick_direction("그래픽 패턴", brief) == ""
+
+
+def test_directions_of_no_people_styles_do_not_mention_people():
+    from app import imagegen, prompts
+    for name in imagegen.NO_PEOPLE_STYLES:
+        meta = prompts.load(f"image/style/{imagegen.STYLES[name]}").meta
+        for option in meta.get("directions", "").split("|"):
+            assert not any(w in option for w in imagegen.TONE_PEOPLE_WORDS), (name, option)
