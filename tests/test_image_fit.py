@@ -973,6 +973,24 @@ def test_composite_mode_generates_clean_background_and_pastes_original_cutout(en
     assert comp.getpixel((3, 3)) == clean.getpixel((3, 3)), "제품 밖은 생성 배경 그대로"
 
 
+def test_product_scale_small_places_smaller_cutout_and_prompt_follows(env):
+    """제품 크기 '작게': 누끼를 줄인 구역에 붙이고, 배경 프롬프트도 그 자리만 비운다. 모르는 값은 422."""
+    from app import compose, imagegen
+    c, ids, prompts = env["client"], env["ids"], env["prompts"]
+    _upload_product(env)
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    assert c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_scale": "아주 작게"}}).status_code == 422
+    r = c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_scale": "작게"}})
+    assert r.status_code == 200 and r.json()["brief"]["product_scale"] == "작게"
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    lay = c.get(f"/api/designs/{ids['design']}/images").json()[0]["background"]["layout"]
+    p = lay["product_placed"]
+    W, H = p["canvas"]
+    sx0, sy0, sx1, sy1 = compose.product_slot(lay["template"], "작게")
+    assert p["slot"] == [round(sx0 * W), round(sy0 * H), round(sx1 * W), round(sy1 * H)]
+    assert any(imagegen.product_slot_vars(lay["template"], p)["slot"] in q for q in prompts)
+
+
 def test_opaque_product_photo_falls_back_to_reference_mode(env):
     """투명 배경이 없는 사진(소상공인 업로드)은 오려 붙일 수 없어 기존 참조 방식으로 만든다."""
     import io

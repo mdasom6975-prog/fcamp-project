@@ -21,6 +21,7 @@ class BriefIn(BaseModel):
     target: str = Field(default="", max_length=300)
     product_image_asset_id: int | None = None      # 제품 이미지(선택)
     image_style: str = "자동"                       # 배경 형태: 자동 | imagegen.STYLES 의 이름
+    product_scale: str = "크게"                     # 제품 크기(투명 누끼 합성): compose.PRODUCT_SCALES 의 이름
     image_model: str | None = None                  # 생성 설정: 이미지 모델(imagegen.MODELS). None 이면 기존 값 유지/기본
     bg_mode: str | None = None                      # 생성 설정: 배경 방식 per_ratio | single. None 이면 기존 값 유지/기본
     # 캠페인 필수·금지 표현. 비어 있으면 브랜드 규칙 값을 쓴다 (phrases.effective)
@@ -57,6 +58,14 @@ class BriefIn(BaseModel):
         from .imagegen import BG_MODES
         if v is not None and v not in BG_MODES:
             raise ValueError(f"배경 방식은 {list(BG_MODES)} 중 하나")
+        return v
+
+    @field_validator("product_scale")
+    @classmethod
+    def _scale(cls, v: str) -> str:
+        from .compose import PRODUCT_SCALES
+        if v not in PRODUCT_SCALES:
+            raise ValueError(f"제품 크기는 {list(PRODUCT_SCALES)} 중 하나")
         return v
 
     @field_validator("image_style")

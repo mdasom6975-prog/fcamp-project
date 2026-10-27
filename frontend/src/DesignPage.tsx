@@ -19,7 +19,7 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string; in_image?: InImage }[]
@@ -1148,11 +1148,19 @@ const campaignMeta = (d: Design) =>
 
 type Brief = {
   product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null; image_style: string
+  product_scale: string
   required_phrases: string[]; forbidden_phrases: string[]
 }
-const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', required_phrases: [], forbidden_phrases: [] }
+// 제품 크기(서버 compose.PRODUCT_SCALES): 투명 누끼를 붙이는 구역을 받침 기준으로 줄인다
+const PRODUCT_SCALES = [
+  { v: '크게', label: '크게 — 제품이 주인공 (화면의 약 43%)' },
+  { v: '보통', label: '보통 — 제품과 배경을 함께 (약 24%)' },
+  { v: '작게', label: '작게 — 배경이 주인공, 제품은 포인트 (약 12%)' },
+]
+const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', required_phrases: [], forbidden_phrases: [] }
 // 저장된 캠페인 입력을 폼 값으로 (캠페인 열기·수정 취소)
 const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
+  product_scale: d.brief.product_scale ?? '크게',
   required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
@@ -1562,6 +1570,14 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                     <button type="button" onClick={() => setBrief({ ...brief, product_image_asset_id: null })}>삭제</button>
                   )}
                 </div>
+                {brief.product_image_asset_id && (
+                  <label className="product-scale">제품 크기
+                    <select value={brief.product_scale} onChange={(e) => setBrief({ ...brief, product_scale: e.target.value })}>
+                      {PRODUCT_SCALES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+                    </select>
+                    <span className="muted">투명 누끼를 배경에 붙일 때의 크기입니다. 바꾸면 배경을 새로 만들어야 반영됩니다.</span>
+                  </label>
+                )}
               </div>
             </div>
           </div>
@@ -1692,6 +1708,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <dt>핵심 메시지</dt><dd>{d.brief.key_message || <span className="muted">없음</span>}</dd>
                 <dt>타깃</dt><dd>{d.brief.target || <span className="muted">없음</span>}</dd>
                 <dt>배경 형태</dt><dd>{d.brief.image_style ?? '자동'}</dd>
+                {d.brief.product_image_asset_id && <><dt>제품 크기</dt><dd>{d.brief.product_scale ?? '크게'}</dd></>}
                 <dt>제품 이미지</dt><dd>{d.brief.product_image_asset_id
                   ? <img className="prod-thumb" src={`/api/assets/${d.brief.product_image_asset_id}/file`} alt="제품 이미지" />
                   : <span className="muted">없음</span>}</dd>

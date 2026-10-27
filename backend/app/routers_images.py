@@ -251,6 +251,12 @@ def _product_image(db: Session, d: Design) -> tuple[Image.Image | None, int | No
     return im, aid
 
 
+def product_scale(d: Design) -> str:
+    """캠페인 입력의 제품 크기(크게|보통|작게). 예전 캠페인처럼 값이 없으면 크게."""
+    v = (d.brief or {}).get("product_scale")
+    return v if v in compose.PRODUCT_SCALES else compose.DEFAULT_PRODUCT_SCALE
+
+
 def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False, variant: bool = False) -> dict:
     """배경 프롬프트와 그 재료. 생성(_generate_one)과 대기 화면의 주문서 미리보기(background_prompt_preview)가 같은 문장을 쓴다.
     반환: prompt(variant 면 same_scene 로 감싼 것), style, reason, single, product_img, product_id, pmode, composite, bv, brand, settings."""
@@ -266,7 +272,7 @@ def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False,
     composite = pmode == "composite"
     # 합성 방식이면 생성 크기(_generate_one 과 같은 값)에서 누끼가 실제로 놓일 상자를 미리 계산해 그 자리만 비우게 한다
     gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
-    placed = compose.product_box(gw, gh, product_img, template) if composite else None
+    placed = compose.product_box(gw, gh, product_img, template, product_scale(d)) if composite else None
     prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
                                    product=product_img is not None, variant=variant, composite=composite,
                                    colors=bv.colors, placed=placed)
@@ -313,7 +319,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     extra: dict = {}
     if composite:
         clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
-        bg, placed = compose.paste_product(bg, product_img, template)
+        bg, placed = compose.paste_product(bg, product_img, template, product_scale(d))
         extra = {"clean_file": clean_key, "product_placed": placed}
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
