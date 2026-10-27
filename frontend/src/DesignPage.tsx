@@ -19,7 +19,7 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; layout?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string; in_image?: InImage }[]
@@ -1151,7 +1151,7 @@ const campaignMeta = (d: Design) =>
 
 type Brief = {
   product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null; image_style: string
-  product_scale: string
+  product_scale: string; layout: string
   required_phrases: string[]; forbidden_phrases: string[]
 }
 // 제품 크기(서버 compose.PRODUCT_SCALES): 투명 누끼를 붙이는 구역을 받침 기준으로 줄인다
@@ -1160,13 +1160,56 @@ const PRODUCT_SCALES = [
   { v: '보통', label: '보통 — 제품과 배경을 함께 (약 24%)' },
   { v: '작게', label: '작게 — 배경이 주인공, 제품은 포인트 (약 12%)' },
 ]
-const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', required_phrases: [], forbidden_phrases: [] }
+const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', layout: '기본', required_phrases: [], forbidden_phrases: [] }
 // 저장된 캠페인 입력을 폼 값으로 (캠페인 열기·수정 취소)
 const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
-  product_scale: d.brief.product_scale ?? '크게',
+  product_scale: d.brief.product_scale ?? '크게', layout: d.brief.layout ?? '기본',
   required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
+
+// 레이아웃(서버 backend/app/layouts.json, GET /api/image-settings 의 layouts): 비율군별 문구 자리·정렬·제품 구역
+type LayoutTpl = { side: 'bottom' | 'top' | 'left' | 'right'; align: 'left' | 'center'; product_slot: number[]; text_column: number }
+type LayoutOpt = { name: string; description: string; version: string; templates: Record<string, LayoutTpl> }
+
+// 배치 그림: 제품 구역(면)과 문구 자리(줄 3개: 제목·본문·CTA)를 토큰 값 그대로 그린다
+function LayoutSketch({ t, w, h }: { t: LayoutTpl; w: number; h: number }) {
+  const [x0, y0, x1, y1] = t.product_slot
+  const m = 0.07
+  const zone = t.side === 'bottom' ? [m, 0.72, 1 - m, 1 - m] : t.side === 'top' ? [m, 0.2, 1 - m, 0.46]
+    : t.side === 'left' ? [m, 0.42, m + (1 - 2 * m) * t.text_column, 1 - m] : [1 - m - (1 - 2 * m) * t.text_column, 0.42, 1 - m, 1 - m]
+  const zw = zone[2] - zone[0]
+  const bars = [{ k: 0.8, y: 0 }, { k: 0.6, y: 0.36 }, { k: 0.34, y: 0.72 }]
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true" className="layout-sketch">
+      <rect x={0.5} y={0.5} width={w - 1} height={h - 1} rx={3} className="ls-frame" />
+      <rect x={x0 * w} y={y0 * h} width={(x1 - x0) * w} height={(y1 - y0) * h} rx={2} className="ls-product" />
+      {bars.map((b) => {
+        const bw = zw * b.k * w
+        const bx = t.align === 'center' ? (zone[0] + (zw - zw * b.k) / 2) * w : zone[0] * w
+        const by = (zone[1] + (zone[3] - zone[1]) * b.y) * h
+        return <rect key={b.y} x={bx} y={by} width={bw} height={Math.max(2, (zone[3] - zone[1]) * h * 0.2)} rx={1} className={b.y > 0.7 ? 'ls-cta' : 'ls-text'} />
+      })}
+    </svg>
+  )
+}
+
+function LayoutPicker({ value, options, onChange }: { value: string; options: LayoutOpt[]; onChange: (v: string) => void }) {
+  return (
+    <div className="layout-picker" role="radiogroup" aria-label="레이아웃">
+      {options.map((o) => (
+        <button key={o.name} type="button" role="radio" aria-checked={value === o.name} title={o.description}
+          className={`layout-opt${value === o.name ? ' on' : ''}`} onClick={() => onChange(o.name)}>
+          <span className="layout-sketches">
+            {o.templates['세로형'] && <LayoutSketch t={o.templates['세로형']} w={32} h={40} />}
+            {o.templates['가로형'] && <LayoutSketch t={o.templates['가로형']} w={52} h={28} />}
+          </span>
+          <span className="layout-name">{o.name}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   workBrandId: number | null; onWorkBrand: (id: number | null) => void; onGoBrand?: () => void
@@ -1182,6 +1225,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   // 입력 수정
   const [editing, setEditing] = useState(false)
   const [brief, setBrief] = useState<Brief>(EMPTY_BRIEF)
+  const [layouts, setLayouts] = useState<LayoutOpt[]>([])
+  useEffect(() => { fetch('/api/image-settings').then((r) => r.json()).then((j) => Array.isArray(j?.layouts) && setLayouts(j.layouts)).catch(() => undefined) }, [])
   const [picked, setPicked] = useState<number[]>([])
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1543,6 +1588,13 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             </select>
             <span className="muted">자동이면 브랜드 이미지 톤·상품 설명의 단서(일러스트, 3D, 패턴, 인물)로 고르고, 단서가 없으면 사람 없는 실사 제품·공간으로 만듭니다.</span>
           </label>
+          {layouts.length > 0 && (
+            <div className="msg-field">레이아웃 <span className="opt">(선택)</span>
+              <LayoutPicker value={brief.layout} options={layouts} onChange={(v) => setBrief({ ...brief, layout: v })} />
+              <span className="muted">{layouts.find((o) => o.name === brief.layout)?.description} 그림은 세로형·가로형 지면의 배치(진한 면은 제품 자리)입니다.
+                배경 구도와 문구 자리가 함께 바뀌므로, 이미지를 만든 뒤 바꾸면 배경을 새로 생성해야 맞습니다.</span>
+            </div>
+          )}
           <div className="msg-field">필수 / 금지 표현 <span className="opt">(선택)</span>
             <span className="muted">이 캠페인의 카피 생성·검수에 씁니다. 비워 두면 브랜드 규칙의 표현(필수 {rules?.req ?? '-'}개 · 금지 {rules?.ban ?? '-'}개)이 적용됩니다.</span>
             <div className="field-grid">
@@ -1711,6 +1763,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <dt>핵심 메시지</dt><dd>{d.brief.key_message || <span className="muted">없음</span>}</dd>
                 <dt>타깃</dt><dd>{d.brief.target || <span className="muted">없음</span>}</dd>
                 <dt>배경 형태</dt><dd>{d.brief.image_style ?? '자동'}</dd>
+                <dt>레이아웃</dt><dd>{d.brief.layout ?? '기본'}</dd>
                 {d.brief.product_image_asset_id && <><dt>제품 크기</dt><dd>{d.brief.product_scale ?? '크게'}</dd></>}
                 <dt>제품 이미지</dt><dd>{d.brief.product_image_asset_id
                   ? <img className="prod-thumb" src={`/api/assets/${d.brief.product_image_asset_id}/file`} alt="제품 이미지" />

@@ -137,10 +137,23 @@ def image_usage():
 
 @router.get("/image-settings")
 def image_settings():
-    """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 추정 비용)과 배경 방식, 기본값."""
+    """프론트 선택용: 고를 수 있는 이미지 모델(정사각 1장 추정 비용)과 배경 방식, 레이아웃, 기본값.
+    layouts 는 캠페인 입력의 레이아웃 고르기와 배치 그림에 쓴다(비율군별 문구 자리·정렬·제품 구역)."""
     return {"models": imagegen.model_options(), "modes": list(imagegen.BG_MODES), "default_mode": imagegen.default_bg_mode(),
             "quality": imagegen.OPENAI_QUALITY, "provider": imagegen.PROVIDER, "usd_krw": imagegen.pricing_rate(),
-            "single_min_keep": imagegen.SINGLE_MIN_KEEP}
+            "single_min_keep": imagegen.SINGLE_MIN_KEEP, "layouts": layout_options()}
+
+
+def layout_options() -> list[dict]:
+    """compose.LAYOUTS 를 화면용으로: 이름·설명과 비율군별 {side, align, product_slot, text_column}. 기본 레이아웃이 맨 앞이다."""
+    out = []
+    for name, tpls in compose.LAYOUTS.items():
+        t0 = next(iter(tpls.values()))
+        out.append({"name": name, "description": t0["description"], "version": t0["version"],
+                    "templates": {tpl: {"side": t["text"]["side"], "align": t["text"]["align"],
+                                        "product_slot": t["product_slot"], "text_column": t["text_column"]}
+                                  for tpl, t in tpls.items()}})
+    return sorted(out, key=lambda o: o["name"] != compose.DEFAULT_LAYOUT)
 
 
 @router.put("/designs/{design_id}/image-settings")
@@ -251,6 +264,17 @@ def _product_image(db: Session, d: Design) -> tuple[Image.Image | None, int | No
     return im, aid
 
 
+def layout_name(d: Design) -> str:
+    """캠페인 입력의 레이아웃. 예전 캠페인처럼 값이 없거나 지금 없는 이름이면 기본."""
+    v = (d.brief or {}).get("layout")
+    return v if v in compose.LAYOUTS else compose.DEFAULT_LAYOUT
+
+
+def layout_ref(name: str) -> dict:
+    """기록용 {name, version}: 배경 행과 합성 보고서에 남겨 어떤 배치로 만들었는지 본다."""
+    return {"name": name, "version": compose.layout_tokens(compose.VERTICAL, name)["version"]}
+
+
 def product_scale(d: Design) -> str:
     """캠페인 입력의 제품 크기(크게|보통|작게). 예전 캠페인처럼 값이 없으면 크게."""
     v = (d.brief or {}).get("product_scale")
@@ -272,10 +296,11 @@ def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False,
     composite = pmode == "composite"
     # 합성 방식이면 생성 크기(_generate_one 과 같은 값)에서 누끼가 실제로 놓일 상자를 미리 계산해 그 자리만 비우게 한다
     gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
-    placed = compose.product_box(gw, gh, product_img, template, product_scale(d)) if composite else None
+    lay = layout_name(d)
+    placed = compose.product_box(gw, gh, product_img, template, product_scale(d), lay) if composite else None
     prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
                                    product=product_img is not None, variant=variant, composite=composite,
-                                   colors=bv.colors, placed=placed)
+                                   colors=bv.colors, placed=placed, layout=lay)
     if variant:
         prompt = imagegen.build_variant_prompt(prompt)
     return {"prompt": prompt, "style": style, "reason": reason, "single": single, "product_img": product_img,
@@ -319,7 +344,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     extra: dict = {}
     if composite:
         clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
-        bg, placed = compose.paste_product(bg, product_img, template, product_scale(d))
+        bg, placed = compose.paste_product(bg, product_img, template, product_scale(d), layout_name(d))
         extra = {"clean_file": clean_key, "product_placed": placed}
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
@@ -327,6 +352,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
               **({"single_extra": True} if force_ratio else {}),
               **({"product_asset_id": product_id, "product_mode": pmode} if product_img is not None else {}), **extra,
               "model": st["model"] if provider == "openai" else imagegen.CF_MODEL,
+              "layout": layout_ref(layout_name(d)),
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or Path(path).stem) if ref_img is not None else Path(path).stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, single=single,
@@ -626,7 +652,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
             out_img = compose.fit_blur(bg_img, w, h)
             crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5}
         else:
-            nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h)
+            nw, nh, x, y, crop = compose.crop_window(bg_img.convert("RGB"), w, h, layout=layout_name(d))
             out_img = bg_img.convert("RGB").resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
                   "crop": crop, "warnings": [], "elements": []}
@@ -647,8 +673,14 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
             pv.safe_area, (bv.logo_margin or {}).get("percent"), text_hex, scrim_hex, fill_blur=fill_blur,
             body=sel.body if ii["body"] else None, cta=sel.cta if ii["cta"] else None,
             body_font_path=_font_path(bv, "본문", db), accent_hex=_color(bv, "주조색"),
-            corner=(bv.icon_style or {}).get("corner") or "둥근", logo_position=bv.logo_position or "좌상단")
+            corner=(bv.icon_style or {}).get("corner") or "둥근", logo_position=bv.logo_position or "좌상단",
+            layout=layout_name(d))
         report["in_image_setting"] = {"body": ii["body"], "cta": ii["cta"], "default": ii["default"]}
+        # 배경은 만든 때의 레이아웃 구도로 그려져 있다. 그 뒤 레이아웃을 바꿨으면 문구 자리와 피사체가 어긋날 수 있다
+        bg_lay = ((bg_row.layout or {}).get("layout") or {}).get("name") or compose.DEFAULT_LAYOUT
+        if bg_lay != layout_name(d):
+            report["warnings"].append(f"배경은 '{bg_lay}' 레이아웃 구도로 만들어졌습니다. "
+                                      f"'{layout_name(d)}' 구도에 맞추려면 배경을 새로 생성하세요")
         if bv.logo_asset_id and logo is None:
             report["warnings"].append("로고 파일을 찾지 못해 합성하지 못했습니다")
         if not bv.logo_asset_id:

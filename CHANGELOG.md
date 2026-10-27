@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 캠페인 입력: 레이아웃 고르기 (레이아웃 토큰 3단계)
+- 캠페인 입력에 '레이아웃'(기본·상단 문구·중앙 정렬·좌우 반전)을 추가했다. 카드마다 세로형·가로형 배치 그림(제품 자리·문구 줄·CTA)을 토큰 값 그대로 그린다(`LayoutPicker`). 입력 요약에도 표시
+- `BriefIn.layout` 검증(모르는 이름 422). `GET /api/image-settings` 에 layouts(이름·설명·버전·비율군별 문구 자리·정렬·제품 구역·문구 열 폭)
+- 배경 생성(구도 프롬프트·제품 구역)·누끼 합성·크롭·지면 합성이 캠페인의 레이아웃을 따른다(`routers_images.layout_name`, 예전 캠페인은 기본). 배경 행 `layout.layout` 과 합성 보고서 `layout` 에 {name, version} 기록
+- 배경을 만든 뒤 레이아웃을 바꾸고 다시 합성하면 "배경은 'X' 레이아웃 구도로 만들어졌습니다 … 배경을 새로 생성하세요" 경고를 남긴다(배경을 자동으로 다시 만들지는 않는다)
+- 테스트 `test_image_fit.py::test_layout_in_brief_drives_prompt_product_slot_and_compose`. 화면은 타입 검사만 했고 브라우저로는 아직 보지 않았다
+
 ### 레이아웃 3종 추가 + 구도 프롬프트 변수화 (레이아웃 토큰 2단계)
 - `layouts.json` 에 레이아웃 3종: **상단 문구**(세로형·정사각 문구 위·피사체와 제품 아래, 로고 위 모서리), **중앙 정렬**(배치는 기본, 제목·본문·CTA 가운데), **좌우 반전**(가로형 피사체 왼쪽·문구 오른쪽 열, 제품 구역 왼쪽). `extends` 로 기본 위에 다른 점만 적는다(`compose.load_layouts`)
 - 구도 프롬프트 `image/composition/{세로형,정사각,가로형}.md` 1.5: 방향·비율을 `{{subject_where}}`·`{{subject_pct}}`·`{{text_where}}`·`{{text_pct}}`·`{{text_surface}}` 로 바꾸고 `imagegen.composition_vars` 가 토큰(`text.side`·`composition.subject`)에서 채운다. 합성이 문구를 놓는 쪽과 프롬프트가 비우는 쪽이 같은 토큰을 읽는다. 기본 레이아웃 문장은 1.4 와 같다(스냅샷 그대로)

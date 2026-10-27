@@ -82,7 +82,7 @@ def load_layouts(path: Path = LAYOUTS_PATH) -> dict[str, dict[str, dict]]:
             if tpl not in spec and tpl not in base:
                 raise ValueError(f"layouts.json {name}: 비율군 '{tpl}' 항목이 없습니다")
             t = {**base.get("common", {}), **base.get(tpl, {}), **spec.get("common", {}), **spec.get(tpl, {}),
-                 "layout": name, "version": spec.get("version")}
+                 "layout": name, "version": spec.get("version"), "description": spec.get("description", "")}
             _check_layout(name, tpl, t)
             out[name][tpl] = t
     if DEFAULT_LAYOUT not in out:

@@ -1140,3 +1140,37 @@ def test_prompt_blocks_joins_untagged_lines():
     assert imagegen.prompt_blocks(text) == [
         {"tag": "제품 자리 — 가장 중요한 규칙", "text": "비워 둔다.\n- 구역 안에는 받침만\n- 사람은 바깥"},
         {"tag": "장면", "text": "한 장면"}]
+
+
+def test_layout_in_brief_drives_prompt_product_slot_and_compose(env):
+    """캠페인 입력의 레이아웃: 모르는 이름은 422, 고르면 배경 프롬프트 구도·제품 구역·합성 문구 자리가 따르고 기록에 남는다.
+    배경을 만든 뒤 레이아웃을 바꾸면 다시 합성할 때 '배경을 새로 생성하세요' 경고가 붙는다."""
+    from app import compose, imagegen
+    c, ids, prompts = env["client"], env["ids"], env["prompts"]
+    p = ids["presets"]
+    opts = c.get("/api/image-settings").json()["layouts"]
+    assert opts[0]["name"] == "기본" and {"상단 문구", "중앙 정렬", "좌우 반전"} <= {o["name"] for o in opts}
+    assert next(o for o in opts if o["name"] == "상단 문구")["templates"]["세로형"]["side"] == "top"
+    _upload_product(env)
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    assert d["brief"].get("layout", "기본") == "기본"
+    assert c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "layout": "없는 배치"}}).status_code == 422
+    r = c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "layout": "상단 문구"}})
+    assert r.status_code == 200 and r.json()["brief"]["layout"] == "상단 문구"
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert any("주 피사체는 아래쪽 70% 안에" in q and "위쪽 30%는 문구가 올라갈 자리다" in q for q in prompts)
+    bgs = {r["preset_id"]: r["background"]["layout"] for r in c.get(f"/api/designs/{ids['design']}/images").json()}
+    vert = bgs[p["피드 4:5"]]
+    assert vert["layout"] == {"name": "상단 문구", "version": "1.0"}
+    W, H = vert["product_placed"]["canvas"]
+    sx0, sy0, sx1, sy1 = compose.product_slot("세로형", "크게", "상단 문구")
+    assert vert["product_placed"]["slot"] == [round(sx0 * W), round(sy0 * H), round(sx1 * W), round(sy1 * H)]
+    _select_copy(env, [p["피드 4:5"]])
+    j = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False}).json()
+    comp = j["composite"]["layout"]
+    assert comp["layout"]["name"] == "상단 문구" and not any("레이아웃 구도" in w for w in comp["warnings"])
+    # 배경은 그대로 두고 레이아웃만 바꿔 다시 합성 → 구도가 어긋난다는 경고
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "layout": "기본"}})
+    j = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False}).json()
+    assert any("'상단 문구' 레이아웃 구도" in w for w in j["composite"]["layout"]["warnings"])
