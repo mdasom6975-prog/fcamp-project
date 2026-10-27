@@ -9,7 +9,7 @@
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
-      "includeFiles": "{backend/fonts/**,prompts/**}",
+      "includeFiles": "{backend/fonts/**,backend/app/layouts.json,prompts/**}",
       "excludeFiles": "{frontend/**,docs/**,tests/**,tools/**,brands/**,demo/**,deploy/**,specs/**}"
     }
   },

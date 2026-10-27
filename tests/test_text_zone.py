@@ -39,3 +39,40 @@ def test_stays_below_when_it_fits():
     _, rep = _compose(None)
     assert rep.get("text_zone") is None
     assert "position" not in rep["scrim"]
+
+
+# 배치 토큰(backend/app/layouts.json): 서버가 뜰 때 읽고 검사한다. 잘못된 값은 합성 중이 아니라 시작 때 드러나야 한다.
+def _layouts_file(tmp_path, change):
+    import json
+    from app import compose
+    raw = json.loads(compose.LAYOUTS_PATH.read_text(encoding="utf-8"))
+    change(raw)
+    p = tmp_path / "layouts.json"
+    p.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def test_layout_tokens_merge_common_with_template():
+    from app import compose
+    v, h = compose.layout_tokens(compose.VERTICAL), compose.layout_tokens(compose.HORIZONTAL)
+    assert v["margin"] == h["margin"]                     # common 값
+    assert v["text_column"] == 1.0 and h["text_column"] == 0.55   # 비율군 값이 덮어쓴다
+    assert h["scrim"]["side"] == "left" and v["scrim"]["side"] == "bottom"
+    assert compose.layout_tokens(compose.SQUARE, "없는 레이아웃") is compose.layout_tokens(compose.SQUARE)
+    assert compose.PRODUCT_SLOT[compose.VERTICAL] == tuple(v["product_slot"])
+
+
+def test_layouts_reject_bad_values(tmp_path):
+    import pytest
+    from app import compose
+    def missing_tpl(raw):
+        del raw["기본"]["정사각"]
+    def bad_slot(raw):
+        raw["기본"]["세로형"]["product_slot"] = [0.8, 0.1, 0.2, 0.6]
+    def bad_corner(raw):
+        raw["기본"]["가로형"]["logo_corners"] = ["가운데"]
+    def bad_fraction(raw):
+        raw["기본"]["common"]["margin"] = 6
+    for change, msg in ((missing_tpl, "정사각"), (bad_slot, "product_slot"), (bad_corner, "logo_corners"), (bad_fraction, "margin")):
+        with pytest.raises(ValueError, match=msg):
+            compose.load_layouts(_layouts_file(tmp_path, change))
