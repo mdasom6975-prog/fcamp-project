@@ -207,10 +207,27 @@ def people_vars(style: str) -> dict:
         return {"target_label": "타깃(그리지 않음, 분위기 참고)",
                 "tone_people": " 톤 문장에 인물이 나와도 이 형태에서는 사람을 그리지 않고 색감·조명·질감만 따른다.",
                 "repeat_people": " 사람·얼굴·손·팔 등 신체 일부는 한 명도, 한 조각도 없다.",
-                "people": "사람·얼굴·손·팔·신체 일부를 화면 어디에도 그리지 않는다. 가방·옷처럼 사람이 쓰는 물건도 사람 없이 놓인 모습으로만 그린다."}
+                "people": "사람·얼굴·손·팔·신체 일부를 화면 어디에도 그리지 않는다. 몸에 걸치는 물건은 바닥이나 받침 위에 내려놓인 모습으로만 그린다."}
     return {"target_label": "타깃", "tone_people": "", "repeat_people": "",
             "people": "사람이 등장하는 장면이면 사람은 구역 바깥(옆이나 뒤편, 초점이 흐린 거리)에 두고, 사람의 손·팔·몸이 구역 안으로 "
                       "들어오거나 상품을 든 모습을 그리지 않는다. 구역 위쪽도 사람의 머리나 몸이 걸치지 않게 한다."}
+
+
+# 사람 없는 형태에서 톤 문장에서 뺄 사람 묘사 단어. 이 단어가 든 문장은 통째로 뺀다(금지 문장을 덧붙여도 구체 명사를 따라 그렸다)
+TONE_PEOPLE_WORDS = ("인물", "사람", "청년", "남성", "여성", "남자", "여자", "소년", "소녀", "모델", "얼굴", "가족", "커플",
+                     "학생", "직장인", "포즈", "멘 ", "메고", "착용")
+
+
+def tone_text(style: str, description: str | None) -> str:
+    """background.md 의 {{tone}}. 사람 없는 형태(NO_PEOPLE_STYLES)면 사람 묘사가 든 문장을 빼고(색감·조명·질감 문장만 남김),
+    남는 문장이 없으면 '지정 없음'. 인물 형태는 그대로. 끝의 마침표는 md 문장이 붙이므로 뗀다(사람 없는 형태만, 스냅샷 유지)."""
+    text = (description or "").strip()
+    if not text:
+        return "지정 없음"
+    if style not in NO_PEOPLE_STYLES:
+        return text
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip() and not any(w in s for w in TONE_PEOPLE_WORDS)]
+    return " ".join(kept).rstrip(". ") or "지정 없음"
 
 
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
@@ -237,11 +254,13 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}")
     style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
     # composite: 상품명·설명이 장면에 들어가면 모델이 비워 둔 구역에 같은 종류의 물건을 그린다 → 중립어로 바꾸고 설명은 뺀다
-    text = prompts.render("image/background", product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
-                          description="" if composite else brief.get("description") or "",
-                          key_message=brief.get("key_message") or "지정 없음", target=target,
-                          tone=tone.get("description") or "지정 없음", composition=composition, style=style_text,
-                          brand_colors=brand_color_line(colors), **people_vars(style))
+    pv = people_vars(style)
+    scene = prompts.render(f"image/{scene_name(style, composite)}",
+                           product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
+                           description="" if composite else brief.get("description") or "",
+                           key_message=brief.get("key_message") or "지정 없음", target=target, target_label=pv["target_label"])
+    text = prompts.render("image/background", scene=scene, tone=tone_text(style, tone.get("description")),
+                          composition=composition, style=style_text, brand_colors=brand_color_line(colors), **pv)
     if composite:
         text = prompts.render("image/product_slot", base=text, people=people_vars(style)["people"],
                               **product_slot_vars(template, placed))
@@ -274,6 +293,11 @@ def product_slot_vars(template: str, placed: dict | None = None) -> dict:
     return {"slot": f"가로 {round(x0 * 100)}~{round(x1 * 100)}%, 세로 {round(y0 * 100)}~{round(y1 * 100)}%", "shape": shape}
 
 
+def scene_name(style: str, composite: bool) -> str:
+    """[장면] partial 이름. 투명 누끼를 합성하는 사람 없는 형태는 '상품이 내려놓일 빈 장소'(_scene_place), 그 외는 기본 장면(_scene)."""
+    return "_scene_place" if composite and style in NO_PEOPLE_STYLES else "_scene"
+
+
 def prompt_blocks(text: str) -> list[dict]:
     """프롬프트를 '[태그] 본문' 블록으로 나눈다(대기 화면의 주문서 미리보기용). 태그 없이 이어지는 줄은 앞 블록에 붙인다."""
     blocks: list[dict] = []
@@ -299,7 +323,8 @@ def prompt_refs(template: str, style: str, variant: bool = False, single: bool =
                 product: bool = False, composite: bool = False, colors: list[dict] | None = None) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
-            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common")]
+            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common"),
+            prompts.ref(f"image/{scene_name(style, composite)}")]
     if brand_color_line(colors):
         refs.append(prompts.ref("image/_brand_colors"))
     refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs

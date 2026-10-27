@@ -48,3 +48,21 @@ def test_prompt_slot_follows_cutout_box():
     assert imagegen.product_slot_vars("세로형") == {"slot": "가로 14~86%, 세로 6~66%", "shape": ""}
     wide = imagegen.product_slot_vars("가로형", compose.product_box(1536, 1024, _cutout(900, 300, (0, 0, 899, 299)), "가로형"))
     assert "가로로 넓은 물건(가로:세로 3.0:1)" in wide["shape"]
+
+
+def test_product_scale_shrinks_slot_on_the_same_floor():
+    """제품 크기: 구역 가로·세로에 배율을 곱하고, 세로형·정사각은 받침(아랫변) 가운데, 가로형은 구역 가운데를 기준으로 줄인다."""
+    for template in ("세로형", "정사각", "가로형"):
+        x0, y0, x1, y1 = compose.PRODUCT_SLOT[template]
+        assert compose.product_slot(template, "크게") == compose.product_slot(template)
+        for size, k in compose.PRODUCT_SCALES.items():
+            a0, b0, a1, b1 = compose.product_slot(template, size)
+            assert abs((a1 - a0) - (x1 - x0) * k) < 1e-9 and abs((b1 - b0) - (y1 - y0) * k) < 1e-9
+            assert abs((a0 + a1) - (x0 + x1)) < 1e-9, "가로 가운데 유지"
+            if template == "가로형":
+                assert abs((b0 + b1) - (y0 + y1)) < 1e-9
+            else:
+                assert abs(b1 - y1) < 1e-9, "받침 높이 유지"
+    prod = _cutout(400, 600, (0, 0, 399, 599))
+    big, small = (compose.product_box(1024, 1536, prod, "세로형", s) for s in ("크게", "작게"))
+    assert big["box"][3] == small["box"][3] and (small["box"][3] - small["box"][1]) < (big["box"][3] - big["box"][1]) * 0.6

@@ -248,3 +248,25 @@ def test_no_people_styles_forbid_people_everywhere(style):
         assert text.rstrip().endswith("한 조각도 없다.")
     else:
         assert "사람이 등장하는 장면이면" in text and "타깃: " in text and "한 조각도 없다" not in text
+
+
+def test_no_people_tone_drops_person_sentences_and_composite_scene_is_empty_place():
+    """시안 12 2차: 톤 문장의 '백팩을 멘 청년' 같은 사람 묘사는 사람 없는 형태에서 빼고, 투명 누끼 합성이면 [장면]은 '상황'이 아니라
+    상품이 내려놓일 빈 장소다. 인물 형태는 톤·장면을 그대로 둔다."""
+    from app import imagegen
+    tone = {"description": "거리·캠퍼스에서 백팩을 멘 청년을 담은 스트리트 사진 느낌의 실사 인물. 라임 포인트, 대비 강한 모노톤. 금지: 이미지 안의 글자, 가짜 로고."}
+    assert imagegen.tone_text("실사 제품·공간", tone["description"]) == "라임 포인트, 대비 강한 모노톤. 금지: 이미지 안의 글자, 가짜 로고"
+    assert imagegen.tone_text("실사 인물", tone["description"]) == tone["description"]
+    assert imagegen.tone_text("3D 렌더", "밝은 인물 사진.") == "지정 없음"
+    assert imagegen.tone_text("3D 렌더", "아이콘처럼 단순한 형태.") == "아이콘처럼 단순한 형태", "단어 일부(아이콘)는 사람으로 보지 않는다"
+    brief = {"product_name": "모노 노트북 백팩 20L", "key_message": "출근길도 가볍게", "target": "통학·출퇴근하는 20대"}
+    text = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 제품·공간", product=True, composite=True)
+    assert "백팩을 멘" not in text and "청년" not in text and "가방·옷" not in text
+    assert "상품이 내려놓일 장소 한 곳을 그린다" in text and "상황을 한 장면으로" not in text
+    assert "'주 피사체'는 이 비워 둔 상품 자리를 뜻한다" in text
+    people = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 인물", product=True, composite=True)
+    assert "백팩을 멘 청년" in people and "상황을 한 장면으로" in people
+    plain = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 제품·공간")
+    assert "상황을 한 장면으로" in plain and "청년" not in plain, "합성이 아니면 기본 장면, 톤 거르기는 그대로"
+    refs = imagegen.prompt_refs("세로형", "실사 제품·공간", composite=True)
+    assert any(r.startswith("image/_scene_place@") for r in refs)
