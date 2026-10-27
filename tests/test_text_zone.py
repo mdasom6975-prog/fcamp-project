@@ -160,3 +160,64 @@ def test_editing_keeps_scrim_side_and_align(tmp_path, monkeypatch):
     # 예전 기록: 문구를 위로 옮긴 합성은 position '위' 만 남아 있다 → 편집에서도 위쪽 스크림
     old = {"template": "세로형", "scrim": {"mode": "세로형", "color": "#000000", "opacity": 0.62, "position": "위"}, "elements": []}
     assert editing.default_elements(old, font, None)[1]["props"]["side"] == "top"
+
+
+# ---- 레이아웃 3종(상단 문구·중앙 정렬·좌우 반전): layouts.json 의 실제 정의로 확인한다 ----
+def test_all_layouts_keep_product_slot_out_of_text_zone():
+    """제품 구역은 구도 프롬프트가 문구 자리로 비우라고 한 띠(composition.subject 의 나머지)와 겹치지 않는다."""
+    from app import compose
+    assert {"기본", "상단 문구", "중앙 정렬", "좌우 반전"} <= set(compose.LAYOUTS)
+    for name, tpls in compose.LAYOUTS.items():
+        for tpl, t in tpls.items():
+            x0, y0, x1, y1 = t["product_slot"]
+            k = t["composition"]["subject"]
+            side = t["text"]["side"]
+            edge = {"bottom": y1 <= k, "top": y0 >= 1 - k, "left": x0 >= 1 - k, "right": x1 <= k}[side]
+            assert edge, (name, tpl, side, t["product_slot"])
+
+
+def test_composition_vars_follow_text_side():
+    from app import imagegen
+    assert imagegen.composition_vars("세로형") == {"subject_where": "위쪽", "subject_pct": 70, "text_where": "아래쪽",
+                                                  "text_pct": 30, "text_surface": "바닥·배경"}
+    top = imagegen.composition_vars("세로형", "상단 문구")
+    assert (top["subject_where"], top["text_where"], top["text_surface"]) == ("아래쪽", "위쪽", "벽·배경")
+    right = imagegen.composition_vars("가로형", "좌우 반전")
+    assert (right["subject_where"], right["subject_pct"], right["text_where"]) == ("왼쪽", 65, "오른쪽")
+    assert imagegen.product_slot_vars("세로형", layout="상단 문구")["slot"] == "가로 14~86%, 세로 34~94%"
+
+
+def test_top_text_layout_crops_subject_low_and_puts_text_above():
+    from app import compose
+    _, rep = compose.compose(_textured((1024, 1536), (300, 900, 720, 1400)), 1080, 1350, "이번 주말, 누구일까", FONT, _logo(),
+                             None, None, None, None, body=BODY, cta="쿠챠에서 만나기", accent_hex="#3B5BFF", layout="상단 문구")
+    els = {e["type"]: e for e in rep["elements"]}
+    subj = rep["crop"]["content_box_canvas"]
+    assert rep["layout"] == {"name": "상단 문구", "version": "1.0"}
+    assert rep["crop"]["zoom"] > 1 and subj[3] > 1350 * 0.8          # 확대해도 피사체는 아래쪽에 남는다
+    assert rep.get("text_zone") == "위" and els["cta"]["box"][3] <= subj[1]
+    assert els["logo"]["box"][1] < els["text"]["box"][1]              # 로고는 위 모서리, 문구는 그 아래
+
+
+def test_mirrored_layout_puts_horizontal_text_right():
+    from app import compose
+    _, rep = compose.compose(_textured((1536, 1024), (500, 250, 900, 800)), 1200, 628, "이번 주말, 누구일까", FONT, _logo(),
+                             None, None, None, None, body=BODY, layout="좌우 반전")
+    els = {e["type"]: e for e in rep["elements"]}
+    subj = rep["crop"]["content_box_canvas"]
+    assert rep["scrim"]["side"] == "right" and els["text"]["box"][0] >= subj[2]
+    assert rep["logo_placement"]["corner"] in ("우상단", "좌상단")
+    assert not _overlap(els["logo"]["box"], els["text"]["box"])
+    p = compose.product_box(1536, 1024, Image.new("RGBA", (400, 800), (0, 0, 0, 255)), "가로형", layout="좌우 반전")
+    assert p["box"][2] <= 1536 * 0.6 + 1                              # 제품도 왼쪽 구역
+
+
+def test_center_layout_aligns_every_template():
+    from app import compose
+    for size, gen, box in (((1080, 1350), (1024, 1536), (250, 120, 780, 800)), ((1200, 628), (1536, 1024), (800, 150, 1400, 900))):
+        _, rep = compose.compose(_textured(gen, box), *size, "이번 주말, 누구일까", FONT, None, None, None, None, None,
+                                 cta="쿠챠에서 만나기", accent_hex="#3B5BFF", layout="중앙 정렬")
+        els = {e["type"]: e for e in rep["elements"]}
+        tx0, _, tx1, _ = els["text"]["box"]
+        c0, _, c1, _ = els["cta"]["box"]
+        assert els["text"]["align"] == "가운데" and abs((c0 - tx0) - (tx1 - c1)) <= 1

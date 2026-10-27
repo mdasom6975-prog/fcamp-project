@@ -42,6 +42,8 @@ def _check_layout(name: str, tpl: str, t: dict) -> None:
     for key in ("margin", "logo_max_w", "logo_max_h", "text_gap", "cta_height"):
         frac(key, t.get(key))
     frac("text_column", t.get("text_column"), 0.1)
+    frac("composition.subject", (t.get("composition") or {}).get("subject"), 0.3)
+    frac("crop_subject_share", t.get("crop_subject_share"), 0.2)
     for key in ("title_start", "title_min", "body_ratio", "gap"):
         frac(f"type.{key}", (t.get("type") or {}).get(key))
     if not 1 <= ((t.get("type") or {}).get("line_height") or 0) <= 3:
@@ -65,17 +67,22 @@ def _check_layout(name: str, tpl: str, t: dict) -> None:
 
 
 def load_layouts(path: Path = LAYOUTS_PATH) -> dict[str, dict[str, dict]]:
-    """layouts.json 을 읽어 {레이아웃: {비율군: 토큰}} 으로 돌려준다. 모든 레이아웃에 세 비율군이 있어야 하고 값은 _check_layout 으로 검사한다."""
+    """layouts.json 을 읽어 {레이아웃: {비율군: 토큰}} 으로 돌려준다. 모든 레이아웃에 세 비율군이 있어야 하고 값은 _check_layout 으로 검사한다.
+    extends 가 있으면 그 레이아웃의 common·비율군 항목 위에 이 레이아웃의 값을 키 단위로 덮어쓴다(다른 점만 적는다)."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     out: dict[str, dict[str, dict]] = {}
     for name, spec in raw.items():
         if name.startswith("_"):
             continue
+        base = raw.get(spec["extends"]) if spec.get("extends") else {}
+        if base is None or (base or {}).get("extends"):
+            raise ValueError(f"layouts.json {name}: extends 는 extends 가 없는 레이아웃 이름이어야 합니다: {spec['extends']!r}")
         out[name] = {}
         for tpl in TEMPLATES:
-            if tpl not in spec:
+            if tpl not in spec and tpl not in base:
                 raise ValueError(f"layouts.json {name}: 비율군 '{tpl}' 항목이 없습니다")
-            t = {**spec.get("common", {}), **spec[tpl], "layout": name, "version": spec.get("version")}
+            t = {**base.get("common", {}), **base.get(tpl, {}), **spec.get("common", {}), **spec.get(tpl, {}),
+                 "layout": name, "version": spec.get("version")}
             _check_layout(name, tpl, t)
             out[name][tpl] = t
     if DEFAULT_LAYOUT not in out:
@@ -151,14 +158,14 @@ def content_box(img: Image.Image) -> tuple[int, int, int, int] | None:
 
 
 MAX_TIGHTEN = 1.3          # 여백을 줄이려 확대하는 상한(원본 1024 기준 화질 유지)
-SUBJECT_SHARE = {VERTICAL: 0.55, SQUARE: 0.6, HORIZONTAL: 0.6}   # 피사체가 차지해야 할 몫(세로형·정사각은 높이, 가로형은 폭)
 
 
 def crop_window(img: Image.Image, w: int, h: int, focus: bool = True,
-                tighten: bool = True) -> tuple[int, int, int, int, dict]:
+                tighten: bool = True, layout: str = DEFAULT_LAYOUT) -> tuple[int, int, int, int, dict]:
     """cover 리사이즈 후 잘라 낼 창의 위치. focus 면 content_box 를 담도록 창을 옮긴다(담을 수 없으면 세로는 윗변,
     가로는 중심에 맞춘다 — 얼굴은 피사체의 위쪽에 있다). tighten 이면 피사체가 작아 빈 면이 넓을 때 창을 줄여(확대, 최대
-    MAX_TIGHTEN 배) 피사체가 SUBJECT_SHARE 만큼 차지하게 하고, 문구 자리(세로형·정사각은 아래, 가로형은 왼쪽)는 남긴다.
+    MAX_TIGHTEN 배) 피사체가 토큰 crop_subject_share 만큼 차지하게 하고, 문구 자리(토큰 text.side: 기본은 세로형·정사각 아래,
+    가로형 왼쪽)는 남긴다. layout 은 layouts.json 의 레이아웃 이름.
     반환: (nw, nh, left, top, 기록용 dict). dict 의 zoom·cx·cy 는 editing.render 와 같은 뜻이다."""
     scale0 = max(w / img.width, h / img.height)
     nw0, nh0 = max(1, round(img.width * scale0)), max(1, round(img.height * scale0))
@@ -170,18 +177,23 @@ def crop_window(img: Image.Image, w: int, h: int, focus: bool = True,
         x0, y0, x1, y1 = (round(v * scale0) for v in box)
         bw, bh = max(1, x1 - x0), max(1, y1 - y0)
         tpl = template_for(w, h)
+        tk = layout_tokens(tpl, layout)
+        share, side = tk["crop_subject_share"], tk["text"]["side"]   # 피사체가 차지해야 할 몫(세로형·정사각은 높이, 가로형은 폭)
         if tighten:
             if tpl == HORIZONTAL:
-                zoom = min(MAX_TIGHTEN, w / (bw / SUBJECT_SHARE[tpl]), h / bh if bh > 0 else MAX_TIGHTEN)
+                zoom = min(MAX_TIGHTEN, w / (bw / share), h / bh if bh > 0 else MAX_TIGHTEN)
             else:
-                zoom = min(MAX_TIGHTEN, h / (bh / SUBJECT_SHARE[tpl]), w / bw if bw > 0 else MAX_TIGHTEN)
+                zoom = min(MAX_TIGHTEN, h / (bh / share), w / bw if bw > 0 else MAX_TIGHTEN)
             zoom = max(1.0, round(zoom, 3))
             if zoom < 1.03:
                 zoom = 1.0
         ww, wh = w / zoom, h / zoom           # 확대 전 좌표계에서의 창 크기
-        if tpl == HORIZONTAL and zoom > 1:    # 피사체를 오른쪽에, 왼쪽은 문구 자리
-            left = x1 + 0.05 * ww - ww
+        if tpl == HORIZONTAL and zoom > 1:    # 피사체를 문구 반대쪽에(기본: 피사체 오른쪽, 왼쪽은 문구 자리)
+            left = (x0 - 0.05 * ww) if side == "right" else (x1 + 0.05 * ww - ww)
             top = (y0 + y1) / 2 - wh / 2
+        elif side == "top" and zoom > 1:      # 가로 중심, 피사체를 아래에 붙이고 위를 문구 자리로
+            left = (x0 + x1) / 2 - ww / 2
+            top = y1 + 0.08 * wh - wh
         else:                                 # 가로 중심, 세로는 위에 약간의 머리 공간 (아래가 문구 자리)
             left = (x0 + x1) / 2 - ww / 2
             top = (y0 - 0.08 * wh) if zoom > 1 else ((y0 + y1) / 2 - wh / 2 if bh <= wh else y0)
@@ -230,9 +242,9 @@ PRODUCT_SCALES = {"크게": 1.0, "보통": 0.75, "작게": 0.53}
 DEFAULT_PRODUCT_SCALE = "크게"
 
 
-def product_slot(template: str, size: str = DEFAULT_PRODUCT_SCALE) -> tuple[float, float, float, float]:
-    """제품 크기(PRODUCT_SCALES)를 적용한 제품 구역 (x0, y0, x1, y1), 캔버스 대비 비율. 크게는 PRODUCT_SLOT 그대로."""
-    x0, y0, x1, y1 = PRODUCT_SLOT[template]
+def product_slot(template: str, size: str = DEFAULT_PRODUCT_SCALE, layout: str = DEFAULT_LAYOUT) -> tuple[float, float, float, float]:
+    """제품 크기(PRODUCT_SCALES)를 적용한 제품 구역 (x0, y0, x1, y1), 캔버스 대비 비율. 크게는 토큰 product_slot 그대로."""
+    x0, y0, x1, y1 = layout_tokens(template, layout)["product_slot"]
     k = PRODUCT_SCALES.get(size, 1.0)
     w, h = (x1 - x0) * k, (y1 - y0) * k
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
@@ -256,13 +268,14 @@ def trim_cutout(product: Image.Image) -> Image.Image:
     return prod.crop(bbox) if bbox else prod
 
 
-def product_box(W: int, H: int, product: Image.Image, template: str, size: str = DEFAULT_PRODUCT_SCALE) -> dict:
+def product_box(W: int, H: int, product: Image.Image, template: str, size: str = DEFAULT_PRODUCT_SCALE,
+                layout: str = DEFAULT_LAYOUT) -> dict:
     """(W, H) 캔버스에서 제품 누끼가 실제로 놓일 상자. 제품 구역(product_slot: PRODUCT_SLOT 에 제품 크기 size 적용)에 비율을 지켜 맞추되 PRODUCT_MAX_UPSCALE 까지만
     키우고, 세로형·정사각은 구역 아랫변에 발을 붙이고 가로형은 구역 가운데에 둔다. paste_product 와 배경 프롬프트가 같은 값을 쓴다.
     반환: {slot, box, scale, src, canvas}. slot·box 는 픽셀 (x0, y0, x1, y1), src 는 여백을 잘라낸 누끼의 픽셀 크기 [w, h],
     canvas 는 계산에 쓴 캔버스 크기 [W, H]."""
     prod = trim_cutout(product)
-    sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(product_slot(template, size), (W, H, W, H)))
+    sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(product_slot(template, size, layout), (W, H, W, H)))
     s = min((sx1 - sx0) / prod.width, (sy1 - sy0) / prod.height, PRODUCT_MAX_UPSCALE)
     pw, ph = max(1, round(prod.width * s)), max(1, round(prod.height * s))
     x = sx0 + (sx1 - sx0 - pw) // 2
@@ -272,12 +285,12 @@ def product_box(W: int, H: int, product: Image.Image, template: str, size: str =
 
 
 def paste_product(bg: Image.Image, product: Image.Image, template: str,
-                  size: str = DEFAULT_PRODUCT_SCALE) -> tuple[Image.Image, dict]:
+                  size: str = DEFAULT_PRODUCT_SCALE, layout: str = DEFAULT_LAYOUT) -> tuple[Image.Image, dict]:
     """생성된 빈 배경 위에 제품 누끼 원본을 그대로(AI 재생성 없이) 붙인다. 위치·크기는 product_box,
     발밑에 접지 그림자를 깐다. 반환: (합성 이미지 RGB, 기록용 {slot, box, scale, src, canvas})."""
     bg = bg.convert("RGB")
     W, H = bg.size
-    placed = product_box(W, H, product, template, size)
+    placed = product_box(W, H, product, template, size, layout)
     x, y, x1, y1 = placed["box"]
     pw, ph = x1 - x, y1 - y
     prod = trim_cutout(product).resize((pw, ph), Image.LANCZOS)
@@ -594,7 +607,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         ox, oy = (w - fw) // 2, (h - fh) // 2
         crop = {"mode": "블러 채우기", "zoom": 1.0, "cx": 0.5, "cy": 0.5, "content_box_canvas": [ox, oy, ox + fw, oy + fh]}
     else:
-        nw, nh, x, y, crop = crop_window(bg, w, h)
+        nw, nh, x, y, crop = crop_window(bg, w, h, layout=layout)
         canvas = bg.resize((nw, nh), Image.LANCZOS).crop((x, y, x + w, y + h))
     tpl = template_for(w, h)
     tk = layout_tokens(tpl, layout)              # 배치 토큰(layouts.json)

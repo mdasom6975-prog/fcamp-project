@@ -1,8 +1,8 @@
 {
-  "_설명": "합성(compose.py) 배치 토큰. 숫자는 모두 캔버스 대비 비율이다. 레이아웃마다 common 에 세 비율군(세로형·정사각·가로형)이 같이 쓰는 값을 두고, 비율군 항목이 같은 키를 덮어쓴다. compose.load_layouts 가 서버 시작 때 읽고 검증한다. 띠 배너(compose_strip)는 이 파일을 쓰지 않는다.",
+  "_설명": "합성(compose.py)과 배경 구도 프롬프트(image/composition)가 함께 읽는 배치 토큰. 숫자는 모두 캔버스 대비 비율이다. 레이아웃마다 common 에 세 비율군(세로형·정사각·가로형)이 같이 쓰는 값을 두고, 비율군 항목이 같은 키를 덮어쓴다. extends 가 있으면 그 레이아웃 값 위에 다른 점만 덮어쓴다. compose.load_layouts 가 서버 시작 때 읽고 검증한다. 띠 배너(compose_strip)는 이 파일을 쓰지 않는다. composition.subject 는 프롬프트에 적는 피사체 몫, crop_subject_share 는 크롭 확대 때 피사체가 차지할 몫, product_slot 은 누끼 자리 — 기본 레이아웃의 세 값은 예전 상수 그대로라 서로 다르다(평가 뒤 맞춘다).",
   "기본": {
-    "version": "1.1",
-    "description": "세로형·정사각은 피사체 위·문구 아래, 가로형은 피사체 오른쪽·문구 왼쪽 열. 1.0 — 토큰 분리 전 compose.py 상수를 그대로 옮긴 값. 1.1 — 문구 방향·정렬(text)을 토큰으로, 스크림 방향은 문구 방향을 따른다",
+    "version": "1.2",
+    "description": "세로형·정사각은 피사체 위·문구 아래, 가로형은 피사체 오른쪽·문구 왼쪽 열. 1.0 — 토큰 분리 전 compose.py 상수를 그대로 옮긴 값. 1.1 — 문구 방향·정렬(text)을 토큰으로, 스크림 방향은 문구 방향을 따른다. 1.2 — 구도 프롬프트 비율(composition.subject)과 크롭 피사체 몫(crop_subject_share, 예전 SUBJECT_SHARE)을 토큰으로",
     "common": {
       "margin": 0.06,
       "logo_max_w": 0.4,
@@ -14,18 +14,24 @@
       "scrim": {"extent": 0.6, "opacity": 0.62}
     },
     "세로형": {
+      "composition": {"subject": 0.70},
+      "crop_subject_share": 0.55,
       "product_slot": [0.14, 0.06, 0.86, 0.66],
       "logo_max_h": 0.14,
       "logo_corners": ["좌상단", "우상단", "좌하단", "우하단"],
       "cta_height": 0.065
     },
     "정사각": {
+      "composition": {"subject": 0.75},
+      "crop_subject_share": 0.6,
       "product_slot": [0.16, 0.05, 0.84, 0.70],
       "logo_max_h": 0.14,
       "logo_corners": ["좌상단", "우상단", "좌하단", "우하단"],
       "cta_height": 0.065
     },
     "가로형": {
+      "composition": {"subject": 0.65},
+      "crop_subject_share": 0.6,
       "product_slot": [0.40, 0.08, 0.94, 0.88],
       "logo_max_h": 0.18,
       "logo_corners": ["좌상단", "우상단", "우하단"],
@@ -33,6 +39,40 @@
       "text_column": 0.55,
       "cta_height": 0.11,
       "scrim": {"extent": 0.75, "opacity": 0.62}
+    }
+  },
+  "상단 문구": {
+    "extends": "기본",
+    "version": "1.0",
+    "description": "세로형·정사각은 문구(로고 아래)를 위에, 피사체·제품을 아래에 둔다. 메시지를 먼저 읽게 할 때(화장품·식품). 가로형은 기본과 같다",
+    "세로형": {
+      "text": {"side": "top", "align": "left"},
+      "product_slot": [0.14, 0.34, 0.86, 0.94],
+      "logo_corners": ["좌상단", "우상단"]
+    },
+    "정사각": {
+      "text": {"side": "top", "align": "left"},
+      "product_slot": [0.16, 0.30, 0.84, 0.95],
+      "logo_corners": ["좌상단", "우상단"]
+    }
+  },
+  "중앙 정렬": {
+    "extends": "기본",
+    "version": "1.0",
+    "description": "배치·로고 후보는 기본과 같고 제목·본문·CTA 를 문구 자리 가운데에 정렬한다. 미니멀·프리미엄 톤",
+    "common": {
+      "text": {"side": "bottom", "align": "center"}
+    },
+    "가로형": {"text": {"side": "left", "align": "center"}}
+  },
+  "좌우 반전": {
+    "extends": "기본",
+    "version": "1.0",
+    "description": "가로형만 피사체 왼쪽·문구 오른쪽 열(로고는 문구 열 위 모서리 우선). 세로형·정사각은 기본과 같다",
+    "가로형": {
+      "text": {"side": "right", "align": "left"},
+      "product_slot": [0.06, 0.08, 0.60, 0.88],
+      "logo_corners": ["우상단", "좌상단"]
     }
   }
 }

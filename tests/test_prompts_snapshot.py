@@ -211,6 +211,15 @@ def test_background_brand_colors_prompt():
             == imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형"))
 
 
+@pytest.mark.parametrize("layout,template", [("상단 문구", "세로형"), ("좌우 반전", "가로형")])
+def test_background_layout_prompt(layout, template):
+    """레이아웃 토큰이 구도 문장(image/composition)의 피사체·문구 방향과 비율, 제품 구역을 바꾼다. 문구는 그리지 않는 composite 로 확인한다."""
+    from app import imagegen
+    base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, template, "실사 제품·공간", product=True, composite=True,
+                                 layout=layout)
+    _assert_snapshot(f"image__layout_{layout.replace(' ', '')}_{template}", base + "\n")
+
+
 # ---- 분석 화면 비전 채점 (analysis): 이미지는 보내지 않고 문장만 고정한다 ----
 def test_judge_prompt():
     from app import analysis, prompts

@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 레이아웃 3종 추가 + 구도 프롬프트 변수화 (레이아웃 토큰 2단계)
+- `layouts.json` 에 레이아웃 3종: **상단 문구**(세로형·정사각 문구 위·피사체와 제품 아래, 로고 위 모서리), **중앙 정렬**(배치는 기본, 제목·본문·CTA 가운데), **좌우 반전**(가로형 피사체 왼쪽·문구 오른쪽 열, 제품 구역 왼쪽). `extends` 로 기본 위에 다른 점만 적는다(`compose.load_layouts`)
+- 구도 프롬프트 `image/composition/{세로형,정사각,가로형}.md` 1.5: 방향·비율을 `{{subject_where}}`·`{{subject_pct}}`·`{{text_where}}`·`{{text_pct}}`·`{{text_surface}}` 로 바꾸고 `imagegen.composition_vars` 가 토큰(`text.side`·`composition.subject`)에서 채운다. 합성이 문구를 놓는 쪽과 프롬프트가 비우는 쪽이 같은 토큰을 읽는다. 기본 레이아웃 문장은 1.4 와 같다(스냅샷 그대로)
+- 크롭(`crop_window`)·제품 구역(`product_slot`·`product_box`·`paste_product`)·`imagegen.build_prompt`·`product_slot_vars` 에 `layout` 인자. 크롭은 문구가 위면 피사체를 아래에, 오른쪽이면 피사체를 왼쪽에 붙여 확대한다. `SUBJECT_SHARE` 상수는 토큰 `crop_subject_share` 로 옮겼다
+- 아직 화면·API 에서 레이아웃을 고를 수 없다(3단계). 기본 레이아웃의 구도 비율(70/30 등)·크롭 몫·제품 구역이 서로 다른 문제는 값 그대로 두고 평가(4단계)에서 맞춘다
+- 기본 레이아웃 결과 변화 없음(556가지 조합 비교). 테스트: 모든 레이아웃의 제품 구역이 문구 자리와 겹치지 않음, 방향별 구도 변수, 상단 문구·좌우 반전·중앙 정렬 합성, 새 스냅샷 `image__layout_상단문구_세로형`·`image__layout_좌우반전_가로형`
+
 ### 합성 문구 방향·정렬 일반화 (레이아웃 토큰 1단계)
 - 토큰 `text.side`·`text.align`(layouts.json 기본 1.1): 세로형·정사각은 문구를 피사체 아래(bottom)·위(top)에, 가로형은 왼쪽(left)·오른쪽(right) 열에 둔다. 정렬은 왼쪽·가운데. 가로형에 위/아래 같은 맞지 않는 조합은 시작 때 거절한다
 - `compose.compose(layout=…)`: 문구 열·피사체 피하기·로고와 나눠 쓰기·반대쪽 자리로 옮기기(4-1)가 네 방향 모두에서 동작한다. 로고는 문구 열 안에 있을 때만 문구와 위아래로 나눈다. 세로형·정사각의 '문구 쪽 모서리면 반대쪽 모서리 우선' 규칙도 방향을 따른다

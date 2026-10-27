@@ -232,7 +232,7 @@ def tone_text(style: str, description: str | None) -> str:
 
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
                  single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
-                 colors: list[dict] | None = None, placed: dict | None = None) -> str:
+                 colors: list[dict] | None = None, placed: dict | None = None, layout: str = compose.DEFAULT_LAYOUT) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
@@ -240,18 +240,20 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     product=True 면 제품 누끼 이미지를 참조 이미지로 함께 보내므로 prompts/image/product_ref.md 문장을 덧붙인다.
     variant=True 면 다른 비율군 배경(1번)이 제품 원본(2번) 앞에 함께 첨부되므로, 1번 속 상품은 이전에 그려진 것이라
     무시하고 제품 원본만 따르게 첨부 이미지의 역할을 적는다 (generate_variant 의 첨부 순서와 맞춘다).
-    composite=True 면 제품을 이미지에 그리지 않고 제품 구역(compose.PRODUCT_SLOT)을 비워 두게 한다(product_slot.md). 제품 누끼는 생성 뒤 코드가
+    composite=True 면 제품을 이미지에 그리지 않고 제품 구역(토큰 product_slot)을 비워 두게 한다(product_slot.md). 제품 누끼는 생성 뒤 코드가
     그 자리에 그대로 붙이므로 참조 이미지로 첨부하지 않는다(product 는 무시).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
     colors 는 브랜드 허용 색상(BrandVersion.colors). 주면 [브랜드 톤] 뒤에 [브랜드 색] 문장이 붙는다(brand_color_line).
     placed 는 생성 크기 기준 compose.product_box 결과. composite 일 때 주면 고정 구역 대신 누끼가 실제로 놓일 자리만 비운다(product_slot_vars).
+    layout 은 compose.LAYOUTS 의 레이아웃 이름. 구도의 피사체·문구 방향과 비율(composition_vars), 제품 구역이 이 값을 따른다.
     """
     style = style or pick_style(tone, brief)[0]
     if style not in STYLES:
         raise ValueError(f"배경 형태는 {list(STYLES)} 중 하나여야 합니다: {style}")
     target = brief.get("target") or "지정 없음"
     # single: 한 장을 모든 지면이 잘라 쓰므로 비율군 구도 대신 '어느 방향으로 잘려도 되는' 공용 구도를 쓴다
-    composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}")
+    composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}",
+                                 **composition_vars(template, layout))
     style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
     # composite: 상품명·설명이 장면에 들어가면 모델이 비워 둔 구역에 같은 종류의 물건을 그린다 → 중립어로 바꾸고 설명은 뺀다
     pv = people_vars(style)
@@ -263,7 +265,7 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                           composition=composition, style=style_text, brand_colors=brand_color_line(colors), **pv)
     if composite:
         text = prompts.render("image/product_slot", base=text, people=people_vars(style)["people"],
-                              **product_slot_vars(template, placed))
+                              **product_slot_vars(template, placed, layout))
     elif product:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
@@ -273,12 +275,27 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
 SLOT_MARGIN = 0.03    # 누끼 상자 바깥으로 더 비워 두는 여유(캔버스 대비, 사방). 접지 그림자·가장자리 소품 겹침 방지
 
 
-def product_slot_vars(template: str, placed: dict | None = None) -> dict:
+# 문구 자리(레이아웃 토큰 text.side) → 구도 문장의 (피사체 쪽, 문구 쪽, 문구 자리에 이어지는 면)
+SIDE_WORDS = {"bottom": ("위쪽", "아래쪽", "바닥·배경"), "top": ("아래쪽", "위쪽", "벽·배경"),
+              "left": ("오른쪽", "왼쪽", "배경"), "right": ("왼쪽", "오른쪽", "배경")}
+
+
+def composition_vars(template: str, layout: str = compose.DEFAULT_LAYOUT) -> dict:
+    """composition/<비율군>.md 의 변수. 피사체·문구 방향은 토큰 text.side, 피사체 몫(%)은 composition.subject 에서 온다.
+    합성(compose)이 문구를 놓는 쪽과 같은 토큰을 읽으므로 프롬프트가 비우는 자리와 문구 자리가 어긋나지 않는다."""
+    tk = compose.layout_tokens(template, layout)
+    subject_where, text_where, surface = SIDE_WORDS[tk["text"]["side"]]
+    pct = round(tk["composition"]["subject"] * 100)
+    return {"subject_where": subject_where, "subject_pct": pct, "text_where": text_where, "text_pct": 100 - pct,
+            "text_surface": surface}
+
+
+def product_slot_vars(template: str, placed: dict | None = None, layout: str = compose.DEFAULT_LAYOUT) -> dict:
     """product_slot.md 의 {{slot}}·{{shape}}. placed(compose.product_box 결과)가 있으면 누끼가 실제로 놓일 상자에 사방 SLOT_MARGIN 을
-    더한 자리와 상품 모양·바닥 높이를, 없으면 비율군 고정 구역(compose.PRODUCT_SLOT)과 빈 shape 를 준다.
+    더한 자리와 상품 모양·바닥 높이를, 없으면 레이아웃의 고정 구역(토큰 product_slot)과 빈 shape 를 준다.
     길쭉한 병이나 저해상도 누끼는 고정 구역의 일부만 차지하므로, 실제 자리만 비워야 나머지가 빈 받침으로 남지 않는다."""
     if not placed:
-        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
+        x0, y0, x1, y1 = (round(v * 100) for v in compose.layout_tokens(template, layout)["product_slot"])
         return {"slot": f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", "shape": ""}
     W, H = placed["canvas"]
     bx0, by0, bx1, by1 = placed["box"]

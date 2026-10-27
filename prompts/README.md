@@ -22,7 +22,7 @@
 | `icons/_output_spec.md` | (svg) 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
 | `image/background.md` | 배경 이미지 생성 (표현 방식 `{{style}}` + 구도 `{{composition}}` + 브랜드 색 `{{brand_colors}}`) | `imagegen.build_prompt` |
 | `image/_brand_colors.md` | 배경의 브랜드 색 블록 (partial): 강조색(없으면 주조색)은 포인트로 15% 이내, 큰 면은 브랜드 배경색(없으면 밝은 중성색). 강조·주조색이 없으면 붙지 않는다 | `imagegen.brand_color_line` |
-| `image/composition/{가로형,정사각,세로형}.md` | 비율군(템플릿)별 구도. 배경은 비율군마다 1장 생성 | `imagegen.build_prompt` |
+| `image/composition/{가로형,정사각,세로형}.md` | 비율군(템플릿)별 구도. 배경은 비율군마다 1장 생성. 피사체·문구 방향과 비율은 변수(`{{subject_where}}` 등)로, 레이아웃 토큰(`backend/app/layouts.json`)에서 채운다 | `imagegen.build_prompt`·`composition_vars` |
 | `image/style/{실사인물,실사제품,플랫일러스트,3D렌더,그래픽패턴}.md` | 배경 형태(표현 방식). 브리프 `image_style` 또는 자동 선택(`imagegen.pick_style`)으로 파일을 고른다 | `imagegen.build_prompt` |
 | `image/product_ref.md` | 제품 누끼 이미지를 참조 이미지로 첨부할 때 background 프롬프트 앞에 붙는 문장 (`{{product_name}}`, `{{base}}`) | `imagegen.build_prompt(product=True)` |
 | `image/product_slot.md` | 제품 누끼를 합성 방식(`IMAGE_PRODUCT_MODE=composite`)으로 쓸 때 배경 프롬프트 앞에 붙는 문장: 제품을 그리지 않고 제품 구역을 비워 둔다 (`{{slot}}`, `{{base}}`). 누끼는 생성 뒤 `compose.paste_product` 가 붙인다 | `imagegen.build_prompt(composite=True)` |
