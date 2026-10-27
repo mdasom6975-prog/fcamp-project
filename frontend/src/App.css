@@ -527,7 +527,7 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .layout-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 10px; min-width: 112px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); cursor: pointer; }
 .layout-opt:hover { border-color: var(--line-strong); }
-.layout-opt.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.layout-opt.on, .layout-opt.on:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .layout-opt:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .layout-sketches { display: flex; align-items: flex-end; gap: 6px; }
 .layout-name { font-size: 12px; font-weight: 600; }

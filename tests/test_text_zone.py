@@ -221,3 +221,11 @@ def test_center_layout_aligns_every_template():
         tx0, _, tx1, _ = els["text"]["box"]
         c0, _, c1, _ = els["cta"]["box"]
         assert els["text"]["align"] == "가운데" and abs((c0 - tx0) - (tx1 - c1)) <= 1
+
+
+def test_layout_descriptions_are_user_facing():
+    """description 은 캠페인 입력 화면에 그대로 보인다. 버전 이력·코드 이름은 history 에 둔다."""
+    from app import compose
+    for name, tpls in compose.LAYOUTS.items():
+        desc = next(iter(tpls.values()))["description"]
+        assert desc and not any(w in desc for w in ("1.0 —", "compose", "토큰", "_")), (name, desc)
