@@ -210,3 +210,17 @@ def test_background_product_slot_prompt():
     _assert_snapshot("image__product_slot_세로형", base + "\n")
     base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True, variant=True, composite=True)
     _assert_snapshot("image__product_slot_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
+
+
+@pytest.mark.parametrize("style", ["실사 인물", "실사 제품·공간", "플랫 일러스트", "3D 렌더", "그래픽 패턴"])
+def test_no_people_styles_forbid_people_everywhere(style):
+    """사람 없는 형태는 어디에서도 사람이 있다는 전제를 두지 않고, 금지를 끝에서 한 번 더 말한다(시안 12: 실사 제품·공간에 인물)."""
+    from app import imagegen
+    tone = {"description": "거리에서 백팩을 멘 청년을 담은 스트리트 사진 느낌의 실사 인물"}
+    text = imagegen.build_prompt("모노백", tone, BRIEF, "세로형", style, product=True, composite=True)
+    if style in imagegen.NO_PEOPLE_STYLES:
+        assert "사람이 등장하는 장면이면" not in text and "사람이나 주 피사체" not in text
+        assert "타깃(그리지 않음, 분위기 참고)" in text and "톤 문장에 인물이 나와도" in text
+        assert text.rstrip().endswith("한 조각도 없다.")
+    else:
+        assert "사람이 등장하는 장면이면" in text and "타깃: " in text and "한 조각도 없다" not in text

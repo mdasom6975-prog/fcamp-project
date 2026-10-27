@@ -86,6 +86,8 @@ def best_single_template(sizes: list[tuple[int, int]]) -> str:
 STYLES = {"실사 인물": "실사인물", "실사 제품·공간": "실사제품", "플랫 일러스트": "플랫일러스트",
           "3D 렌더": "3D렌더", "그래픽 패턴": "그래픽패턴"}
 AUTO_STYLE = "자동"
+# 사람이 나오면 안 되는 형태. 이 형태면 프롬프트의 사람 관련 문장을 '그리지 않는다'로 바꾸고 끝에서 한 번 더 말한다(people_vars)
+NO_PEOPLE_STYLES = ("실사 제품·공간", "3D 렌더", "그래픽 패턴")
 DEFAULT_STYLE = "실사 제품·공간"
 # 자동 선택 키워드(브랜드 image_tone 설명 + 브리프 설명에서 찾는다). 앞에 있는 규칙이 우선.
 _STYLE_RULES = [("플랫 일러스트", ("일러스트", "드로잉", "벡터", "만화")),
@@ -198,6 +200,19 @@ def brand_color_line(colors: list[dict] | None) -> str:
                                  sub=f"{', '.join(sub)} 는 쓰더라도 아주 작게 쓴다. " if sub else "")
 
 
+def people_vars(style: str) -> dict:
+    """background.md·product_slot.md 의 사람 관련 변수. 사람 없는 형태(NO_PEOPLE_STYLES)면 금지 문장, 인물 형태면 예전 문장·빈칸.
+    분기는 여기서 계산해 md 에는 조건문을 두지 않는다."""
+    if style in NO_PEOPLE_STYLES:
+        return {"target_label": "타깃(그리지 않음, 분위기 참고)",
+                "tone_people": " 톤 문장에 인물이 나와도 이 형태에서는 사람을 그리지 않고 색감·조명·질감만 따른다.",
+                "repeat_people": " 사람·얼굴·손·팔 등 신체 일부는 한 명도, 한 조각도 없다.",
+                "people": "사람·얼굴·손·팔·신체 일부를 화면 어디에도 그리지 않는다. 가방·옷처럼 사람이 쓰는 물건도 사람 없이 놓인 모습으로만 그린다."}
+    return {"target_label": "타깃", "tone_people": "", "repeat_people": "",
+            "people": "사람이 등장하는 장면이면 사람은 구역 바깥(옆이나 뒤편, 초점이 흐린 거리)에 두고, 사람의 손·팔·몸이 구역 안으로 "
+                      "들어오거나 상품을 든 모습을 그리지 않는다. 구역 위쪽도 사람의 머리나 몸이 걸치지 않게 한다."}
+
+
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
                  single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
                  colors: list[dict] | None = None) -> str:
@@ -225,11 +240,11 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                           description="" if composite else brief.get("description") or "",
                           key_message=brief.get("key_message") or "지정 없음", target=target,
                           tone=tone.get("description") or "지정 없음", composition=composition, style=style_text,
-                          brand_colors=brand_color_line(colors))
+                          brand_colors=brand_color_line(colors), **people_vars(style))
     if composite:
         x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
         text = prompts.render("image/product_slot",
-                              slot=f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", base=text)
+                              slot=f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", base=text, people=people_vars(style)["people"])
     elif product:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
