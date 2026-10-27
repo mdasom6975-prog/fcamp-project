@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from . import calllog, cutout, imagegen, llm, pricing, smallbiz, storage
 from .models import Asset, Brand, BrandVersion, CopyVariant, Design, Placement, PresetVersion
-from .routers_assets import get_db
+from .routers_assets import get_db, get_design, latest_image
 from .routers_brands import _version_from
 
 router = APIRouter(prefix="/api/smallbiz", dependencies=[Depends(calllog.track_design)])
@@ -175,13 +175,6 @@ def _suggest_message(what: str) -> str:
     return what.strip().splitlines()[0][:40]
 
 
-def _design(db: Session, design_id: int) -> Design:
-    d = db.get(Design, design_id)
-    if not d or d.kind != "광고 이미지":
-        raise HTTPException(404, "캠페인을 찾을 수 없습니다")
-    return d
-
-
 @router.post("/campaigns")
 def create_campaign(body: CampaignIn, db: Session = Depends(get_db)):
     """품목 글(+사진)로 캠페인을 만들고 카피 3안을 생성해 1안을 선택해 둔다. 이미지는 /campaigns/{id}/images 로 이어서 만든다."""
@@ -223,11 +216,11 @@ def create_campaign(body: CampaignIn, db: Session = Depends(get_db)):
 def get_campaign(design_id: int, db: Session = Depends(get_db)):
     """화면 복원용: 입력, 스타일, 규격별 합성 이미지(없으면 null)."""
     from . import routers_images
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     items = []
     for pid in d.preset_version_ids:
         pv = db.get(PresetVersion, pid)
-        g = routers_images._latest(db, design_id, pid, "composite")
+        g = latest_image(db, design_id, pid, "composite")
         items.append({"preset_id": pid, "name": pv.placement.name if pv else str(pid),
                       "image": routers_images._img_out(g)})
     b = d.brief or {}
@@ -244,7 +237,7 @@ def get_campaign(design_id: int, db: Session = Depends(get_db)):
 def make_images(design_id: int, new_background: bool = Body(False, embed=True), db: Session = Depends(get_db)):
     """모든 지면의 이미지를 만든다(첫 호출이 배경을 만들고 같은 비율은 공유). new_background=True 면 배경을 새로 만들고 다시 합성한다."""
     from . import routers_images
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     errors: list[dict] = []
     if new_background:
         try:
@@ -262,7 +255,7 @@ def make_images(design_id: int, new_background: bool = Body(False, embed=True), 
 @router.put("/campaigns/{design_id}/style")
 def change_style(design_id: int, preset_id: str = Body(..., embed=True), db: Session = Depends(get_db)):
     """'다른 스타일로': 캠페인의 숨은 브랜드를 다른 프리셋으로 바꾼다(입력·카피는 유지). 이어서 /images 를 new_background=True 로 부른다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     preset = smallbiz.get(preset_id)
     if preset is None:
         raise HTTPException(400, "알 수 없는 스타일입니다")
@@ -279,5 +272,5 @@ def change_style(design_id: int, preset_id: str = Body(..., embed=True), db: Ses
 def export_campaign(design_id: int, db: Session = Depends(get_db)):
     """규격별 PNG 묶음(zip). 소상공인용은 검수 단계 없이 작업본으로 내보낸다."""
     from . import routers_export
-    _design(db, design_id)
+    get_design(db, design_id, ad_only=True)
     return routers_export.make_export(design_id, None, True, db)

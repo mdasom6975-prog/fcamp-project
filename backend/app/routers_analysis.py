@@ -3,28 +3,21 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from . import analysis, calllog
-from .models import Brand, BrandVersion, Design, GeneratedImage
-from .routers_assets import get_db
+from .models import Brand, BrandVersion, GeneratedImage
+from .routers_assets import get_db, get_design
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 채점 호출 기록에 시안 id
 
 
-def _design(db: Session, design_id: int) -> Design:
-    d = db.get(Design, design_id)
-    if not d:
-        raise HTTPException(404, "캠페인을 찾을 수 없습니다")
-    return d
-
-
 @router.get("/designs/{design_id}/analysis")
 def get_analysis(design_id: int, db: Session = Depends(get_db)):
-    return analysis.build(db, _design(db, design_id))
+    return analysis.build(db, get_design(db, design_id))
 
 
 @router.post("/designs/{design_id}/analysis/judge")
 def judge(design_id: int, background_id: int | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """배경 1장(기본: 가장 최근 배경)을 Claude 가 보고 브랜드 톤·브리프와의 일치를 항목별로 채점한다. 채팅 1회 과금."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     if background_id is not None:
         g = db.get(GeneratedImage, background_id)
         if g is None or g.design_id != d.id or g.kind != "background":

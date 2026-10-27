@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from . import calllog, copyfields, copywriter, legal, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
-from .routers_assets import get_db
+from .routers_assets import get_db, get_design
 from .routers_review import invalidate_reviews
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
@@ -45,9 +45,7 @@ def _group(design: Design, db: Session) -> list[dict]:
 
 
 def _design(design_id: int, db: Session) -> Design:
-    d = db.get(Design, design_id)
-    if not d:
-        raise HTTPException(404, "시안을 찾을 수 없습니다")
+    d = get_design(db, design_id)
     if d.kind != "광고 이미지":
         raise HTTPException(400, "카피 생성은 광고 이미지 시안에서만 사용합니다")
     return d

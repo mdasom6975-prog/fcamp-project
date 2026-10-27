@@ -12,7 +12,7 @@ from . import storage
 from .db import BASE_DIR
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
                      IconAsset, PresetVersion, ReviewResult)
-from .routers_assets import FONT_DIR, get_db
+from .routers_assets import FONT_DIR, get_db, get_design, latest_image
 from .routers_review import ensure_unlocked, invalidate_icon_reviews, invalidate_reviews
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
@@ -46,12 +46,6 @@ def _img_out(g: GeneratedImage | None) -> dict | None:
             "copy_variant_id": g.copy_variant_id, "layout": g.layout, "created_at": g.created_at.isoformat(),
             # 캐시 무효화용 파일 토큰: 행 id 는 삭제 후 재사용될 수 있지만 파일 이름(uuid)은 고유하다
             "file": Path(g.file_path).stem}
-
-
-def _latest(db: Session, design_id: int, pid: int, kind: str) -> GeneratedImage | None:
-    return db.scalar(select(GeneratedImage).where(
-        GeneratedImage.design_id == design_id, GeneratedImage.preset_version_id == pid,
-        GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
 
 
 def _scene(g: GeneratedImage | None) -> str | None:
@@ -94,7 +88,7 @@ def _single_master(db: Session, design_id: int) -> GeneratedImage | None:
 
 def _current_bg(db: Session, design_id: int, pid: int) -> GeneratedImage | None:
     """지면에 연결된 최신 배경이 현재 장면이면 그 행, 아니면(배경을 새로 만든 뒤 이 비율군은 아직 안 만듦) None."""
-    bg = _latest(db, design_id, pid, "background")
+    bg = latest_image(db, design_id, pid, "background")
     if bg is None:
         return None
     return bg if _same_scene(bg, _scene(_latest_design_bg(db, design_id))) else None
@@ -118,13 +112,6 @@ def in_image_for(d: Design, pv) -> dict:
     if isinstance(saved, dict):
         return {**base, "body": bool(saved.get("body", base["body"])), "cta": bool(saved.get("cta", base["cta"])), "default": False}
     return {**base, "default": True}
-
-
-def _design(db: Session, design_id: int) -> Design:
-    d = db.get(Design, design_id)
-    if not d or d.kind != "광고 이미지":
-        raise HTTPException(404, "광고 이미지 시안을 찾을 수 없습니다")
-    return d
 
 
 @router.get("/image-usage")
@@ -160,7 +147,7 @@ def layout_options() -> list[dict]:
 def set_image_settings(design_id: int, image_model: str | None = Body(None, embed=True),
                        bg_mode: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """시안의 생성 설정(이미지 모델·배경 방식)을 브리프에 저장한다. 다음 배경 생성·재생성부터 적용된다(기존 배경은 그대로)."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     brief = dict(d.brief or {})
     if image_model is not None:
@@ -180,7 +167,7 @@ def set_image_settings(design_id: int, image_model: str | None = Body(None, embe
 def set_in_image(design_id: int, preset_id: int, body: bool | None = Body(None, embed=True),
                  cta: bool | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """지면의 이미지 안 문구 설정(본문·CTA)을 브리프에 저장한다. 다음 합성('다시 합성')부터 적용. 분리 자산형은 400."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     if preset_id not in d.preset_version_ids:
         raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
     pv = db.get(PresetVersion, preset_id)
@@ -204,17 +191,17 @@ def design_api_calls(design_id: int, db: Session = Depends(get_db)):
 
 @router.get("/designs/{design_id}/images")
 def list_images(design_id: int, db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     out = []
     for pid in d.preset_version_ids:
         out.append({"preset_id": pid, "background": _img_out(_current_bg(db, design_id, pid)),
-                    "composite": _img_out(_latest(db, design_id, pid, "composite"))})
+                    "composite": _img_out(latest_image(db, design_id, pid, "composite"))})
     return out
 
 
 @router.post("/designs/{design_id}/copy/{variant_id}/select")
 def select_copy(design_id: int, variant_id: int, db: Session = Depends(get_db)):
-    _design(db, design_id)
+    get_design(db, design_id, ad_only=True)
     v = db.get(CopyVariant, variant_id)
     if not v or v.design_id != design_id:
         raise HTTPException(404, "카피를 찾을 수 없습니다")
@@ -457,7 +444,7 @@ def background_prompt_preview(design_id: int, preset_id: int | None = None, db: 
     """대기 화면의 'AI 주문서': 이 지면(없으면 시안의 첫 지면) 비율군의 배경을 새로 그릴 때 보내는 프롬프트를 블록으로.
     생성과 같은 _bg_prompt 로 만들며 이미지 모델은 부르지 않는다. 다른 비율군을 참조하는 변형(same_scene)은 앞에 안내 문장이
     더 붙지만 여기서는 기준 문장만 보여 준다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ids = [preset_id] if preset_id is not None else list(d.preset_version_ids)
     pv = next((p for p in (db.get(PresetVersion, i) for i in ids) if p and p.production_width), None)
     if pv is None:
@@ -476,7 +463,7 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
     품질은 항상 IMAGE_QUALITY(기본 medium). 검수 완료된 캠페인은 409.
     배경은 **합성본이 있는 지면의 비율군**만 지금 만든다(합성본이 하나도 없으면 모든 비율군). 나머지 비율군은
     그 지면을 합성할 때 현재 장면을 참조해 만든다 → 쓰지 않는 비율군의 호출이 없어진다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     if style is not None:
         style = style.strip() or imagegen.AUTO_STYLE
@@ -484,7 +471,7 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
             raise HTTPException(400, f"배경 형태는 {[imagegen.AUTO_STYLE, *imagegen.STYLES]} 중 하나")
         d.brief = {**(d.brief or {}), "image_style": style}
         db.flush()
-    composed = [pid for pid in d.preset_version_ids if _latest(db, design_id, pid, "composite") is not None]
+    composed = [pid for pid in d.preset_version_ids if latest_image(db, design_id, pid, "composite") is not None]
     rows, deferred = create_shared_background(db, d, in_use=composed or None)
     # 편집 화면에서 저장한 지면은 자동 합성(make_image)이 409 로 막히므로, 편집 요소를 유지한 채 새 배경으로 여기서 다시 그린다
     from .routers_edit import rerender_edited     # 순환 import 회피 (routers_edit 가 이 모듈을 import 한다)
@@ -508,7 +495,7 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
     """시안의 생성 결과(배경·합성·편집 요소·검수 결과)만 지운다. 브랜드·규격·입력 내용(brief)은 유지하고,
     카피는 include_copy=True, 아이콘 세트는 include_icons=True 일 때만 지운다(세트는 브랜드 규칙 버전 소유라 같은 버전을
     쓰는 다른 캠페인에서도 사라진다). 이미지 생성 API 호출 테스트를 처음부터 다시 하기 위한 용도."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     imgs = db.scalars(select(GeneratedImage).where(GeneratedImage.design_id == design_id)).all()
     paths = {g.file_path for g in imgs}
     for g in imgs:
@@ -553,7 +540,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
                    discard_edits: bool = False) -> dict:
     """지면 하나의 배경(없으면 생성)에 현재 카피·지면 설정(이미지 안 본문·CTA 등)으로 문구를 합성한다.
     discard_edits 면 편집 화면에서 저장한 내용도 버리고 자동 합성으로 되돌린다('처음 상태로 되돌리기'). 아니면 저장한 편집이 있을 때 409."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     if preset_id not in d.preset_version_ids:
         raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
@@ -611,7 +598,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
             # 그 장면을 참조해 이 비율군 배경을 1장 만들고(비율군마다 1장 원칙), 불가능하면 예전처럼 잘라 쓴다
             src = same or (None if imagegen.can_vary(st["bg_mode"]) else latest)
         if src is not None and storage.exists(src.file_path):
-            bg_row = _latest(db, design_id, preset_id, "background")
+            bg_row = latest_image(db, design_id, preset_id, "background")
             if bg_row is None or bg_row.file_path != src.file_path:   # 이 규격에 연결(파일은 공유, 생성 호출 없음)
                 bg_row = _bg_row(d, preset_id, src.file_path, src.width, src.height, src.prompt,
                                  src.brand_version_id, {**(src.layout or {}), **({"fill": "blur"} if single_fill else {})})

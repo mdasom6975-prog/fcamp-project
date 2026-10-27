@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from . import imagegen, legal, phrases, review
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, IconAsset,
                      PresetVersion, ReviewResult)
-from .routers_assets import get_db
+from .routers_assets import get_db, latest_image
 
 router = APIRouter(prefix="/api")
 
@@ -41,12 +41,6 @@ def version_icon_set(db: Session, version_id: int) -> list[IconAsset]:
                            .order_by(IconAsset.position)).all())
 
 
-def _latest(db, did, pid, kind):
-    return db.scalar(select(GeneratedImage).where(
-        GeneratedImage.design_id == did, GeneratedImage.preset_version_id == pid,
-        GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc()).limit(1))
-
-
 def _brand_dict(bv: BrandVersion, name: str = "", brief: dict | None = None) -> dict:
     """검수용 브랜드 규칙. 필수·금지 표현은 캠페인 입력(brief)이 우선, 비면 브랜드 규칙."""
     eff = phrases.effective(bv, brief)
@@ -59,7 +53,7 @@ def _brand_dict(bv: BrandVersion, name: str = "", brief: dict | None = None) -> 
 def gather(db: Session, d: Design, pv: PresetVersion, brand: dict) -> dict:
     """한 지면의 검수·내보내기에 필요한 입력을 모은다 (같은 값을 두 곳이 공유한다)."""
     sep = pv.placement.content_kind == "분리 자산형"
-    comp = _latest(db, d.id, pv.id, "composite")
+    comp = latest_image(db, d.id, pv.id, "composite")
     sel = db.scalar(select(CopyVariant).where(CopyVariant.design_id == d.id, CopyVariant.preset_version_id == pv.id,
                                               CopyVariant.selected.is_(True)))
     layout = (comp.layout if comp else {}) or {}

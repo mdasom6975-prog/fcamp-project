@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from . import calllog, compose, copywriter, editing, phrases, storage
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
-from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db
+from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db, get_design, latest_image
 from .routers_copy import select_variant
 from .routers_review import ensure_unlocked
 from .routers_images import _color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image
@@ -25,13 +25,6 @@ PREVIEW_JPEG_QUALITY = 90
 
 
 # ---------- 공통 보조 ----------
-def _design(db: Session, design_id: int) -> Design:
-    d = db.get(Design, design_id)
-    if not d or d.kind != "광고 이미지":
-        raise HTTPException(404, "광고 이미지 시안을 찾을 수 없습니다")
-    return d
-
-
 def _preset(db: Session, d: Design, pid: int) -> PresetVersion:
     pv = db.get(PresetVersion, pid)
     if not pv or pid not in d.preset_version_ids:
@@ -72,16 +65,6 @@ def _logo_of(db: Session):
     return f
 
 
-def _latest(db: Session, did: int, pid: int, kind: str, original_only: bool = False):
-    rows = db.scalars(select(GeneratedImage).where(
-        GeneratedImage.design_id == did, GeneratedImage.preset_version_id == pid,
-        GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc())).all()
-    for r in rows:
-        if not original_only or not (r.layout or {}).get("edited"):
-            return r
-    return None
-
-
 def _els(db: Session, did: int, pid: int) -> list[Element]:
     return db.scalars(select(Element).where(Element.design_id == did, Element.preset_version_id == pid)
                       .order_by(Element.z_index, Element.id)).all()
@@ -93,7 +76,7 @@ def _el_out(e: Element) -> dict:
 
 
 def _bootstrap(db: Session, d: Design, pid: int, bv: BrandVersion) -> list[Element]:
-    comp = _latest(db, d.id, pid, "composite", original_only=True)
+    comp = latest_image(db, d.id, pid, "composite", original_only=True)
     if not comp or (comp.layout or {}).get("separate_assets"):
         raise HTTPException(400, "먼저 이미지를 생성해 주세요 (카피 선택 후 이미지 생성)")
     for e in editing.default_elements(comp.layout, _font_ref(bv), bv.logo_asset_id, _font_ref(bv, "본문")):
@@ -166,7 +149,7 @@ def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None
 
 
 def _bg_row(db, did, pid) -> GeneratedImage:
-    bg = _latest(db, did, pid, "background")
+    bg = latest_image(db, did, pid, "background")
     if not bg or not storage.exists(bg.file_path):
         raise HTTPException(400, "배경 이미지가 없습니다. 먼저 이미지를 생성해 주세요")
     return bg
@@ -191,7 +174,7 @@ def rerender_edited(db, d: Design, exclude: int | None = None, note_unedited: bo
             skipped.append({"preset_id": pid, "name": name, "reason": "배경이 잠겨 있어 이전 배경을 유지합니다"})
             continue
         oimg.props = {**oimg.props, "zoom": 1.0, "cx": 0.5, "cy": 0.5}      # 새 이미지는 자르기 초기화
-        _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
+        _save_render(db, d, opv, orows, _bg_row(db, d.id, pid), latest_image(db, d.id, pid, "composite"))
         applied.append(pid)
     db.flush()
     return applied, skipped
@@ -200,7 +183,7 @@ def rerender_edited(db, d: Design, exclude: int | None = None, note_unedited: bo
 # ---------- 조회 ----------
 @router.get("/designs/{design_id}/presets/{preset_id}/edit")
 def get_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     pv = _preset(db, d, preset_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     rows = _els(db, d.id, preset_id) or _bootstrap(db, d, preset_id, bv)
@@ -209,7 +192,7 @@ def get_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     for f in bv.fonts or []:
         if f.get("source") == "upload" and f.get("asset_id"):
             fonts.append({"label": f"업로드 폰트 ({f.get('role')})", "ref": {"source": "upload", "asset_id": f["asset_id"]}})
-    comp = _latest(db, d.id, preset_id, "composite")
+    comp = latest_image(db, d.id, preset_id, "composite")
     return {"canvas": [pv.production_width, pv.production_height], "name": pv.placement.name,
             "elements": [_el_out(r) for r in rows], "fonts": fonts,
             "brand_colors": [{"role": c.get("role"), "hex": c.get("hex")} for c in (bv.colors or [])],
@@ -254,7 +237,7 @@ def _apply_payload(db, rows: list[Element], payload: list[dict], canvas) -> list
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/preview")
 def preview(design_id: int, preset_id: int, elements: list[dict] = Body(..., embed=True),
             max_px: int | None = Body(None, embed=True), db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
     if not rows:
@@ -296,7 +279,7 @@ def _persist(db, rows, applied):
 
 @router.put("/designs/{design_id}/presets/{preset_id}/edit")
 def save_edit(design_id: int, preset_id: int, elements: list[dict] = Body(..., embed=True), db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
@@ -304,7 +287,7 @@ def save_edit(design_id: int, preset_id: int, elements: list[dict] = Body(..., e
         raise HTTPException(400, "편집 화면을 먼저 열어 주세요")
     applied = _apply_payload(db, rows, elements, (pv.production_width, pv.production_height))
     _persist(db, rows, applied)
-    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
+    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), latest_image(db, d.id, preset_id, "composite"))
     db.commit()
     return {**res, "elements": [_el_out(r) for r in rows]}
 
@@ -312,7 +295,7 @@ def save_edit(design_id: int, preset_id: int, elements: list[dict] = Body(..., e
 @router.post("/designs/{design_id}/edit/common-text")
 def common_text(design_id: int, text: str = Body(..., embed=True), db: Session = Depends(get_db)):
     """문구를 모든 지면에 적용한다. 잠겼거나 지면별로 따로 수정한 문구는 건드리지 않는다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     text = text.strip()
     if not text or len(text) > 300:
@@ -338,7 +321,7 @@ def common_text(design_id: int, text: str = Body(..., embed=True), db: Session =
             skipped.append({"preset_id": pid, "name": name, "reason": "이 지면에서 따로 수정한 문구입니다"})
         else:
             t.props = {**t.props, "text": text}
-            _save_render(db, d, pv, rows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"))
+            _save_render(db, d, pv, rows, _bg_row(db, d.id, pid), latest_image(db, d.id, pid, "composite"))
             applied_ids.append(pid)
     db.commit()
     return {"applied": applied_ids, "skipped": skipped}
@@ -347,7 +330,7 @@ def common_text(design_id: int, text: str = Body(..., embed=True), db: Session =
 # ---------- 요소 재생성 / 처음 상태로 ----------
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/regenerate")
 def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=True), db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     rows = _els(db, d.id, preset_id)
@@ -392,7 +375,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
         t.props = {**t.props, "text": pick["headline"], "text_override": True}
     else:
         raise HTTPException(400, "element 는 background 또는 text")
-    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"))
+    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), latest_image(db, d.id, preset_id, "composite"))
     db.commit()
     return {**res, **extra, "elements": [_el_out(r) for r in rows]}
 
@@ -400,7 +383,7 @@ def regenerate(design_id: int, preset_id: int, element: str = Body(..., embed=Tr
 @router.post("/designs/{design_id}/presets/{preset_id}/edit/reset")
 def reset_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     """편집 내용을 버리고 자동 배치 상태로 되돌린다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     # 옛 합성의 기록으로 요소를 되살리면 그 뒤에 켠 '이미지 안 본문·CTA' 설정이 빠진다 → 현재 카피·지면 설정으로 다시 합성한다
@@ -423,7 +406,7 @@ def undo_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
     """직전 저장 상태로 돌아간다. 저장 시점마다 남는 DesignSnapshot 을 쌓인 순서대로 하나씩 꺼낸다.
     현재와 같은 내용의 스냅샷(다른 지면 편집·배경 재생성으로 남은 것)은 건너뛰고, 더 이전 스냅샷이 없으면 자동 배치 상태로 돌아간다.
     배경 이미지 자체는 되돌리지 않는다(요소의 문구·위치·크기·색·잠금만)."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     pv = _preset(db, d, preset_id)
     snaps = [s for s in db.scalars(select(DesignSnapshot).where(DesignSnapshot.design_id == d.id)
@@ -451,7 +434,7 @@ def undo_edit(design_id: int, preset_id: int, db: Session = Depends(get_db)):
             db.add(row)
             rows.append(row)
         db.flush()
-    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), _latest(db, d.id, preset_id, "composite"), snapshot=False)
+    res = _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), latest_image(db, d.id, preset_id, "composite"), snapshot=False)
     db.commit()
     return {**res, "elements": [_el_out(r) for r in rows], "to": "이전 저장 상태" if target else "자동 배치 상태"}
 
@@ -480,7 +463,7 @@ def _variant_plan(db: Session, d: Design, variant_no: int) -> list[dict]:
             continue
         new, old = _variant_of(db, d.id, pid, variant_no), _selected(db, d.id, pid)
         item = {"preset_id": pid, "name": pv.placement.name, "new": new, "old": old, "mode": "none", "custom": [], "rows": []}
-        if new is None or _latest(db, d.id, pid, "composite", original_only=False) is None:
+        if new is None or latest_image(db, d.id, pid, "composite", original_only=False) is None:
             plan.append(item)
             continue
         rows = _els(db, d.id, pid)
@@ -502,7 +485,7 @@ def _variant_plan(db: Session, d: Design, variant_no: int) -> list[dict]:
 @router.get("/designs/{design_id}/copy/select-impact")
 def select_impact(design_id: int, variant_no: int, db: Session = Depends(get_db)):
     """시안 번호를 바꾸면 이미지에 어떤 영향이 있는지(저장하지 않는다). 직접 고친 문구가 있으면 화면이 확인창을 띄운다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     plan = _variant_plan(db, d, variant_no)
     return {"recompose": [p["name"] for p in plan if p["mode"] in ("plain", "edited")],
             "custom": [{"preset_id": p["preset_id"], "name": p["name"], "fields": p["custom"]} for p in plan if p["custom"]]}
@@ -513,7 +496,7 @@ def apply_variant(design_id: int, variant_no: int = Body(..., embed=True), overw
                   db: Session = Depends(get_db)):
     """시안 번호를 모든 지면에 적용하고, 이미 만든 합성본도 새 문구로 다시 합성한다(배경 유지, 이미지 생성 비용 없음).
     편집 화면에서 저장한 지면은 위치·크기·잠금을 그대로 두고 문구만 바꾼다. 직접 고친 문구는 overwrite_custom 일 때만 덮어쓴다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     plan = _variant_plan(db, d, variant_no)           # 선택을 바꾸기 전에 이전 선택과 비교해 둔다
     select_variant(design_id, variant_no, db)         # 선택 표시 변경 + 검수 무효화 (404 처리 포함)
@@ -543,7 +526,7 @@ def apply_variant(design_id: int, variant_no: int = Body(..., embed=True), overw
                     props.pop("text_override", None)
                 r.props, changed = props, True
             if changed:
-                _save_render(db, d, pv, rows, _bg_row(db, d.id, pid), _latest(db, d.id, pid, "composite"),
+                _save_render(db, d, pv, rows, _bg_row(db, d.id, pid), latest_image(db, d.id, pid, "composite"),
                              copy_variant_id=it["new"].id)
                 db.commit()
                 recomposed.append(pid)

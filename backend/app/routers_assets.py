@@ -5,11 +5,12 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fontTools.ttLib import TTFont
 from PIL import Image
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import storage
 from .db import BASE_DIR, SessionLocal
-from .models import Asset
+from .models import Asset, Design, GeneratedImage
 
 router = APIRouter(prefix="/api")
 FONT_DIR = BASE_DIR / "fonts"
@@ -31,6 +32,23 @@ PROVIDED_FONTS = [
 def get_db():
     with SessionLocal() as db:
         yield db
+
+
+def get_design(db: Session, design_id: int, ad_only: bool = False) -> Design:
+    """캠페인을 찾는다. 없으면 404. ad_only 면 광고 이미지 캠페인만(아이콘 세트 캠페인도 404)."""
+    d = db.get(Design, design_id)
+    if not d or (ad_only and d.kind != "광고 이미지"):
+        raise HTTPException(404, "광고 이미지 캠페인을 찾을 수 없습니다" if ad_only else "캠페인을 찾을 수 없습니다")
+    return d
+
+
+def latest_image(db: Session, design_id: int, preset_id: int, kind: str, original_only: bool = False) -> GeneratedImage | None:
+    """지면의 가장 최근 이미지 행(kind: background | composite). original_only 면 편집 저장본(layout.edited)을 건너뛴다."""
+    q = select(GeneratedImage).where(GeneratedImage.design_id == design_id, GeneratedImage.preset_version_id == preset_id,
+                                     GeneratedImage.kind == kind).order_by(GeneratedImage.id.desc())
+    if not original_only:
+        return db.scalar(q.limit(1))
+    return next((r for r in db.scalars(q) if not (r.layout or {}).get("edited")), None)
 
 
 def _svg_size(data: bytes) -> tuple[int | None, int | None]:

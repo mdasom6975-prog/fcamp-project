@@ -6,6 +6,7 @@
 """
 import io
 import json
+import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageStat
@@ -519,13 +520,23 @@ def draw_text_soft(canvas: Image.Image, items: list[tuple[int, int, str]], font,
         return canvas
     size = getattr(font, "size", 20)
     shadow = (0, 0, 0) if _lum(color) > 0.3 else (255, 255, 255)
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
     off = max(1, round(size * 0.03))
-    for x, y, text in items:
-        d.text((x + off, y + off), text, font=font, fill=shadow + (150,))
-    layer = layer.filter(ImageFilter.GaussianBlur(max(1.0, size * 0.06)))
-    out = Image.alpha_composite(canvas.convert("RGBA"), layer)
+    radius = max(1.0, size * 0.06)
+    # 그림자는 글자 둘레에만 생기므로 글자 상자 + 블러가 번지는 폭만큼만 흐린다(캔버스 전체를 흐리면 합성 시간의 절반을 쓴다).
+    # 번지는 폭 바깥은 투명이라 캔버스 전체를 흐린 결과와 같다
+    pad = math.ceil(radius * 4) + 2
+    boxes = [font.getbbox(text) for _, _, text in items]
+    x0 = max(0, min(x + off + bb[0] for (x, _, _), bb in zip(items, boxes)) - pad)
+    y0 = max(0, min(y + off + bb[1] for (_, y, _), bb in zip(items, boxes)) - pad)
+    x1 = min(canvas.width, max(x + off + bb[2] for (x, _, _), bb in zip(items, boxes)) + pad)
+    y1 = min(canvas.height, max(y + off + bb[3] for (_, y, _), bb in zip(items, boxes)) + pad)
+    out = canvas.convert("RGBA")
+    if x1 > x0 and y1 > y0:
+        layer = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        d = ImageDraw.Draw(layer)
+        for x, y, text in items:
+            d.text((x + off - x0, y + off - y0), text, font=font, fill=shadow + (150,))
+        out.alpha_composite(layer.filter(ImageFilter.GaussianBlur(radius)), dest=(x0, y0))
     d = ImageDraw.Draw(out)
     for x, y, text in items:
         d.text((x, y), text, font=font, fill=color)
@@ -653,7 +664,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     layout: layouts.json 의 레이아웃 이름. 문구 자리(text.side)·정렬(text.align)·크기 값을 정한다.
     clean·product·placed: 투명 누끼를 붙인 배경이면 누끼 없는 원본·누끼·배경에서의 누끼 상자. 지면마다 누끼를 다시 붙여 잘리지 않게 한다(crop_scene).
     문구 블록은 제목 → 본문 → CTA 순으로 아래에서 위로 쌓고, 자리가 모자라면 본문을 먼저 뺀다(제목·CTA 우선).
-    띠 배너(가로세로 2.6 이상)는 CTA 를 오른쪽에 두고 본문은 1줄만."""
+    띠 배너(가로세로 2.6 이상)는 compose_strip 이 그린다(CTA 오른쪽, 본문 1줄)."""
     bg = bg.convert("RGB")
     body = (body or "").strip() or None
     cta = (cta or "").strip() or None
@@ -661,7 +672,6 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     if is_strip(w, h):
         return compose_strip(bg, w, h, headline, font_path, logo, safe, text_color_hex, scrim_hex, body, cta,
                              body_font_path, accent_hex, corner, clean=clean, product=product, placed=placed)
-    strip = False
     # 블러 채우기: 자르지 않고 전체를 넣는다(1장 방식 폴백). 내용 상자는 전체로 본다
     canvas, crop, product_fit = crop_scene(bg, w, h, layout, fill_blur, clean, product, placed)
     tpl = template_for(w, h)
@@ -760,19 +770,9 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
                 tx0 = sx1 + gap
             else:
                 report["warnings"].append(narrow)
-    # 띠 배너: CTA 는 문구 열 오른쪽에 세로 가운데, 문구 열은 그만큼 좁아진다
-    cta_h = 0
-    if cta:
-        cta_h = round(h * (0.26 if strip else tk["cta_height"]))
-        cta_h = max(cta_h, 18)
+    cta_h = max(round(h * tk["cta_height"]), 18) if cta else 0
     cta_box: list[int] | None = None
     cta_font_size = max(10, round(cta_h * 0.5)) if cta else 0
-    if cta and strip:
-        probe = ImageDraw.Draw(canvas)
-        cf = ImageFont.truetype(font_path, cta_font_size)
-        cw = round(probe.textlength(cta, font=cf) + cta_h)
-        cta_box = [tx1 - cw, round((ct + cb) / 2 - cta_h / 2), tx1, round((ct + cb) / 2 + cta_h / 2)]
-        tx1 = cta_box[0] - gap
     avail_w, avail_h = tx1 - tx0, max(ty1 - ty0, 1)
 
     # 3) 스크림(가독성 보조)은 문구 자리(아래/위)가 정해진 뒤에 4-1)에서 깐다.
@@ -781,9 +781,9 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     #    줄 수 상한 안에 들어가도록 글자 크기를 줄이고, 최소 크기에서도 안 들어가면 상한을 넘겨 모든 줄을 그대로 둔다.
     #    블록이 최소 글자 크기에서도 안 들어가면 본문을 먼저 뺀다(제목·CTA 우선). 그래도 넘치면 경고만 남긴다.
     draw = ImageDraw.Draw(canvas)
-    body_max_lines = 1 if strip else tk["body_max_lines"]
+    body_max_lines = tk["body_max_lines"]
     body_min_size = 11
-    inner_gap = round(h * tk["type"]["gap"]) if not strip else round(h * 0.04)
+    inner_gap = round(h * tk["type"]["gap"])
     size0 = max(24, round(min(w, h) * tk["type"]["title_start"]))     # 여백이 넓어 보이지 않게 제목을 크게 시작한다(맞지 않으면 줄인다)
     def body_fit(bsize: int) -> tuple[list[str], int]:
         """본문을 bsize 로 줄바꿈한 줄들(자르지 않음)과 실제로 쓸 글자 크기. 줄 수 상한 안에 들어갈 때까지 크기를 줄이고,
@@ -805,7 +805,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
             if body:
                 bl, bs = body_fit(max(body_min_size, round(sz * tk["type"]["body_ratio"])))
                 bh += inner_gap + round(bs * lh_k) * len(bl)
-            if cta and not strip:
+            if cta:
                 bh += inner_gap + cta_h
             ok = bh <= ah and all(draw.textlength(ln, font=f) <= avail_w for ln in ls)
             if ok or sz <= min_size:
@@ -814,7 +814,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         kept = True
         if not ok and body:      # 자리가 모자라면 본문을 빼고 제목·CTA 만
             kept, bl, bs = False, [], 0
-            bh = round(sz * lh_k) * len(ls) + ((inner_gap + cta_h) if cta and not strip else 0)
+            bh = round(sz * lh_k) * len(ls) + ((inner_gap + cta_h) if cta else 0)
             ok = bh <= ah and all(draw.textlength(ln, font=f) <= avail_w for ln in ls)
         return sz, ls, bl, bs, ok, kept, bh
     size, lines, body_lines, body_size, fits, kept, block_h = fit_block(avail_h)
@@ -822,7 +822,7 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
     if top_zone:
         ty1 = ty0 + block_h                  # 위쪽 자리는 위에서부터 쌓는다
     # 4-1) 피사체 아래(top 이면 위) 자리가 모자라면(본문이 빠지거나 넘칠 때) 반대쪽 자리를 써 본다. 더 잘 들어갈 때만 옮긴다.
-    if (not fits or not kept) and side in ("bottom", "top") and not strip and subj:
+    if (not fits or not kept) and side in ("bottom", "top") and subj:
         a0, a1 = (subj[3] + gap, ty1_full) if top_zone else (ty0_full, subj[1] - gap)
         if a1 - a0 > avail_h:
             alt = fit_block(a1 - a0)
@@ -849,9 +849,9 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         report["warnings"].append(f"본문이 {body_max_lines}줄을 넘습니다 (말줄임 없이 전부 표시). 편집에서 줄이거나 본문을 끄세요")
     text_h = round(size * lh_k) * len(lines)
     body_h = (round(body_size * lh_k) * len(body_lines)) if body else 0
-    # 아래에서 위로: CTA(띠형 제외) → 본문 → 제목
+    # 아래에서 위로: CTA → 본문 → 제목
     y_cursor = ty1
-    if cta and not strip:
+    if cta:
         probe_font = ImageFont.truetype(font_path, cta_font_size)
         cw = round(draw.textlength(cta, font=probe_font) + cta_h)
         cw = min(cw, round(avail_w * 0.7)) if cw > avail_w * 0.7 else cw
@@ -864,21 +864,14 @@ def compose(bg: Image.Image, w: int, h: int, headline: str, font_path: str, logo
         y_cursor = body_box[1] - inner_gap
     ty = y_cursor - text_h
     text_box = [tx0, ty, tx1, y_cursor]
-    if strip:   # 띠형: 문구 블록을 세로 가운데로
-        shift = round((ct + cb) / 2 - (ty + y_cursor) / 2)
-        shift = max(ct - ty, min(shift, cb - y_cursor))
-        ty += shift; text_box = [tx0, ty, tx1, y_cursor + shift]
-        if body_box:
-            body_box = [body_box[0], body_box[1] + shift, body_box[2], body_box[3] + shift]
 
     # 5) 문구 색: 브랜드 텍스트색을 쓰되 대비가 부족하면 흰색/검정으로 대체
     region = canvas.crop((tx0, max(0, ty), tx1, max(ty + 1, ty1))).resize((1, 1), Image.BOX).getpixel((0, 0))
     color, fallback = pick_text_color(region, text_color_hex)
     # 5-1) 가독성 보강: 스크림은 평균을 맞출 뿐이라 사진의 밝은 조각(피부·하늘) 위에서는 글자가 묻힌다.
     #      문구 블록을 칸으로 나눠 가장 약한 칸의 대비가 4.5:1 에 못 미치거나 배경이 복잡하면, 블록 뒤에 흐린 판을 한 장 더 깐다.
-    block_bottom = y_cursor if not cta_box or strip else cta_box[3]
-    block = [min(tx0, cta_box[0] if cta_box and not strip else tx0), ty,
-             max(tx1, cta_box[2] if cta_box and not strip else tx1), block_bottom]
+    block_bottom = cta_box[3] if cta_box else y_cursor
+    block = [min(tx0, cta_box[0] if cta_box else tx0), ty, max(tx1, cta_box[2] if cta_box else tx1), block_bottom]
     tb_pad = round(size * 0.5)
     tb_box = [max(0, block[0] - tb_pad), max(0, block[1] - tb_pad), min(w, block[2] + tb_pad), min(h, block[3] + tb_pad)]
     tb_region = canvas.crop(tuple(tb_box))

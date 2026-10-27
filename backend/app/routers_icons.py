@@ -10,18 +10,11 @@ from PIL import Image
 
 from . import calllog, compose, icons, imagegen, phrases, prompts, storage
 from .models import Asset, Brand, BrandVersion, Design, GeneratedImage, IconAsset, PinSheet
-from .routers_assets import get_db
+from .routers_assets import get_db, get_design
 from .routers_review import invalidate_icon_reviews, version_icon_set
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 WEB_SIZE = (256, 256)   # 웹용 아이콘 기본 크기 (사용자 결정)
-
-
-def _design(db: Session, design_id: int) -> Design:
-    d = db.get(Design, design_id)
-    if not d:
-        raise HTTPException(404, "캠페인을 찾을 수 없습니다")
-    return d
 
 
 def _size(d: Design) -> tuple[int, int]:
@@ -136,7 +129,7 @@ def _fill(items: list[dict], more) -> list[dict]:
 
 @router.get("/designs/{design_id}/icons")
 def list_icons(design_id: int, db: Session = Depends(get_db)):
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     return [_out(a) for a in version_icon_set(db, d.brand_version_id)]
 
 
@@ -293,7 +286,7 @@ def _ensure_candidates(db, d, brand, style, forbidden, render: str) -> list[dict
 def icon_candidates(design_id: int, db: Session = Depends(get_db)):
     """아이콘 기능명 후보 목록(렌더 전, 비용 없음). 이미 렌더된 이름은 rendered=True. 후보가 없으면 제안 호출 1회로 채운다.
     사용자는 여기서 고른 것만 렌더한다(POST /icons 의 names)."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     forbidden = phrases.effective(bv, d.brief)["forbidden_phrases"]
@@ -309,7 +302,7 @@ def icon_candidates(design_id: int, db: Session = Depends(get_db)):
 def create_icons(design_id: int, names: list[str] | None = Body(None, embed=True), db: Session = Depends(get_db)):
     """아이콘 세트 생성. names 를 주면 후보 중 그 이름만 렌더한다(세트가 있으면 이어 붙임, 이미지 1개당 1장 비용).
     names 가 없으면 전처럼 후보에서 COUNT 개를 한 번에 만든다(규칙 버전당 한 세트)."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     existing = version_icon_set(db, d.brand_version_id)
     # 규칙 버전마다 한 세트만: 이미 있으면 새로 만들지 않는다 (개별 아이콘은 다시 그릴 수 있다). 고른 이름 추가는 허용
     if existing and names is None:
@@ -372,7 +365,7 @@ def reset_icons(design_id: int, db: Session = Depends(get_db)):
     """이 캠페인의 브랜드 규칙 버전에 속한 아이콘 세트(행·파일)를 지운다. 시안 이미지 초기화와는 별개다.
     세트는 규칙 버전 소유라 같은 버전을 쓰는 다른 캠페인에서도 사라진다. 기능명 후보(brief.icon_candidates)는 남겨
     다시 만들 때 제안 호출 없이 쓴다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     rows = db.scalars(select(IconAsset).where(IconAsset.brand_version_id == d.brand_version_id)).all()
     files: set[str] = set()
     for a in rows:
@@ -393,7 +386,7 @@ def reset_icons(design_id: int, db: Session = Depends(get_db)):
 def fill_icons(design_id: int, db: Session = Depends(get_db)):
     """세트가 목표 개수(10)에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 채운다.
     현재 기능명과 겹치지 않는 기능을 제안받아 같은 세트(batch)·같은 스타일로 이어서 렌더한다. 아이콘 1개당 이미지 1장 비용."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     cur = version_icon_set(db, d.brand_version_id)
     if not cur:
         raise HTTPException(409, "이 브랜드 규칙 버전에는 아직 아이콘 세트가 없습니다. 먼저 세트를 만들어 주세요.")
@@ -433,7 +426,7 @@ def fill_icons(design_id: int, db: Session = Depends(get_db)):
 @router.post("/designs/{design_id}/icons/{icon_id}/regenerate")
 def regenerate_icon(design_id: int, icon_id: int, db: Session = Depends(get_db)):
     """한 아이콘만 다시 그린다. 스타일은 세트와 동일하게(3d: 같은 스타일 블록, svg: 코드 강제) 유지한다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     a = db.get(IconAsset, icon_id)
     if not a or a.brand_version_id != d.brand_version_id:
         raise HTTPException(404, "아이콘을 찾을 수 없습니다")
@@ -518,7 +511,7 @@ def _pin_logo(db: Session, bv: BrandVersion) -> Image.Image | None:
 @router.get("/designs/{design_id}/pins")
 def list_pins(design_id: int, db: Session = Depends(get_db)):
     """이 캠페인의 핀 뱃지 세트(최근 것부터), 입력 기본값(이름 = 브랜드 이름, 단어 = 말투 설명의 첫 키워드), 고를 수 있는 주제."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     topics, source = _pin_topics(db, d, bv, phrases.effective(bv, d.brief)["forbidden_phrases"])
@@ -532,7 +525,7 @@ def list_pins(design_id: int, db: Session = Depends(get_db)):
 def create_pins(design_id: int, name: str | None = Body(None), word: str | None = Body(None),
                 topics: list[str] | None = Body(None), db: Session = Depends(get_db)):
     """핀 뱃지 세트를 만든다. topics 는 주제 후보 중 PIN_TOPICS 개(없으면 앞에서부터). 로고가 있으면 격자 렌더에 첨부한다."""
-    d = _design(db, design_id)
+    d = get_design(db, design_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     name = (name or "").strip() or brand.name

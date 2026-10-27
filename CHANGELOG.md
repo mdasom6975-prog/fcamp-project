@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### 정리·속도: 죽은 분기, 조회 함수 중복, 글자 그림자 블러
+- `compose.compose()` 의 띠 배너 분기(`strip`, 항상 False) 12곳을 지웠다. 띠 배너는 처음부터 `compose_strip` 이 그린다
+- 캠페인 조회(`_design` 6벌)·지면 최신 이미지 조회(`_latest` 3벌)를 `routers_assets.get_design(ad_only=)`·`latest_image(original_only=)` 하나로 모았다. 없는 캠페인 오류 문구는 '캠페인을 찾을 수 없습니다' / '광고 이미지 캠페인을 찾을 수 없습니다' 로 통일
+- `draw_text_soft`: 그림자 블러를 캔버스 전체가 아니라 글자 상자 + 번지는 폭만 한다. 결과 픽셀은 같고(합성 605가지 비교) 1440×1800 합성이 약 156ms → 85ms, 편집 미리보기도 같은 만큼 빨라진다
+
 ### 정리: 안 쓰는 함수와 끝난 비교 스크립트
 - 지운 함수: `icons.png_bytes`·`calllog.note_usage`(부르는 곳 없음, 채팅 토큰 기록은 `llm._note_usage`), `calllog.current_design`·`prompts.list_names`(테스트에서만 사용 — 테스트는 `calllog._design`·프롬프트 폴더 목록으로 바꿈)
 - 지운 스크립트: `backend/scripts/compare_prompts.py`(10/16 프롬프트 v1·v2 비교, `background.md` 1.1 에 반영), `backend/scripts/compare_brand_colors.py`(브랜드 색 비교, `background.md` 1.8 에 반영). README·`image/_brand_colors.md` 설명에서 경로를 뺐다
