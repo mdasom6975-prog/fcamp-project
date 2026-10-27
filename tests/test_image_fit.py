@@ -959,6 +959,10 @@ def test_composite_mode_generates_clean_background_and_pastes_original_cutout(en
     lay = rows[0]["background"]["layout"]
     assert lay["product_mode"] == "composite" and lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_slot@")
     assert lay["clean_file"] and lay["product_placed"]["box"][3] <= lay["product_placed"]["slot"][3]
+    # 프롬프트가 비운 자리 = 실제로 누끼를 붙인 상자(+여유), 상품 모양 문장이 함께 들어간다
+    from app import imagegen
+    assert all("이 자리에 놓일 상품은" in p for p in prompts)
+    assert any(imagegen.product_slot_vars(lay["template"], lay["product_placed"])["slot"] in p for p in prompts)
     with env["Local"]() as db:
         comp_path = db.get(env["models"].GeneratedImage, rows[0]["background"]["id"]).file_path
     comp = Image.open(storage.local(comp_path)).convert("RGB")

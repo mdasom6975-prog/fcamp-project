@@ -264,9 +264,12 @@ def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False,
     product_img, product_id = _product_image(db, d)
     pmode = imagegen.product_mode(product_img) if imagegen.PROVIDER == "openai" else None
     composite = pmode == "composite"
+    # 합성 방식이면 생성 크기(_generate_one 과 같은 값)에서 누끼가 실제로 놓일 상자를 미리 계산해 그 자리만 비우게 한다
+    gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
+    placed = compose.product_box(gw, gh, product_img, template) if composite else None
     prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
                                    product=product_img is not None, variant=variant, composite=composite,
-                                   colors=bv.colors)
+                                   colors=bv.colors, placed=placed)
     if variant:
         prompt = imagegen.build_variant_prompt(prompt)
     return {"prompt": prompt, "style": style, "reason": reason, "single": single, "product_img": product_img,

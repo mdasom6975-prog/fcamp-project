@@ -176,19 +176,21 @@ def trim_cutout(product: Image.Image) -> Image.Image:
 def product_box(W: int, H: int, product: Image.Image, template: str) -> dict:
     """(W, H) 캔버스에서 제품 누끼가 실제로 놓일 상자. 제품 구역(PRODUCT_SLOT)에 비율을 지켜 맞추되 PRODUCT_MAX_UPSCALE 까지만
     키우고, 세로형·정사각은 구역 아랫변에 발을 붙이고 가로형은 구역 가운데에 둔다. paste_product 와 배경 프롬프트가 같은 값을 쓴다.
-    반환: {slot, box, scale, src}. slot·box 는 픽셀 (x0, y0, x1, y1), src 는 여백을 잘라낸 누끼의 픽셀 크기 [w, h]."""
+    반환: {slot, box, scale, src, canvas}. slot·box 는 픽셀 (x0, y0, x1, y1), src 는 여백을 잘라낸 누끼의 픽셀 크기 [w, h],
+    canvas 는 계산에 쓴 캔버스 크기 [W, H]."""
     prod = trim_cutout(product)
     sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(PRODUCT_SLOT[template], (W, H, W, H)))
     s = min((sx1 - sx0) / prod.width, (sy1 - sy0) / prod.height, PRODUCT_MAX_UPSCALE)
     pw, ph = max(1, round(prod.width * s)), max(1, round(prod.height * s))
     x = sx0 + (sx1 - sx0 - pw) // 2
     y = sy1 - ph if template != HORIZONTAL else sy0 + (sy1 - sy0 - ph) // 2
-    return {"slot": [sx0, sy0, sx1, sy1], "box": [x, y, x + pw, y + ph], "scale": round(s, 3), "src": [prod.width, prod.height]}
+    return {"slot": [sx0, sy0, sx1, sy1], "box": [x, y, x + pw, y + ph], "scale": round(s, 3), "src": [prod.width, prod.height],
+            "canvas": [W, H]}
 
 
 def paste_product(bg: Image.Image, product: Image.Image, template: str) -> tuple[Image.Image, dict]:
     """생성된 빈 배경 위에 제품 누끼 원본을 그대로(AI 재생성 없이) 붙인다. 위치·크기는 product_box,
-    발밑에 접지 그림자를 깐다. 반환: (합성 이미지 RGB, 기록용 {slot, box, scale, src})."""
+    발밑에 접지 그림자를 깐다. 반환: (합성 이미지 RGB, 기록용 {slot, box, scale, src, canvas})."""
     bg = bg.convert("RGB")
     W, H = bg.size
     placed = product_box(W, H, product, template)

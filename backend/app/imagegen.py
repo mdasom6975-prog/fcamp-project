@@ -215,7 +215,7 @@ def people_vars(style: str) -> dict:
 
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
                  single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
-                 colors: list[dict] | None = None) -> str:
+                 colors: list[dict] | None = None, placed: dict | None = None) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
@@ -227,6 +227,7 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     그 자리에 그대로 붙이므로 참조 이미지로 첨부하지 않는다(product 는 무시).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
     colors 는 브랜드 허용 색상(BrandVersion.colors). 주면 [브랜드 톤] 뒤에 [브랜드 색] 문장이 붙는다(brand_color_line).
+    placed 는 생성 크기 기준 compose.product_box 결과. composite 일 때 주면 고정 구역 대신 누끼가 실제로 놓일 자리만 비운다(product_slot_vars).
     """
     style = style or pick_style(tone, brief)[0]
     if style not in STYLES:
@@ -242,13 +243,35 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                           tone=tone.get("description") or "지정 없음", composition=composition, style=style_text,
                           brand_colors=brand_color_line(colors), **people_vars(style))
     if composite:
-        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
-        text = prompts.render("image/product_slot",
-                              slot=f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", base=text, people=people_vars(style)["people"])
+        text = prompts.render("image/product_slot", base=text, people=people_vars(style)["people"],
+                              **product_slot_vars(template, placed))
     elif product:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
     return text
+
+
+SLOT_MARGIN = 0.03    # 누끼 상자 바깥으로 더 비워 두는 여유(캔버스 대비, 사방). 접지 그림자·가장자리 소품 겹침 방지
+
+
+def product_slot_vars(template: str, placed: dict | None = None) -> dict:
+    """product_slot.md 의 {{slot}}·{{shape}}. placed(compose.product_box 결과)가 있으면 누끼가 실제로 놓일 상자에 사방 SLOT_MARGIN 을
+    더한 자리와 상품 모양·바닥 높이를, 없으면 비율군 고정 구역(compose.PRODUCT_SLOT)과 빈 shape 를 준다.
+    길쭉한 병이나 저해상도 누끼는 고정 구역의 일부만 차지하므로, 실제 자리만 비워야 나머지가 빈 받침으로 남지 않는다."""
+    if not placed:
+        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
+        return {"slot": f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", "shape": ""}
+    W, H = placed["canvas"]
+    bx0, by0, bx1, by1 = placed["box"]
+    x0, y0 = max(0.0, bx0 / W - SLOT_MARGIN), max(0.0, by0 / H - SLOT_MARGIN)
+    x1, y1 = min(1.0, bx1 / W + SLOT_MARGIN), min(1.0, by1 / H + SLOT_MARGIN)
+    r = (bx1 - bx0) / max(1, by1 - by0)
+    kind = "세로로 긴 물건" if r < 0.8 else "가로로 넓은 물건" if r > 1.25 else "정사각에 가까운 물건"
+    ratio = f"1:{1 / r:.1f}" if r < 1 else f"{r:.1f}:1"
+    shape = (f" 이 자리에 놓일 상품은 {kind}(가로:세로 {ratio})으로, 화면 가로의 약 {round((bx1 - bx0) / W * 100)}%, "
+             f"세로의 약 {round((by1 - by0) / H * 100)}%를 차지하며 바닥이 세로 {round(by1 / H * 100)}% 높이에 닿는다. "
+             "받침의 윗면은 그 높이에 맞추고, 이 자리 바깥은 비워 두지 말고 [장면]의 공간·소품으로 자연스럽게 채운다.")
+    return {"slot": f"가로 {round(x0 * 100)}~{round(x1 * 100)}%, 세로 {round(y0 * 100)}~{round(y1 * 100)}%", "shape": shape}
 
 
 def prompt_blocks(text: str) -> list[dict]:

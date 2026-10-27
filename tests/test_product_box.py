@@ -32,3 +32,19 @@ def test_small_cutout_is_capped_by_max_upscale():
     x0, y0, x1, y1 = p["box"]
     assert p["scale"] == compose.PRODUCT_MAX_UPSCALE and (x1 - x0, y1 - y0) == (180, 240)
     assert y1 == p["slot"][3], "작아도 받침(구역 아랫변)에 발을 붙인다"
+
+
+def test_prompt_slot_follows_cutout_box():
+    """배경 프롬프트가 비우는 자리 = 실제로 붙일 상자 + 사방 SLOT_MARGIN. 누끼 정보가 없으면 예전 고정 구역."""
+    from app import imagegen
+    prod = _cutout(400, 1600, (0, 0, 399, 1599))
+    p = compose.product_box(1024, 1536, prod, "세로형")
+    v = imagegen.product_slot_vars("세로형", p)
+    x0, y0, x1, y1 = p["box"]
+    m = imagegen.SLOT_MARGIN
+    assert v["slot"] == (f"가로 {round((x0 / 1024 - m) * 100)}~{round((x1 / 1024 + m) * 100)}%, "
+                         f"세로 {round((y0 / 1536 - m) * 100)}~{round((y1 / 1536 + m) * 100)}%")
+    assert "세로로 긴 물건(가로:세로 1:4.0)" in v["shape"] and f"세로 {round(y1 / 1536 * 100)}% 높이" in v["shape"]
+    assert imagegen.product_slot_vars("세로형") == {"slot": "가로 14~86%, 세로 6~66%", "shape": ""}
+    wide = imagegen.product_slot_vars("가로형", compose.product_box(1536, 1024, _cutout(900, 300, (0, 0, 899, 299)), "가로형"))
+    assert "가로로 넓은 물건(가로:세로 3.0:1)" in wide["shape"]

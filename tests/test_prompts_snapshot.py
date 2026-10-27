@@ -212,6 +212,17 @@ def test_background_product_slot_prompt():
     _assert_snapshot("image__product_slot_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
 
 
+def test_background_product_slot_prompt_sized_to_cutout():
+    """누끼 크기를 알면 고정 구역 대신 누끼가 실제로 놓일 자리(compose.product_box + 사방 3%)만 비우고 모양을 알려 준다."""
+    from PIL import Image
+    from app import compose, imagegen
+    tall = Image.new("RGBA", (300, 900), (10, 120, 200, 255))      # 1:3 길쭉한 병
+    placed = compose.product_box(1024, 1536, tall, "세로형")
+    text = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", "실사 제품·공간", product=True, composite=True,
+                                 placed=placed)
+    _assert_snapshot("image__product_slot_placed_세로형", text + "\n")
+
+
 @pytest.mark.parametrize("style", ["실사 인물", "실사 제품·공간", "플랫 일러스트", "3D 렌더", "그래픽 패턴"])
 def test_no_people_styles_forbid_people_everywhere(style):
     """사람 없는 형태는 어디에서도 사람이 있다는 전제를 두지 않고, 금지를 끝에서 한 번 더 말한다(시안 12: 실사 제품·공간에 인물)."""
