@@ -777,7 +777,7 @@ def test_generate_background_dispatches_by_provider(monkeypatch):
     from app import imagegen
     monkeypatch.setattr(imagegen, "usage", lambda provider=None: {"exhausted": False})
     monkeypatch.setattr(imagegen, "_generate_cloudflare", lambda prompt: _scene(1024, 1024))
-    monkeypatch.setattr(imagegen, "_generate_openai", lambda prompt, size, quality, model, **_: _scene(*map(int, size.split("x"))))
+    monkeypatch.setattr(imagegen, "_generate_openai", lambda prompt, size, quality, model: _scene(*map(int, size.split("x"))))
     assert imagegen.generate_background("p", 1536, 1024, provider="cloudflare").size == (1024, 1024)
     assert imagegen.generate_background("p", 1536, 1024, provider="openai").size == (1536, 1024)
     monkeypatch.setattr(imagegen, "PROVIDER", "openai")

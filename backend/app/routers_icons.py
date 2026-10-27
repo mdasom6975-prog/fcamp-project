@@ -488,44 +488,50 @@ def icon_source(icon_id: int, db: Session = Depends(get_db)):
     return storage.response(a.source_path, "image/png")
 
 
-# ---- 핀 뱃지 세트 ---- 4:5 한 장에 에나멜 핀 8개(로고 중간 1 · 단어 작은 1 · 이름 작은 1 · 관심 주제 5). 이미지 1장 비용
+# ---- 핀 뱃지 세트 ---- 아이콘 격자와 같은 방식: 4×2 격자 1장(투명)에 핀 8개(로고 · 단어 · 이름 · 아이콘 세트 주제 5)를 그려
+# 알파 덩어리로 잘라 쓰고, 4:5 시트는 잘라낸 핀으로 코드가 배치한다. 격자 1장 + 못 잘라낸 칸만 1장씩 비용
 def _pin_out(p: PinSheet) -> dict:
-    return {"id": p.id, "width": p.width, "height": p.height, "meta": p.meta, "created_at": p.created_at.isoformat()}
+    m = p.meta or {}
+    pins = [{k: v for k, v in x.items() if k != "path"} for x in m.get("pins") or []]
+    return {"id": p.id, "width": p.width, "height": p.height, "created_at": p.created_at.isoformat(),
+            "meta": {k: v for k, v in m.items() if k not in ("pins", "source_path")}, "pins": pins}
 
 
-def _pin_refs(db: Session, d: Design, bv: BrandVersion) -> tuple[Image.Image | None, Image.Image | None]:
-    """첨부할 (상품 사진, 로고). images.edit 을 못 쓰는 공급자거나 파일이 없으면 None. 사진은 흰 바탕에 얹어 불투명으로 보낸다."""
-    if not imagegen.can_edit():
-        return None, None
-    photo = logo = None
-    pa = db.get(Asset, (d.brief or {}).get("product_image_asset_id") or 0)
-    if pa and storage.exists(pa.file_path):
-        im = Image.open(storage.local(pa.file_path)).convert("RGBA")
-        im.thumbnail((1024, 1024), Image.LANCZOS)
-        photo = Image.new("RGB", im.size, (255, 255, 255))
-        photo.paste(im, (0, 0), im)
+def _pin_topics(db: Session, d: Design, bv: BrandVersion, forbidden: list[str]) -> tuple[list[dict], str]:
+    """핀 주제 후보: 이 규칙 버전의 아이콘 세트(순서대로). 세트가 없으면 브리프의 기능명 후보(비용 없음, 제안 호출은 하지 않는다)."""
+    done = version_icon_set(db, bv.id)
+    if done:
+        return [{"name": a.name, "concept": a.concept or ""} for a in done], "icons"
+    return [{"name": c["name"], "concept": str(c.get("concept") or "")} for c in _dedupe(_candidates_from_brief(d, forbidden))], "candidates"
+
+
+def _pin_logo(db: Session, bv: BrandVersion) -> Image.Image | None:
+    """로고 핀에 첨부할 브랜드 로고. images.edit 을 못 쓰는 공급자거나 파일이 없으면 None(모노그램으로 대신)."""
     la = db.get(Asset, bv.logo_asset_id or 0)
-    if la and storage.exists(la.file_path):
-        logo = compose.load_logo(la.file_path, la.mime)
-        logo.thumbnail((1024, 1024), Image.LANCZOS)
-    return photo, logo
+    if not imagegen.can_edit() or not la or not storage.exists(la.file_path):
+        return None
+    logo = compose.load_logo(la.file_path, la.mime)
+    logo.thumbnail((1024, 1024), Image.LANCZOS)
+    return logo
 
 
 @router.get("/designs/{design_id}/pins")
 def list_pins(design_id: int, db: Session = Depends(get_db)):
-    """이 캠페인의 핀 뱃지 세트(최근 것부터)와 입력 기본값(이름 = 브랜드 이름, 단어 = 말투 설명의 첫 키워드)."""
+    """이 캠페인의 핀 뱃지 세트(최근 것부터), 입력 기본값(이름 = 브랜드 이름, 단어 = 말투 설명의 첫 키워드), 고를 수 있는 주제."""
     d = _design(db, design_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
+    topics, source = _pin_topics(db, d, bv, phrases.effective(bv, d.brief)["forbidden_phrases"])
     rows = db.scalars(select(PinSheet).where(PinSheet.design_id == d.id).order_by(PinSheet.id.desc())).all()
     return {"pins": [_pin_out(p) for p in rows], "defaults": {"name": brand.name, "word": icons.pin_word_default(bv.voice)},
-            "has_logo": bool(bv.logo_asset_id), "has_photo": bool((d.brief or {}).get("product_image_asset_id")),
-            "size": list(icons.PIN_OUT)}
+            "topics": topics, "topic_source": source, "topic_count": icons.PIN_TOPICS, "has_logo": bool(bv.logo_asset_id),
+            "grid": f"{icons.PIN_COLS}x{icons.PIN_ROWS}", "size": list(icons.PIN_SHEET)}
 
 
 @router.post("/designs/{design_id}/pins")
-def create_pins(design_id: int, name: str | None = Body(None), word: str | None = Body(None), db: Session = Depends(get_db)):
-    """핀 뱃지 세트 1장을 만든다. 로고·상품 사진이 있으면 참조 이미지로 붙인다(images.edit, [사진, 로고] 순서)."""
+def create_pins(design_id: int, name: str | None = Body(None), word: str | None = Body(None),
+                topics: list[str] | None = Body(None), db: Session = Depends(get_db)):
+    """핀 뱃지 세트를 만든다. topics 는 주제 후보 중 PIN_TOPICS 개(없으면 앞에서부터). 로고가 있으면 격자 렌더에 첨부한다."""
     d = _design(db, design_id)
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
@@ -539,31 +545,76 @@ def create_pins(design_id: int, name: str | None = Body(None), word: str | None 
     hit = [p for p in forbidden if p and (p in name or p in word)]
     if hit:
         raise HTTPException(400, f"금지 표현이 들어 있습니다: {hit}")
-    photo, logo = _pin_refs(db, d, bv)
-    photo_n = 1 if photo is not None else None
-    logo_n = (2 if photo is not None else 1) if logo is not None else None
-    prompt = icons.pin_prompt(name, word, brand.description, d.brief or {}, bv.voice, bv.image_tone, bv.colors,
-                              forbidden, logo_n, photo_n)
-    model = imagegen.settings_for(d.brief)["model"]
-    w, h = icons.PIN_GEN
+    avail, source = _pin_topics(db, d, bv, forbidden)
+    by_name = {t["name"]: t for t in avail}
+    picked = list(dict.fromkeys(str(t).strip() for t in topics if str(t).strip())) if topics is not None else list(by_name)[:icons.PIN_TOPICS]
+    if len(avail) < icons.PIN_TOPICS:
+        raise HTTPException(400, f"핀 주제로 쓸 아이콘(또는 기능명 후보)이 {icons.PIN_TOPICS}개 이상 필요합니다. 아이콘 세트를 먼저 만들어 주세요")
+    unknown = [t for t in picked if t not in by_name]
+    if unknown:
+        raise HTTPException(400, f"아이콘 세트에 없는 주제입니다: {unknown}")
+    if len(picked) != icons.PIN_TOPICS:
+        raise HTTPException(400, f"주제를 {icons.PIN_TOPICS}개 골라 주세요 (지금 {len(picked)}개)")
+
+    logo = _pin_logo(db, bv)
+    sv = icons.pin_style_vars(bv.colors, bv.image_tone)
+    cells = icons.pin_cells(name, word, [(t, by_name[t]["concept"]) for t in picked], logo is not None)
+    labels = ["로고", word, name] + picked
+    prompt = icons.pin_grid_prompt(name, cells, sv, forbidden)
+    w, h = (int(v) for v in icons.PIN_GRID_SIZE.split("x"))
+
+    def render(pr: str, with_logo: bool, size: str):
+        if with_logo:
+            pw, ph = (int(v) for v in size.split("x"))
+            return imagegen.generate_variant(pr, pw, ph, None, quality=icons.QUALITY_3D, model=icons.MODEL_3D,
+                                             product=logo, kind="pin", transparent=True)
+        return imagegen.generate_transparent(pr, icons.MODEL_3D, icons.QUALITY_3D, kind="pin", size=size)
+
     try:
-        if photo is not None or logo is not None:
-            im = imagegen.generate_variant(prompt, w, h, photo, model=model, product=logo, kind="pin")
-        else:
-            im = imagegen.generate_background(prompt, w, h, model=model, kind="pin")
+        grid = render(prompt, logo is not None, icons.PIN_GRID_SIZE)
     except imagegen.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except Exception as e:
         raise HTTPException(502, f"핀 뱃지 생성에 실패했습니다 ({type(e).__name__})")
-    out = icons.crop_pin_sheet(im)
-    path = storage.put_image(f"pins_{uuid.uuid4().hex[:10]}.png", out)
-    p = PinSheet(design_id=d.id, brand_version_id=bv.id, file_path=path, width=out.width, height=out.height, prompt=prompt,
-                 meta={"name": name, "word": word, "logo": logo is not None, "photo": photo is not None, "model": model,
-                       "quality": imagegen.OPENAI_QUALITY, "prompt_ref": prompts.ref("icons/pin_badges"),
-                       "generated_size": [im.width, im.height]})
+    pieces, info = icons.split_blobs(grid, icons.PIN_COLS, icons.PIN_ROWS, icons.PIN_COUNT)
+    failed = [i for i, p in enumerate(pieces) if p is None]
+    retried: list[int] = []
+    if 0 < len(failed) <= icons.PIN_MAX_RETRY:     # 격자에서 못 건진 핀만 1장씩 다시 그린다(로고 핀은 로고 첨부)
+        jobs = [(icons.pin_one_prompt(name, cells[i], sv, forbidden), i == 0 and logo is not None) for i in failed]
+        for i, res in zip(failed, icons.render_many(jobs, lambda job: render(job[0], job[1], imagegen.OPENAI_SIZE))):
+            if not isinstance(res, Exception):
+                pieces[i] = res
+                retried.append(i + 1)
+    if all(p is None for p in pieces):
+        raise HTTPException(502, "격자에서 핀을 잘라내지 못했습니다. 다시 만들어 주세요")
+
+    uid = uuid.uuid4().hex[:10]
+    src = storage.put_image(f"pins_{uid}_grid.png", grid)
+    pins = []
+    for k, (piece, kind, label) in enumerate(zip(pieces, icons.PIN_KINDS, labels), 1):
+        if piece is None:
+            pins.append({"slot": k, "kind": kind, "label": label, "missing": True})
+            continue
+        im = icons.trim_alpha(piece)
+        pins.append({"slot": k, "kind": kind, "label": label, "path": storage.put_image(f"pins_{uid}_{k}.png", im),
+                     "width": im.width, "height": im.height, "retried": k in retried})
+    bg = next((c["hex"] for c in (bv.colors or []) if c.get("role") == "배경색" and c.get("hex")), None)
+    sheet = icons.compose_pin_sheet(pieces, bg)
+    p = PinSheet(design_id=d.id, brand_version_id=bv.id, file_path=storage.put_image(f"pins_{uid}.png", sheet),
+                 width=sheet.width, height=sheet.height, prompt=prompt,
+                 meta={"name": name, "word": word, "topics": picked, "topic_source": source, "logo": logo is not None,
+                       "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "grid": f"{icons.PIN_COLS}x{icons.PIN_ROWS}",
+                       "prompt_ref": prompts.ref("icons/pin_grid"), "style_ref": prompts.ref("icons/_pin_style"),
+                       "method": info["method"], "blobs": info["blobs"], "retried": retried,
+                       "missing": [x["label"] for x in pins if x.get("missing")], "source_path": src, "pins": pins})
     db.add(p)
     db.commit()
     return _pin_out(p)
+
+
+def _pin_files(p: PinSheet) -> list[str]:
+    m = p.meta or {}
+    return [f for f in [p.file_path, m.get("source_path")] + [x.get("path") for x in m.get("pins") or []] if f]
 
 
 @router.delete("/designs/{design_id}/pins/{pin_id}")
@@ -571,7 +622,8 @@ def delete_pin(design_id: int, pin_id: int, db: Session = Depends(get_db)):
     p = db.get(PinSheet, pin_id)
     if not p or p.design_id != design_id:
         raise HTTPException(404, "핀 뱃지 세트를 찾을 수 없습니다")
-    storage.delete(p.file_path)
+    for f in _pin_files(p):
+        storage.delete(f)
     db.delete(p)
     db.commit()
     return {"deleted": pin_id}
@@ -579,7 +631,28 @@ def delete_pin(design_id: int, pin_id: int, db: Session = Depends(get_db)):
 
 @router.get("/pins/{pin_id}/png")
 def pin_png(pin_id: int, db: Session = Depends(get_db)):
+    """4:5 시트(잘라낸 핀을 배치한 것)."""
     p = db.get(PinSheet, pin_id)
     if not p or not storage.exists(p.file_path):
         raise HTTPException(404, "핀 뱃지 세트를 찾을 수 없습니다")
     return storage.response(p.file_path, "image/png")
+
+
+@router.get("/pins/{pin_id}/grid")
+def pin_grid_png(pin_id: int, db: Session = Depends(get_db)):
+    """격자 원본(투명 PNG, 1536×1024)."""
+    p = db.get(PinSheet, pin_id)
+    path = (p.meta or {}).get("source_path") if p else None
+    if not path or not storage.exists(path):
+        raise HTTPException(404, "격자 원본이 없습니다")
+    return storage.response(path, "image/png")
+
+
+@router.get("/pins/{pin_id}/pieces/{slot}")
+def pin_piece_png(pin_id: int, slot: int, db: Session = Depends(get_db)):
+    """잘라낸 핀 1개(투명 PNG). slot 은 칸 순서(1 로고, 2 단어, 3 이름, 4~8 주제)."""
+    p = db.get(PinSheet, pin_id)
+    x = next((x for x in ((p.meta or {}).get("pins") or []) if x.get("slot") == slot), None) if p else None
+    if not x or not x.get("path") or not storage.exists(x["path"]):
+        raise HTTPException(404, "핀을 찾을 수 없습니다")
+    return storage.response(x["path"], "image/png")

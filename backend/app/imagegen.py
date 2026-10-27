@@ -328,8 +328,8 @@ def _openai_png(prompt: str, model: str, quality: str, size: str = OPENAI_SIZE, 
 
 
 def _generate_openai(prompt: str, size: str = OPENAI_SIZE, quality: str = OPENAI_QUALITY,
-                     model: str = OPENAI_MODEL, kind: str = "background") -> Image.Image:
-    return Image.open(io.BytesIO(_openai_png(prompt, model, quality, size=size, kind=kind))).convert("RGB")
+                     model: str = OPENAI_MODEL) -> Image.Image:
+    return Image.open(io.BytesIO(_openai_png(prompt, model, quality, size=size))).convert("RGB")
 
 
 def pricing_rate() -> float:
@@ -440,10 +440,12 @@ def _is_fidelity_error(e: Exception) -> bool:
 
 def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
                      quality: str = OPENAI_QUALITY, model: str | None = None,
-                     product: Image.Image | None = None, kind: str | None = None) -> Image.Image:
+                     product: Image.Image | None = None, kind: str | None = None,
+                     transparent: bool = False) -> Image.Image:
     """참조 이미지와 같은 장면을 (w, h) 크기·다른 구도로 다시 만든다 (OpenAI images.edit). 비용·한도는 생성 1장과 같다.
     reference 는 다른 비율군의 배경(없으면 None), product 는 제품 누끼 이미지(투명 PNG, 없으면 None).
-    둘 다 주면 [배경, 제품] 순서로 첨부한다. 하나는 있어야 한다. kind 는 호출 기록용(없으면 variant/product)."""
+    둘 다 주면 [배경, 제품] 순서로 첨부한다. 하나는 있어야 한다. kind 는 호출 기록용(없으면 variant/product).
+    transparent 면 투명 배경 PNG(RGBA)로 받는다(핀 뱃지 격자: 로고를 첨부하면서 잘라 쓸 알파가 필요하다)."""
     import openai
     if usage("openai")["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
@@ -458,12 +460,13 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
         raise ValueError("참조 이미지나 제품 이미지가 필요합니다")
     model = model or OPENAI_MODEL
     extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and fidelity_supported(model)) else {}
+    alpha = {"background": "transparent", "output_format": "png"} if transparent else {}
     def _edit(**kw):
         k = kind or ("variant" if reference is not None else "product")
         with calllog.timed("images.edit", k, "openai", model, size=f"{w}x{h}", quality=quality) as info:
             info["prompt_text"] = {"prompt": prompt}
             r = client().with_options(timeout=240.0, max_retries=0).images.edit(
-                model=model, image=files if len(files) > 1 else files[0], prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
+                model=model, image=files if len(files) > 1 else files[0], prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **alpha, **kw)
             calllog.note_image_usage(info, r)
             return r
     try:
@@ -482,12 +485,12 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
             raise QuotaExceeded("OpenAI 크레딧(결제 한도)이 부족합니다. OpenAI 결제 설정을 확인해 주세요")
         raise QuotaExceeded("OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요")
     _bump(provider="openai")
-    return Image.open(io.BytesIO(base64.b64decode(r.data[0].b64_json))).convert("RGB")
+    return Image.open(io.BytesIO(base64.b64decode(r.data[0].b64_json))).convert("RGBA" if transparent else "RGB")
 
 
 def generate_background(prompt: str, w: int, h: int, quality: str = OPENAI_QUALITY,
-                        model: str | None = None, provider: str | None = None, kind: str = "background") -> Image.Image:
-    """공급자별 생성. kind 는 호출 기록용(OpenAI, 핀 뱃지는 'pin'). (w, h) 는 생성 크기(size_for 결과). 지면 비율의 나머지 차이는 compose.cover_crop 이 맞춘다.
+                        model: str | None = None, provider: str | None = None) -> Image.Image:
+    """공급자별 생성. (w, h) 는 생성 크기(size_for 결과). 지면 비율의 나머지 차이는 compose.cover_crop 이 맞춘다.
     quality·model 은 OpenAI 에만 적용된다(FLUX 는 품질 단계·크기 지정이 없어 정사각으로 나온다). provider 기본은 PROVIDER."""
     provider = (provider or PROVIDER).strip().lower()
     if provider not in ("openai", "cloudflare"):
@@ -495,5 +498,5 @@ def generate_background(prompt: str, w: int, h: int, quality: str = OPENAI_QUALI
     if usage(provider)["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
                             "한도를 올리려면 IMAGE_DAILY_LIMIT 을 조정하세요")
-    return (_generate_openai(prompt, f"{w}x{h}", quality, model or OPENAI_MODEL, kind=kind) if provider == "openai"
+    return (_generate_openai(prompt, f"{w}x{h}", quality, model or OPENAI_MODEL) if provider == "openai"
             else _generate_cloudflare(prompt))

@@ -144,17 +144,21 @@ def test_icon3d_render_prompt_minimal():
     _assert_snapshot("icons3d__render_minimal", icons.render_prompt("보관함", "", vars) + "\n")
 
 
-def test_pin_badges_prompt():
-    """핀 뱃지 세트: 상품 사진(1번)·로고(2번) 첨부."""
+def test_pin_grid_prompt():
+    """핀 뱃지 격자: 로고 첨부 + 단어·이름 + 아이콘 주제 5개."""
     from app import icons
-    _assert_snapshot("pins__badges", icons.pin_prompt("쿠챠", "호기심", BRAND["description"], BRIEF, BRAND["voice"],
-                                                     BRAND["image_tone"], BRAND["colors"], ["최저가"], 2, 1) + "\n")
+    sv = icons.pin_style_vars(BRAND["colors"], BRAND["image_tone"])
+    topics = [("보관함", "뚜껑이 살짝 열린 둥근 상자"), ("선물", "리본을 묶은 작은 상자"), ("알림", "둥근 종"),
+              ("수집", "캡슐 세 개가 담긴 진열장"), ("공개", "반쯤 열린 캡슐")]
+    cells = icons.pin_cells("쿠챠", "호기심", topics, has_logo=True)
+    _assert_snapshot("pins__grid", icons.pin_grid_prompt("쿠챠", cells, sv, ["최저가"]) + "\n")
 
 
-def test_pin_badges_prompt_minimal():
-    """로고·사진·브랜드 색·톤이 없을 때의 분기(모노그램 로고 핀, '없음')."""
+def test_pin_one_prompt_minimal():
+    """핀 1개 다시 그리기 + 로고·브랜드 색·톤이 없을 때의 분기(모노그램, '지정 없음')."""
     from app import icons
-    _assert_snapshot("pins__badges_minimal", icons.pin_prompt("쿠챠", "호기심", "", BRIEF_MIN, {}, {}, [], [], None, None) + "\n")
+    cell = icons.pin_cells("쿠챠", "호기심", [("a", "")] * 5, has_logo=False)[0]
+    _assert_snapshot("pins__one_minimal", icons.pin_one_prompt("쿠챠", cell, icons.pin_style_vars([], {}), []) + "\n")
 
 
 # ---- 배경 이미지 (imagegen) ----

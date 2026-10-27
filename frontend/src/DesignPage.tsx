@@ -113,6 +113,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
   const [iconKey] = useState(0)      // 아이콘 세트를 지운 뒤 패널 다시 불러오기
+  const [iconCount, setIconCount] = useState(0)   // 아이콘 세트 개수가 바뀌면 핀 뱃지 주제를 다시 불러온다
   const [lightbox, setLightbox] = useState(false)   // 카드를 누르면 크게 보기(스크롤 없이)
 
   const loadImgs = useCallback(() =>
@@ -465,8 +466,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
           </div>}
 
           {view === 'icons' && <IconPanel key={iconKey} designId={designId} versionNo={versionNo} ask
-            ready={groups.some((g) => imgs[g.preset_id]?.composite)} />}
-          {view === 'icons' && <PinPanel designId={designId} />}
+            ready={groups.some((g) => imgs[g.preset_id]?.composite)} onCount={setIconCount} />}
+          {view === 'icons' && <PinPanel designId={designId} iconCount={iconCount} />}
 
           {view !== 'icons' && <div className="pick-bar">
             <span className="pick-text">
@@ -760,7 +761,7 @@ type IconItem = {
   violations: { detail: string }[]
 }
 
-function IconPanel({ designId, versionNo, ready, ask }: { designId: number; versionNo: number | null; ready: boolean; ask: boolean }) {
+function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: number; versionNo: number | null; ready: boolean; ask: boolean; onCount?: (n: number) => void }) {
   const [items, setItems] = useState<IconItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [want, setWant] = useState(false)      // 아이콘도 생성할지 여부
@@ -845,6 +846,7 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
     fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
   }, [designId])
+  useEffect(() => { if (loaded) onCount?.(items.length) }, [loaded, items.length, onCount])
 
   const generate = async () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner,
     { sketch: await sketchCands(target) })
@@ -1011,34 +1013,48 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   )
 }
 
-type PinItem = { id: number; width: number; height: number; created_at: string
-  meta: { name: string; word: string; logo: boolean; photo: boolean; model?: string; quality?: string } }
+type PinPiece = { slot: number; kind: 'logo' | 'word' | 'name' | 'topic'; label: string; width?: number; height?: number; missing?: boolean; retried?: boolean }
+type PinItem = { id: number; width: number; height: number; created_at: string; pins: PinPiece[]
+  meta: { name: string; word: string; topics: string[]; logo: boolean; model?: string; quality?: string; grid?: string; retried?: number[]; missing?: string[] } }
+type PinTopic = { name: string; concept: string }
 
-// 핀 뱃지 세트: 4:5 한 장에 에나멜 핀 8개 — 로고(중간) · 브랜드를 표현하는 단어 · 브랜드 이름(작은 핀) + 관심 주제 5개. 1장당 이미지 1장 비용
-function PinPanel({ designId }: { designId: number }) {
+// 핀 뱃지 세트: 아이콘 격자와 같은 방식 — 4×2 격자 1장(투명)에 핀 8개(로고 · 단어 · 이름 · 아이콘 세트 주제 5)를 그려 잘라 쓰고,
+// 잘라낸 핀으로 4:5 시트를 배치한다. 격자 1장 + 못 잘라낸 칸만 1장씩 비용. iconCount 가 바뀌면(아이콘 세트 생성·채우기) 주제를 다시 불러온다
+function PinPanel({ designId, iconCount }: { designId: number; iconCount?: number }) {
   const [pins, setPins] = useState<PinItem[]>([])
-  const [info, setInfo] = useState<{ has_logo: boolean; has_photo: boolean } | null>(null)
+  const [info, setInfo] = useState<{ has_logo: boolean; grid: string; topic_source: string; topic_count: number } | null>(null)
+  const [topics, setTopics] = useState<PinTopic[]>([])
+  const [picked, setPicked] = useState<string[]>([])
   const [name, setName] = useState('')
   const [word, setWord] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [fresh, setFresh] = useState<number | null>(null)
+  const need = info?.topic_count ?? 5
 
   useEffect(() => {
     fetch(`/api/designs/${designId}/pins`).then((r) => r.json()).then((j) => {
       if (!Array.isArray(j?.pins)) return
-      setPins(j.pins); setInfo({ has_logo: j.has_logo, has_photo: j.has_photo })
-      setName(j.defaults?.name ?? ''); setWord(j.defaults?.word ?? '')
+      setPins(j.pins); setInfo({ has_logo: j.has_logo, grid: j.grid, topic_source: j.topic_source, topic_count: j.topic_count })
+      const list: PinTopic[] = j.topics ?? []
+      setTopics(list)
+      // 고른 주제가 아직 목록에 있으면 유지하고, 아니면 앞에서부터 채운다
+      setPicked((p) => {
+        const keep = p.filter((n) => list.some((t) => t.name === n))
+        return keep.length === j.topic_count ? keep : list.slice(0, j.topic_count).map((t) => t.name)
+      })
+      setName((v) => v || (j.defaults?.name ?? '')); setWord((v) => v || (j.defaults?.word ?? ''))
     }).catch(() => undefined)
-  }, [designId])
+  }, [designId, iconCount])
 
-  const make = () => overlay.run('핀 뱃지 세트 만드는 중… 핀 8개를 한 장에 그립니다 (30초~1분)', makeInner, {
-    sketch: [{ name: '로고', concept: '중간 핀' }, { name: word || '단어', concept: '작은 핀' }, { name: name || '이름', concept: '작은 핀' },
-      ...Array.from({ length: 5 }, (_, i) => ({ name: `관심 주제 ${i + 1}`, concept: '그림 핀' }))] })
+  const toggle = (n: string) => setPicked((p) => (p.includes(n) ? p.filter((x) => x !== n) : p.length < need ? [...p, n] : p))
+  const make = () => overlay.run(`핀 뱃지 세트 만드는 중… ${info?.grid ?? '4x2'} 격자 한 장에 핀 8개를 그려 잘라냅니다 (30초~1분)`, makeInner, {
+    sketch: [{ name: '로고', concept: '로고 핀' }, { name: word, concept: '단어 핀' }, { name, concept: '이름 핀' },
+      ...picked.map((n) => ({ name: n, concept: topics.find((t) => t.name === n)?.concept }))] })
   const makeInner = async () => {
     setBusy(true); setErr(null)
     try {
-      const p: PinItem = await post(`/api/designs/${designId}/pins`, { name, word })
+      const p: PinItem = await post(`/api/designs/${designId}/pins`, { name, word, topics: picked })
       setPins((l) => [p, ...l]); setFresh(p.id)
     } catch (e) {
       setErr((e as Error).message)
@@ -1047,43 +1063,75 @@ function PinPanel({ designId }: { designId: number }) {
     }
   }
   const remove = async (id: number) => {
-    if (!window.confirm('이 핀 뱃지 세트를 지웁니다. 계속할까요?')) return
+    if (!window.confirm('이 핀 뱃지 세트(시트와 잘라낸 핀)를 지웁니다. 계속할까요?')) return
     const r = await fetch(`/api/designs/${designId}/pins/${id}`, { method: 'DELETE' })
     if (r.ok) setPins((l) => l.filter((p) => p.id !== id))
     else setErr('지우지 못했습니다')
   }
 
   if (!info) return null
-  const refs = [info.has_photo && '상품 사진', info.has_logo && '로고'].filter(Boolean).join('·')
+  const fromIcons = info.topic_source === 'icons'
   return (
     <div className="imgblock icon-step">
       <strong>핀 뱃지 세트</strong>
       <DevStats designId={designId} kinds={['pin']} label="핀 뱃지 생성" refreshKey={`${busy}-${pins.length}`} />
       <p className="muted">
-        브랜드 설명·상품·타깃을 바탕으로 극사실주의 일러스트 에나멜 핀 8개를 4:5 이미지 한 장에 그립니다.
-        중간 핀 1개는 브랜드 로고, 작은 핀 2개는 아래 단어와 이름이고 나머지 5개는 관심 주제입니다.
-        {refs ? ` 참고 이미지(${refs})를 함께 보냅니다.` : ' 로고가 없어 이름 첫 글자 모노그램으로 대신합니다.'} 1장당 이미지 1장 비용입니다.
+        아이콘 세트와 같은 방식으로 {info.grid} 격자 한 장에 극사실주의 일러스트 에나멜 핀 8개를 투명 배경으로 그려 하나씩 잘라내고, 잘라낸 핀으로 4:5 시트를 배치합니다.
+        핀은 브랜드 로고{info.has_logo ? '(등록한 로고를 참고 이미지로 첨부)' : '(로고가 없어 이름 첫 글자 모노그램)'} · 아래 단어 · 이름 · 아이콘 세트 주제 {need}개입니다.
+        격자 1장 비용이고, 격자에서 잘라내지 못한 핀만 1장씩 다시 그립니다.
       </p>
       <div className="row pin-form">
         <label>이름 핀 <input value={name} maxLength={20} disabled={busy} onChange={(e) => setName(e.target.value)} /></label>
         <label>나를 표현하는 단어 <input value={word} maxLength={12} disabled={busy} placeholder="예: 호기심" onChange={(e) => setWord(e.target.value)} /></label>
-        <button className="primary" disabled={busy || !word.trim()} onClick={make}>{pins.length ? '한 장 더 만들기' : '핀 뱃지 세트 만들기'} (이미지 1장)</button>
       </div>
-      {err && <div className="notice err">{err}</div>}
-      {pins.length > 0 && (
-        <div className="pingrid">
-          {pins.map((p) => (
-            <figure key={p.id} className={fresh === p.id ? 'pincell icon-reveal' : 'pincell'}>
-              <a href={`/api/pins/${p.id}/png`} target="_blank" rel="noreferrer"><img src={`/api/pins/${p.id}/png`} alt={`핀 뱃지 세트: ${p.meta.name}`} /></a>
-              <figcaption className="muted">“{p.meta.name}” · “{p.meta.word}” · {p.width}×{p.height}px · {fmtDate(p.created_at)}</figcaption>
-              <div className="row">
-                <a href={`/api/pins/${p.id}/png`} download={`pins_${p.id}.png`}>PNG 내려받기</a>
-                <button type="button" onClick={() => remove(p.id)}>지우기</button>
-              </div>
-            </figure>
-          ))}
+      {topics.length < need ? (
+        <div className="notice err">핀 주제는 아이콘 세트에서 가져옵니다. 아이콘 세트(또는 기능명 후보)가 {need}개 이상 있어야 만들 수 있습니다.</div>
+      ) : (
+        <div className="icon-cands">
+          <p className="muted">주제 {need}개 고르기 — {fromIcons ? '이 규칙 버전의 아이콘 세트' : '아직 아이콘 세트가 없어 기능명 후보'}에서 ({picked.length}/{need})</p>
+          <div className="icon-cand-grid">
+            {topics.map((t) => (
+              <label key={t.name} className="icon-cand" title={t.concept}>
+                <input type="checkbox" disabled={busy || (!picked.includes(t.name) && picked.length >= need)}
+                  checked={picked.includes(t.name)} onChange={() => toggle(t.name)} />
+                <span>{t.name}</span>
+                {t.concept && <span className="muted icon-cand-concept">{t.concept}</span>}
+              </label>
+            ))}
+          </div>
         </div>
       )}
+      <div className="row">
+        <button className="primary" disabled={busy || !word.trim() || picked.length !== need} onClick={make}>
+          {pins.length ? '한 장 더 만들기' : '핀 뱃지 세트 만들기'} (격자 이미지 1장)
+        </button>
+      </div>
+      {err && <div className="notice err">{err}</div>}
+      {pins.map((p) => (
+        <figure key={p.id} className={fresh === p.id ? 'pinset icon-reveal' : 'pinset'}>
+          <a className="pinsheet" href={`/api/pins/${p.id}/png`} target="_blank" rel="noreferrer"><img src={`/api/pins/${p.id}/png`} alt={`핀 뱃지 시트: ${p.meta.name}`} /></a>
+          <div className="pinset-body">
+            <figcaption className="muted">
+              “{p.meta.name}” · “{p.meta.word}” · 주제 {(p.meta.topics || []).join(', ')} · 시트 {p.width}×{p.height}px · {fmtDate(p.created_at)}
+            </figcaption>
+            {(p.meta.missing?.length ?? 0) > 0 && <span className="badge b-need">잘라내지 못한 핀: {p.meta.missing!.join(', ')} — 한 장 더 만들어 주세요</span>}
+            <div className="pin-pieces">
+              {p.pins.map((x) => (
+                <a key={x.slot} className={x.missing ? 'pin-piece missing' : 'pin-piece'} href={x.missing ? undefined : `/api/pins/${p.id}/pieces/${x.slot}`}
+                  target="_blank" rel="noreferrer" title={x.retried ? '격자에서 잘라내지 못해 1장으로 다시 그림' : undefined}>
+                  {x.missing ? <span className="pin-piece-empty">없음</span> : <img src={`/api/pins/${p.id}/pieces/${x.slot}`} alt={x.label} />}
+                  <span>{x.label}{x.retried ? ' *' : ''}</span>
+                </a>
+              ))}
+            </div>
+            <div className="row">
+              <a href={`/api/pins/${p.id}/png`} download={`pins_${p.id}.png`}>4:5 시트 PNG</a>
+              <a href={`/api/pins/${p.id}/grid`} target="_blank" rel="noreferrer">격자 원본</a>
+              <button type="button" onClick={() => remove(p.id)}>지우기</button>
+            </div>
+          </div>
+        </figure>
+      ))}
     </div>
   )
 }
@@ -1115,6 +1163,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [platforms, setPlatforms] = useState<PlatformLite[]>([])
   const [designs, setDesigns] = useState<Design[]>([])
+  const [iconCount, setIconCount] = useState(0)   // 아이콘 세트 캠페인: 아이콘 개수가 바뀌면 핀 뱃지 주제를 다시 불러온다
   const [activeId, setActiveId] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
   // 새 캠페인
@@ -1602,8 +1651,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
         {d.kind !== '광고 이미지' ? (
           <section className="card" id="sec-copy">
             <header><h3>아이콘 세트</h3></header>
-            <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} />
-            <PinPanel designId={d.id} />
+            <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} onCount={setIconCount} />
+            <PinPanel designId={d.id} iconCount={iconCount} />
           </section>
         ) : hasCopy === null ? (
           <p className="muted">불러오는 중…</p>
