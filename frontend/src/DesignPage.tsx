@@ -785,6 +785,7 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
   const [gridCells, setGridCells] = useState(0)   // 격자 렌더 칸 수(0 이면 아이콘마다 1장). 호출 수 = ceil(개수 / 칸 수)
   const [gridLabel, setGridLabel] = useState<string | null>(null)
   const [style, setStyle] = useState<IconStyle | null>(null)   // 적용 스타일(재질·모서리·색) — 생성 전에도 보여 준다
+  const [zoom, setZoom] = useState<number | null>(null)       // 확대 미리보기로 연 아이콘 id (←/→ 로 옆 아이콘)
   const calls = (n: number) => (gridCells >= 2 ? Math.ceil(n / gridCells) : n)
   const [filling, setFilling] = useState(false)
   const [fresh, setFresh] = useState<number[]>([])   // 방금 렌더된 아이콘 id (등장 애니메이션)
@@ -930,6 +931,8 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
     : srcLong.length === items.length ? `원본: ${srcGrid} 격자에서 잘라낸 ${Math.min(...srcLong)}~${Math.max(...srcLong)}px 조각`
     : `원본: ${srcGrid} 격자에서 잘라낸 약 200~350px 조각`
   const vLabel = versionNo ? `브랜드 규칙 v${versionNo}` : '이 브랜드 규칙 버전'
+  const zoomIdx = zoom === null ? -1 : items.findIndex((a) => a.id === zoom)
+  const zoomed = zoomIdx >= 0 ? items[zoomIdx] : null
   // 적용 스타일 한 줄 + 최신 브랜드 규칙의 재질이 다르면 안내(재질을 바꿨는데 반영이 안 된다는 오해를 막는다)
   const styleLine = style && (
     <div className="icon-style">
@@ -1024,21 +1027,37 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
         {items.map((a) => (
           <figure key={`${a.id}-${fresh.includes(a.id) ? ver : 0}`} className={fresh.includes(a.id) ? 'iconcell icon-reveal' : 'iconcell'}
             style={fresh.includes(a.id) ? { animationDelay: `${fresh.indexOf(a.id) * 90}ms` } : undefined}>
-            <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} title={a.concept || a.name} />
+            <button type="button" className="icon-zoom" onClick={() => setZoom(a.id)} aria-label={`${a.name} 크게 보기`} title="크게 보기">
+              <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} />
+            </button>
             <figcaption>{a.position}. {a.name}</figcaption>
             {a.concept && <div className="muted icon-concept">{a.concept}</div>}
             {a.violations.map((v, i) => <span key={i} className="badge b-need">{v.detail}</span>)}
             <div className="row">
               <button disabled={one === a.id} onClick={() => redraw(a.id)}>{one === a.id ? '그리는 중…' : '다시 그리기'}</button>
             </div>
-            <div className="muted">
-              {a.has_svg && <><a href={`/api/icons/${a.id}/svg`} target="_blank" rel="noreferrer">SVG</a> · </>}
-              <a href={`/api/icons/${a.id}/png`} target="_blank" rel="noreferrer">PNG</a>
-              {a.has_source && <> · <a href={`/api/icons/${a.id}/source`} target="_blank" rel="noreferrer">원본</a></>}
-            </div>
           </figure>
         ))}
       </div>
+      {zoomed && (
+        <Lightbox title={`${zoomed.position}. ${zoomed.name}`} subtitle={zoomed.concept || undefined} position={`${zoomIdx + 1} / ${items.length}`}
+          onClose={() => setZoom(null)}
+          onPrev={zoomIdx > 0 ? () => setZoom(items[zoomIdx - 1].id) : undefined}
+          onNext={zoomIdx < items.length - 1 ? () => setZoom(items[zoomIdx + 1].id) : undefined}>
+          <div className="icon-lightbox">
+            <img src={`/api/icons/${zoomed.id}/png?v=${ver}`} alt={zoomed.name} />
+            {zoomed.violations.map((v, i) => <span key={i} className="badge b-need">{v.detail}</span>)}
+            <div className="row">
+              <button disabled={one === zoomed.id} onClick={() => redraw(zoomed.id)}>{one === zoomed.id ? '그리는 중…' : '다시 그리기'}</button>
+              <span className="muted">
+                {zoomed.width}×{zoomed.height}px · 투명 배경
+                {zoomed.style.material ? ` · 재질 ${zoomed.style.material}` : ''}
+                {zoomed.style.source_size ? ` · 원본 ${zoomed.style.source_size[0]}×${zoomed.style.source_size[1]}px` : ''}
+              </span>
+            </div>
+          </div>
+        </Lightbox>
+      )}
     </div>
   )
 }
