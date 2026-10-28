@@ -414,6 +414,8 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .phrase-add button { padding: 0 12px; font-size: 14px; }
 @media (max-width: 640px) { .phrase-grid { grid-template-columns: minmax(0, 1fr); } }
 .bp-go { width: 100%; margin-top: 8px; padding: 10px; border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.bp-del { width: 100%; margin-top: 8px; padding: 10px; border-color: #c0392b; color: #c0392b; background: transparent; }
+.bp-del:hover:not(:disabled) { background: #fdecea; }
 .bp-nochange { margin: 6px 0 0; font-size: 12px; text-align: center; }
 
 /* 규격·메시지·시안: 단계 표시줄 · 캠페인 */
