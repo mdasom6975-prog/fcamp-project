@@ -53,11 +53,14 @@ def test_style_vars_material_preset_or_auto():
     from app import icons
     auto = icons.style_vars({"corner": "둥근"}, [], {"description": "무광 레진"})
     assert auto["material"].startswith("아래 브랜드 톤")
-    fixed = icons.style_vars({"corner": "둥근", "material": "클레이"}, [], {})
-    assert fixed["material"] == "클레이 재질로 통일한다"
+    assert auto["tone_scope"] == "재질·광택·조명·형태", "자동이면 톤 설명의 재질·광택도 따른다"
+    fixed = icons.style_vars({"corner": "둥근", "material": "클레이"}, [], {"description": "유리와 빛의 반사"})
+    assert fixed["material"].startswith("클레이 재질로 통일한다") and fixed["tone_scope"] == "조명·형태"
     from app import prompts
     text = prompts.render("icons/_3d_style", **fixed)
     assert "재질: 클레이 재질로 통일한다." in text
+    assert "조명·형태 묘사만 따르고" in text and "재질·광택·조명·형태" not in text, "프리셋이면 톤 설명의 재질·광택은 따르지 않는다"
+    assert icons.material_label("자동").startswith("자동 (") and icons.material_label("금속") == "금속"
 
 
 def test_review_flags_icons_with_other_material():

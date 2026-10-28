@@ -230,6 +230,14 @@ ul.plain { padding-left: 18px; margin: 4px 0; font-size: 14px; }
   width: 96px; height: 96px; object-fit: contain; border-radius: var(--radius-sm);
   background: repeating-conic-gradient(#f2f3f7 0 25%, #fff 0 50%) 0 0 / 12px 12px;
 }
+.iconcell .icon-zoom { display: inline-block; padding: 0; border: none; background: none; cursor: zoom-in; border-radius: var(--radius-sm); line-height: 0; }
+.iconcell .icon-zoom:hover img, .iconcell .icon-zoom:focus-visible img { box-shadow: 0 0 0 2px var(--accent, #4c69fe); }
+.icon-lightbox { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 0 2px; }
+.icon-lightbox img {
+  width: min(512px, 80vw); height: min(512px, 60vh); object-fit: contain; border-radius: var(--radius);
+  background: repeating-conic-gradient(#f2f3f7 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+}
+.icon-lightbox .row { justify-content: center; }
 .iconcell figcaption { margin: 6px 0; font-weight: 600; }
 .iconcell .icon-concept { font-size: 12px; margin: -2px 0 6px; line-height: 1.35; }
 .iconcell .row { justify-content: center; margin-bottom: 4px; }
@@ -527,6 +535,9 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .product-box img { width: 100%; height: 100%; object-fit: contain; }
 .product-scale { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; }
 .product-scale select { max-width: 320px; font-size: 13px; }
+.icon-style { margin: 6px 0 8px; }
+.icon-style p { margin: 0 0 6px; }
+.icon-style .notice { margin-top: 4px; }
 .layout-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
 .layout-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 10px; min-width: 112px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); cursor: pointer; }
