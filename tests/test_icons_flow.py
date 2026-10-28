@@ -480,3 +480,19 @@ def test_icon_reset_deletes_set_and_files_but_keeps_candidates(env):
     assert c.get(f"/api/designs/{did}/icons").json() == [] and not any(storage.exists(f) for f in files)
     assert c.get(f"/api/designs/{did}").json()["brief"]["icon_candidates"] == [{"name": "후보1", "concept": "x"}]
     assert c.post(f"/api/designs/{did}/icons/reset", json={}).json()["icons_deleted"] == 0
+
+
+def test_icon_style_endpoint_shows_pinned_version_material_and_newer_one(env):
+    """캠페인이 붙잡은 브랜드 규칙 버전의 재질을 돌려주고, 브랜드 최신 버전의 재질이 다르면 함께 알린다
+    (브랜드에서 재질을 바꿔도 '최신 규칙 적용' 전에는 예전 재질로 그려지는 것을 화면에서 알 수 있게)."""
+    c, ids, models, Local = env["client"], env["ids"], env["models"], env["Local"]
+    j = c.get(f"/api/designs/{ids['design']}/icon-style").json()
+    assert j["version_no"] == 1 and j["material"] == "자동" and j["material_label"].startswith("자동 (") and j["corner"] == "둥근"
+    assert j["colors"] == ["#4C69FE"] and j["outdated"] is False and j["current_material"] == "자동"
+    with Local() as db:
+        bv2 = models.BrandVersion(brand_id=ids["brand"], version_no=2, levels={}, colors=[], icon_style={"corner": "각진", "material": "유리·반투명"})
+        db.add(bv2); db.flush()
+        db.get(models.Brand, ids["brand"]).current_version_id = bv2.id; db.commit()
+    j = c.get(f"/api/designs/{ids['design']}/icon-style").json()
+    assert j["version_no"] == 1 and j["material"] == "자동", "캠페인은 여전히 v1 재질로 그린다"
+    assert j["outdated"] is True and j["current_version_no"] == 2 and j["current_material"] == "유리·반투명" == j["current_material_label"]

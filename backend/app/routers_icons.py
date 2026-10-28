@@ -133,6 +133,25 @@ def list_icons(design_id: int, db: Session = Depends(get_db)):
     return [_out(a) for a in version_icon_set(db, d.brand_version_id)]
 
 
+@router.get("/designs/{design_id}/icon-style")
+def design_icon_style(design_id: int, db: Session = Depends(get_db)):
+    """이 캠페인의 아이콘에 실제로 적용되는 스타일: 캠페인이 붙잡은 브랜드 규칙 버전의 모서리·재질·색. 아이콘 세트는 브랜드 규칙 버전에
+    붙으므로 브랜드를 고쳐 새 버전이 생겨도 '최신 규칙 적용' 전에는 예전 값으로 그려진다 — 최신 버전의 재질이 다르면 함께 돌려준다."""
+    d = get_design(db, design_id)
+    bv = db.get(BrandVersion, d.brand_version_id)
+    brand = db.get(Brand, d.brand_id)
+    cur = db.get(BrandVersion, brand.current_version_id) if brand and brand.current_version_id else None
+    st = _style(bv)
+    cur_material = (_style(cur)["material"] if cur else None)
+    return {"version_no": bv.version_no, "render": icons.RENDER, "corner": st["corner"], "material": st["material"],
+            "material_label": icons.material_label(st["material"]),
+            "colors": [c["hex"] for c in _palette(bv)] or [st["color"]],
+            "tone": ((bv.image_tone or {}).get("description") or "")[:120],
+            "current_version_no": cur.version_no if cur else None,
+            "outdated": bool(cur and cur.id != bv.id),
+            "current_material": cur_material, "current_material_label": icons.material_label(cur_material) if cur else None}
+
+
 @router.get("/icon-settings")
 def icon_settings():
     """프론트 안내용: 현재 렌더 방식·모델·품질."""

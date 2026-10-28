@@ -762,8 +762,14 @@ type IconItem = {
   id: number; position: number; name: string; concept?: string; width: number; height: number
   render: '3d' | 'svg'; has_svg: boolean; has_source: boolean
   style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[]
-    origin?: { grid?: string } | null; source_size?: number[] }
+    material?: string; origin?: { grid?: string } | null; source_size?: number[] }
   violations: { detail: string }[]
+}
+// 이 캠페인의 아이콘에 실제로 적용되는 스타일(GET /api/designs/{id}/icon-style): 캠페인이 붙잡은 브랜드 규칙 버전 기준.
+// 브랜드를 고쳐 새 버전이 생겨도 '최신 규칙 적용' 전에는 예전 재질로 그려지므로, 최신 버전의 재질이 다르면 알려 준다
+type IconStyle = {
+  version_no: number; render: string; corner: string; material: string; material_label: string; colors: string[]; tone: string
+  current_version_no: number | null; outdated: boolean; current_material: string | null; current_material_label: string | null
 }
 
 function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: number; versionNo: number | null; ready: boolean; ask: boolean; onCount?: (n: number) => void }) {
@@ -778,6 +784,7 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
   const [target, setTarget] = useState(10)   // 세트 목표 개수 (서버 설정)
   const [gridCells, setGridCells] = useState(0)   // 격자 렌더 칸 수(0 이면 아이콘마다 1장). 호출 수 = ceil(개수 / 칸 수)
   const [gridLabel, setGridLabel] = useState<string | null>(null)
+  const [style, setStyle] = useState<IconStyle | null>(null)   // 적용 스타일(재질·모서리·색) — 생성 전에도 보여 준다
   const calls = (n: number) => (gridCells >= 2 ? Math.ceil(n / gridCells) : n)
   const [filling, setFilling] = useState(false)
   const [fresh, setFresh] = useState<number[]>([])   // 방금 렌더된 아이콘 id (등장 애니메이션)
@@ -850,6 +857,7 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
   useEffect(() => {
     fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
     fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
+    fetch(`/api/designs/${designId}/icon-style`).then((r) => (r.ok ? r.json() : null)).then((j) => setStyle(j && j.version_no ? j : null)).catch(() => setStyle(null))
   }, [designId])
   useEffect(() => { if (loaded) onCount?.(items.length) }, [loaded, items.length, onCount])
 
@@ -922,6 +930,21 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
     : srcLong.length === items.length ? `원본: ${srcGrid} 격자에서 잘라낸 ${Math.min(...srcLong)}~${Math.max(...srcLong)}px 조각`
     : `원본: ${srcGrid} 격자에서 잘라낸 약 200~350px 조각`
   const vLabel = versionNo ? `브랜드 규칙 v${versionNo}` : '이 브랜드 규칙 버전'
+  // 적용 스타일 한 줄 + 최신 브랜드 규칙의 재질이 다르면 안내(재질을 바꿨는데 반영이 안 된다는 오해를 막는다)
+  const styleLine = style && (
+    <div className="icon-style">
+      <p className="muted">
+        아이콘 스타일 ({vLabel}) — {style.render === '3d' ? '3D 렌더 · ' : ''}모서리 {style.corner} · <strong>재질 {style.material_label}</strong> · 색 {style.colors.join(', ')}
+        {style.material === '자동' && style.tone ? <> · 이미지 톤: "{style.tone}"</> : null}
+      </p>
+      {style.outdated && style.current_material !== style.material && (
+        <div className="notice">
+          브랜드 최신 규칙 v{style.current_version_no}의 재질은 '{style.current_material_label}'입니다. 이 캠페인은 v{style.version_no}(재질 {style.material_label})로 그립니다.
+          새 재질을 쓰려면 상단 '브랜드 설정 → 최신 규칙 적용' 뒤 아이콘 세트를 {items.length ? '새로 만드세요' : '만드세요'}.
+        </div>
+      )}
+    </div>
+  )
 
   // 아직 세트가 없을 때: 광고 이미지가 있어야 생성 여부를 묻는다
   if (items.length === 0) {
@@ -937,13 +960,14 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
       <div className="imgblock icon-step">
         <strong>아이콘 세트</strong>
         <DevStats designId={designId} kinds={['icon', 'icon_names', 'icon_redraw']} label="아이콘 생성" refreshKey={`${busy}-${filling}-${one}-${items.length}-${ver}`} />
+        {styleLine}
         <label className="icon-ask">
           <input type="checkbox" checked={want} disabled={busy} onChange={(e) => setWant(e.target.checked)} />
           {vLabel}의 아이콘 세트도 함께 만들기
         </label>
         <p className="muted">
           브랜드에 어울리는 3D 아이콘 세트입니다. 기능명 10개는 상품 설명을 바탕으로 AI가 정하고, 아이콘마다 투명 배경 PNG 를 렌더합니다.
-          재질·광원은 브랜드 이미지 톤, 색은 주조·보조·강조색, 모서리는 아이콘 스타일 값으로 모든 아이콘에 동일하게 적용됩니다.
+          재질은 브랜드 아이콘 스타일의 재질(자동이면 이미지 톤 설명), 광원은 이미지 톤, 색은 주조·보조·강조색, 모서리는 아이콘 스타일 값으로 모든 아이콘에 동일하게 적용됩니다.
           이 규칙 버전의 아이콘 세트는 한 번만 만들 수 있고, 이후에는 개별 아이콘만 다시 그릴 수 있습니다. {gridCells >= 2 ? `격자 렌더(${gridLabel})로 한 장에 최대 ${gridCells}개를 그려 자르므로 ${target}개가 이미지 ${calls(target)}장입니다. 개별 다시 그리기는 1장씩입니다.` : '아이콘 1개당 이미지 1장 비용이 발생합니다.'}
         </p>
         {want && (
@@ -972,6 +996,7 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
         이 규칙 버전의 아이콘 세트는 한 세트만 사용합니다. 마음에 들지 않는 아이콘은 개별로 다시 그릴 수 있습니다.
         {ask ? '' : ' 기능명 10개는 상품 설명을 바탕으로 AI가 정했으며 추가·삭제할 수 없습니다.'}
       </p>
+      {styleLine}
       {err && <div className="notice err">{err}</div>}
       {note && <div className="notice err">{note}</div>}
       {items.length < target && (
@@ -988,7 +1013,7 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
       {items.length < target && candidatePicker(target - items.length)}
       {st && items[0].render === '3d' ? (
         <p className="muted">
-          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px ({srcText})
+          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 재질 {st.material ?? '자동'} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px ({srcText})
         </p>
       ) : st && (
         <p className="muted">
