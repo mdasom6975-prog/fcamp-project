@@ -95,7 +95,7 @@ def test_analysis_page_payload(env):
     assert j["brand"]["name"] == "쿠챠" and j["design"]["brief"]["product_name"] == "랜덤 캡슐"
     # 입력 반영 표: 색은 배경 프롬프트에 안 들어가고 아이콘·합성에서만 쓰인다 (학습 포인트)
     colors = next(m for m in j["mapping"] if m["key"] == "colors")
-    assert colors["stages"]["background"] is None and colors["stages"]["icon"] and colors["stages"]["compose"]
+    assert colors["stages"]["background"] and colors["stages"]["icon"] and colors["stages"]["compose"]
     tone = next(m for m in j["mapping"] if m["key"] == "image_tone")
     assert tone["stages"]["background"] and tone["stages"]["copy"] is None
     # 같은 파일의 배경 행 2개 → 배경 1장, 팔레트는 주조색 그대로 → 일치 비율 1.0

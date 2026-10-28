@@ -251,13 +251,15 @@ def _product_image(db: Session, d: Design) -> tuple[Image.Image | None, int | No
     return im, aid
 
 
-def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
-                  force_ratio: bool = False) -> tuple[str, Image.Image, str, dict]:
-    """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (저장소 키, 이미지, 프롬프트, 기록용 layout).
-    품질은 항상 imagegen.OPENAI_QUALITY(기본 medium)이며 layout.quality 에 남긴다.
-    생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
-    reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다.
-    캠페인에 제품 누끼 이미지가 있으면(OpenAI) 참조 이미지로 함께 붙여 장면의 주 피사체로 그리게 한다."""
+def product_scale(d: Design) -> str:
+    """캠페인 입력의 제품 크기(크게|보통|작게). 예전 캠페인처럼 값이 없으면 크게."""
+    v = (d.brief or {}).get("product_scale")
+    return v if v in compose.PRODUCT_SCALES else compose.DEFAULT_PRODUCT_SCALE
+
+
+def _bg_prompt(db: Session, d: Design, template: str, force_ratio: bool = False, variant: bool = False) -> dict:
+    """배경 프롬프트와 그 재료. 생성(_generate_one)과 대기 화면의 주문서 미리보기(background_prompt_preview)가 같은 문장을 쓴다.
+    반환: prompt(variant 면 same_scene 로 감싼 것), style, reason, single, product_img, product_id, pmode, composite, bv, brand, settings."""
     bv = db.get(BrandVersion, d.brand_version_id)
     brand = db.get(Brand, d.brand_id)
     style, reason = imagegen.pick_style(bv.image_tone or {}, d.brief or {})
@@ -265,6 +267,30 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     # 1장 방식: 공용 구도, 비율군 크기 그대로(1024×1536 등). force_ratio 는 1장 방식에서 손실이 큰 비율군을 그 1장을
     # 참조해 비율군 구도로 1장 더 만들 때(크롭공용 대신 비율군 구도, 참조 변형 허용)
     single = st["bg_mode"] == "single" and not force_ratio
+    product_img, product_id = _product_image(db, d)
+    pmode = imagegen.product_mode(product_img) if imagegen.PROVIDER == "openai" else None
+    composite = pmode == "composite"
+    # 합성 방식이면 생성 크기(_generate_one 과 같은 값)에서 누끼가 실제로 놓일 상자를 미리 계산해 그 자리만 비우게 한다
+    gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
+    placed = compose.product_box(gw, gh, product_img, template, product_scale(d)) if composite else None
+    prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
+                                   product=product_img is not None, variant=variant, composite=composite,
+                                   colors=bv.colors, placed=placed)
+    if variant:
+        prompt = imagegen.build_variant_prompt(prompt)
+    return {"prompt": prompt, "style": style, "reason": reason, "single": single, "product_img": product_img,
+            "product_id": product_id, "pmode": pmode, "composite": composite, "bv": bv, "brand": brand, "settings": st}
+
+
+def _generate_one(db: Session, d: Design, template: str, reference: GeneratedImage | None = None,
+                  force_ratio: bool = False) -> tuple[str, Image.Image, str, dict]:
+    """템플릿(비율군) 하나의 배경을 생성해 저장한다. 반환: (저장소 키, 이미지, 프롬프트, 기록용 layout).
+    품질은 항상 imagegen.OPENAI_QUALITY(기본 medium)이며 layout.quality 에 남긴다.
+    생성 크기는 imagegen.size_for(비율군별이면 1024×1536 / 1536×1024 / 1024²), 형태는 브리프 image_style(자동이면 톤·설명으로).
+    reference(다른 비율군의 배경 행)를 주고 변형이 가능하면 그 이미지를 참조로 붙여 '같은 장면'을 이 비율의 구도로 다시 만든다.
+    캠페인에 제품 누끼 이미지가 있으면(OpenAI) 참조 이미지로 함께 붙여 장면의 주 피사체로 그리게 한다.
+    프롬프트는 _bg_prompt 가 만든다."""
+    st = imagegen.settings_for(d.brief)
     gw, gh = imagegen.size_for(template, per_ratio=True if st["bg_mode"] == "single" else None)
     quality = imagegen.OPENAI_QUALITY
     provider = imagegen.PROVIDER
@@ -275,14 +301,10 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         # 제품을 합성한 배경이면 제품이 없는 원본(clean_file)을 참조한다(제품을 다시 그리지 않고 장면만 이어받는다)
         clean = (reference.layout or {}).get("clean_file")
         ref_img = Image.open(storage.local(clean if clean and storage.exists(clean) else reference.file_path))
-    product_img, product_id = _product_image(db, d)
-    pmode = imagegen.product_mode(product_img) if provider == "openai" else None
-    composite = pmode == "composite"
+    bp = _bg_prompt(db, d, template, force_ratio=force_ratio, variant=ref_img is not None)
+    prompt, style, reason, single = bp["prompt"], bp["style"], bp["reason"], bp["single"]
+    product_img, product_id, pmode, composite, bv = bp["product_img"], bp["product_id"], bp["pmode"], bp["composite"], bp["bv"]
     try:
-        prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, template, style, single=single,
-                                       product=product_img is not None, variant=ref_img is not None, composite=composite)
-        if ref_img is not None:
-            prompt = imagegen.build_variant_prompt(prompt)
         if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
             bg = (imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"]) if ref_img is not None
                   else imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider))
@@ -297,7 +319,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     extra: dict = {}
     if composite:
         clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
-        bg, placed = compose.paste_product(bg, product_img, template)
+        bg, placed = compose.paste_product(bg, product_img, template, product_scale(d))
         extra = {"clean_file": clean_key, "product_placed": placed}
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
@@ -308,7 +330,7 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
               # 장면 id: 다른 비율군 참조 변형이면 참조의 장면(같은 장면), 독립 생성이면 이 파일이 새 장면의 시작
               "scene": (_scene(reference) or Path(path).stem) if ref_img is not None else Path(path).stem,
               "prompts": imagegen.prompt_refs(template, style, variant=ref_img is not None, single=single,
-                                              product=product_img is not None, composite=composite)}
+                                              product=product_img is not None, composite=composite, colors=bv.colors)}
     if ref_img is not None:
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
                                "template": (reference.layout or {}).get("template")}
@@ -387,6 +409,23 @@ def create_shared_background(db: Session, d: Design,
         if master is None:
             master = rows[pids[0]]
     return rows, deferred
+
+
+@router.get("/designs/{design_id}/background/prompt-preview")
+def background_prompt_preview(design_id: int, preset_id: int | None = None, db: Session = Depends(get_db)):
+    """대기 화면의 'AI 주문서': 이 지면(없으면 시안의 첫 지면) 비율군의 배경을 새로 그릴 때 보내는 프롬프트를 블록으로.
+    생성과 같은 _bg_prompt 로 만들며 이미지 모델은 부르지 않는다. 다른 비율군을 참조하는 변형(same_scene)은 앞에 안내 문장이
+    더 붙지만 여기서는 기준 문장만 보여 준다."""
+    d = _design(db, design_id)
+    ids = [preset_id] if preset_id is not None else list(d.preset_version_ids)
+    pv = next((p for p in (db.get(PresetVersion, i) for i in ids) if p and p.production_width), None)
+    if pv is None:
+        raise HTTPException(404, "배경을 만들 지면이 없습니다")
+    template = compose.template_for(pv.production_width, pv.production_height)
+    bp = _bg_prompt(db, d, template)
+    return {"template": template, "style": bp["style"], "single": bp["single"], "composite": bp["composite"],
+            "model": bp["settings"]["model"], "blocks": imagegen.prompt_blocks(bp["prompt"]),
+            "colors": [{"role": c.get("role") or "", "hex": c["hex"].upper()} for c in (bp["bv"].colors or []) if c.get("hex")]}
 
 
 @router.post("/designs/{design_id}/background/regenerate")

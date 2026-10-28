@@ -83,7 +83,7 @@ def main() -> None:
     _target["ratio"] = w / h
     tpl = compose.template_for(w, h)
     bv, brand = db.get(BrandVersion, d.brand_version_id), db.get(Brand, d.brand_id)
-    prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, tpl)
+    prompt = imagegen.build_prompt(brand.name, bv.image_tone or {}, d.brief, tpl, colors=bv.colors)
     OUT.mkdir(parents=True, exist_ok=True)
     cards = []
     for name, env, fn in MODELS:

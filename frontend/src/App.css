@@ -233,6 +233,19 @@ ul.plain { padding-left: 18px; margin: 4px 0; font-size: 14px; }
 .iconcell figcaption { margin: 6px 0; font-weight: 600; }
 .iconcell .icon-concept { font-size: 12px; margin: -2px 0 6px; line-height: 1.35; }
 .iconcell .row { justify-content: center; margin-bottom: 4px; }
+.pin-form { align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.pin-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.pinset { display: flex; gap: 14px; align-items: flex-start; margin: 12px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.pinsheet { flex: 0 0 220px; }
+.pinsheet img { width: 220px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: var(--radius-sm); display: block; }
+.pinset-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pin-pieces { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 110px)); gap: 8px; }
+.pin-piece { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: inherit; text-decoration: none; text-align: center; }
+.pin-piece img, .pin-piece-empty { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(#f2f3f7 0 25%, #fff 0 50%) 0 0 / 12px 12px; }
+.pin-piece-empty { display: grid; place-items: center; color: var(--muted, #888); }
+.pinset .row { gap: 12px; align-items: center; }
+@media (max-width: 640px) { .pinset { flex-direction: column; } .pinsheet, .pinsheet img { width: 100%; } }
 
 /* 편집 */
 .editor { margin-top: 12px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
@@ -338,12 +351,19 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .tag-note { background: var(--surface-2); color: var(--text-2); font-size: 12px; padding: 2px 8px; border-radius: 999px; }
 .logo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .logo-box { width: 176px; height: 80px; display: grid; place-items: center; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; }
+/* 상자 자체가 파일 선택 버튼: 전역 button 의 둥근 모양·여백·굵기를 지우고 hover 에 테두리만 진하게 */
+button.logo-box { padding: 0; font-weight: 400; font-size: 13px; }
+button.logo-box:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent); }
+button.logo-box:active:not(:disabled) { transform: none; }
 .logo-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .logo-info { min-width: 0; font-size: 14px; color: var(--text-2); }
 .logo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logo-ratio { margin-left: 8px; font-size: 12px; color: var(--text-3); }
 .logo-help { font-size: 12px; color: var(--text-3); margin-top: 2px; }
 .logo-btn { margin-top: 8px; padding: 4px 12px; font-size: 12px; border-radius: 999px; }
+/* 로고 칸 아래 업로드 안내(정사각으로 만듦 등)·오류 */
+.logo-note { margin-top: 8px; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px; white-space: normal; background: var(--warn-bg); color: var(--warn-fg); }
+.logo-note.err { background: var(--bad-bg); color: var(--bad-fg); }
 .logo-margin { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); }
 .logo-margin input { display: block; width: 120px; margin-top: 4px; padding: 6px 10px; font-size: 14px; }
 
@@ -501,6 +521,8 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .product-img { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
 .product-box { width: 96px; height: 96px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; }
 .product-box img { width: 100%; height: 100%; object-fit: contain; }
+.product-scale { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; }
+.product-scale select { max-width: 320px; font-size: 13px; }
 
 /* 뱃지 (검수·규격·카피 공통) */
 .badge { display: inline-block; font-size: 12px; font-weight: 600; line-height: 18px; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
@@ -555,6 +577,52 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .busy-note { font-size: 12px; }
 .busy-spinner { width: 36px; height: 36px; border-radius: 50%; border: 4px solid var(--line); border-top-color: var(--accent); animation: busy-spin .9s linear infinite; }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
+.busy-box.wide { max-width: 640px; max-height: 92vh; overflow: auto; }
+/* 브랜드 퀴즈 카드 (대기 화면) */
+.busy-quiz { width: 100%; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); padding: 12px 14px; margin-top: 6px; }
+.quiz-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.quiz-tag { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--accent); }
+.quiz-q { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+.quiz-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.quiz-opt { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; font-size: 13px; font-weight: 500; border-radius: var(--radius-sm); background: var(--surface); border-color: var(--line-strong); }
+.quiz-opt:disabled { cursor: default; opacity: 1; }
+.quiz-opt.right { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-fg); }
+.quiz-opt.wrong { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-fg); }
+.quiz-opt.dim { opacity: .55; }
+.quiz-chip { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .12); flex: none; }
+.quiz-explain { margin-top: 10px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.quiz-next { display: block; margin: 8px 0 0 auto; padding: 4px 14px; font-size: 12px; }
+/* 대기 화면: 주문서·퀴즈 탭 */
+.busy-extras { width: 100%; }
+.busy-tabs { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.busy-tabs button { padding: 4px 14px; font-size: 12px; }
+.busy-tabs button.on { background: var(--accent-soft); border-color: var(--accent); }
+/* AI 주문서 카드 */
+.busy-order { width: 100%; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); padding: 12px 14px; margin-top: 6px; }
+.order-lead { font-size: 12px; margin: 0 0 8px; }
+.order-blocks { display: flex; flex-direction: column; gap: 6px; max-height: 38vh; overflow: auto; }
+.order-block { font-size: 13px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; }
+.order-block.brand { background: var(--surface); border-radius: 10px; padding: 4px 8px; }
+.order-tag { display: inline-block; margin-right: 6px; padding: 0 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600; }
+.order-hex { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; color: var(--text); }
+.order-hex .quiz-chip { width: 12px; height: 12px; }
+.order-caret { display: inline-block; width: 2px; height: 1em; margin-left: 1px; vertical-align: text-bottom; background: var(--accent); }
+.busy-notify { padding: 4px 12px; font-size: 12px; }
+/* 아이콘 스케치판: 그릴 기능명을 연필 스케치 카드로. 흔들림 없이 한 번에 카드 하나만 차례로 그려진다(장식, 진행률 아님).
+   키프레임(sketch-draw·sketch-turn)은 카드 수에 따라 Busy.tsx 의 SketchBoard 가 만든다 */
+.busy-sketch { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; width: 100%; max-height: 46vh; overflow: auto; margin: 6px 0; }
+.sketch-card { border: 1.5px dashed var(--line-strong); border-radius: 10px; padding: 6px 8px 8px; background: var(--surface-2); text-align: center; animation: sketch-turn var(--sketch-cycle) linear infinite; }
+.sketch-card svg { width: 100%; height: 36px; }
+.sketch-card path { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 160; stroke-dashoffset: 160; opacity: .35; animation: sketch-draw var(--sketch-cycle) linear infinite; }
+.sketch-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; line-height: 1.2; color: var(--text); }
+.sketch-concept { font-size: 11px; color: var(--text-3); line-height: 1.3; margin-top: 2px; }
+/* 방금 렌더된 아이콘: 스케치 카드가 뒤집히며 나타나듯 차례로 등장 */
+.iconcell.icon-reveal, .pinset.icon-reveal { animation: icon-reveal .6s cubic-bezier(.2, .8, .3, 1.2) both; }
+@keyframes icon-reveal { from { opacity: 0; transform: perspective(600px) rotateY(80deg) scale(.9); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .sketch-card, .sketch-card path, .iconcell.icon-reveal, .pinset.icon-reveal { animation: none; }
+  .sketch-card path { stroke-dashoffset: 0; }
+}
 
 /* 시안 이미지 크게 보기 */
 .lightbox { position: fixed; inset: 0; z-index: 900; background: rgba(15, 23, 42, .55); display: flex; align-items: center; justify-content: center; padding: 24px; }

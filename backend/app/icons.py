@@ -403,6 +403,98 @@ def fit_alpha(im: Image.Image, w: int, h: int) -> tuple[Image.Image, dict]:
     return canvas, {"scale": round(s, 4), "bbox": [round(v, 2) for v in bbox], "transparent": transparent, "clipped": clipped}
 
 
+def source_desc(style: dict | None, size: tuple[int, int] | list[int] | None) -> str:
+    """3D 아이콘 원본(source_path) 설명. 1장 렌더면 1024 정사각, 격자 렌더면 격자에서 잘라낸 조각이라 크기가 아이콘마다 다르다."""
+    grid = ((style or {}).get("origin") or {}).get("grid")
+    dims = f"{size[0]}×{size[1]}" if size else None
+    if grid:
+        return f"{dims or '크기 미상'}, 투명, {grid} 격자에서 잘라냄"
+    return f"{dims or '1024×1024'}, 투명"
+
+
+# ---- 핀 뱃지 세트 ---- (문장은 prompts/icons/pin_grid·pin_one + _pin_style + _pin_cell_*)
+# 아이콘 격자와 같은 방식: 4열×2행 가로 캔버스(1536×1024, 칸 384×512)에 투명 배경으로 핀 8개를 그리고 split_blobs 로 잘라 쓴다.
+# 칸 순서는 고정 — 로고 · 단어 · 이름 · 아이콘 세트 주제 5. 못 잘라낸 칸은 호출자가 핀 1개 렌더(pin_one)로 다시 그린다.
+# 4:5 시트(1024×1280)는 잘라낸 핀을 compose_pin_sheet 가 브랜드 배경색 위에 배치해 만든다(추가 호출 없음).
+PIN_COLS, PIN_ROWS = 4, 2
+PIN_COUNT = PIN_COLS * PIN_ROWS
+PIN_TOPICS = PIN_COUNT - 3
+PIN_GRID_SIZE = "1536x1024"
+PIN_KINDS = ["logo", "word", "name"] + ["topic"] * PIN_TOPICS
+PIN_SHEET = (1024, 1280)
+PIN_COLOR_ROLES = ("주조색", "보조색", "강조색")
+# 시트 배치: 칸 순서별 (중심 x, 중심 y, 긴 변) — 시트 너비 대비 비율. 로고는 가운데 크게, 단어·이름은 위 작은 핀, 주제는 둘레에
+PIN_SLOTS = [(0.50, 0.42, 0.40),
+             (0.24, 0.14, 0.24), (0.76, 0.14, 0.24),
+             (0.15, 0.50, 0.22), (0.85, 0.50, 0.22), (0.20, 0.85, 0.25), (0.50, 0.89, 0.25), (0.80, 0.85, 0.25)]
+PIN_MAX_RETRY = 3      # 격자에서 이보다 많이 못 잘라내면 1개씩 다시 그리지 않는다(격자 자체가 잘못 나온 것)
+
+
+def pin_word_default(voice: dict | None) -> str:
+    """'나를 표현하는 단어' 기본값: 브랜드 말투 설명의 첫 키워드(예: '명확함 · 호기심 · …' → '명확함'). 없으면 빈 문자열."""
+    desc = str((voice or {}).get("description") or "")
+    first = re.split(r"[·,./\n]", desc, maxsplit=1)[0].strip()
+    return first if 0 < len(first) <= 12 else ""
+
+
+def pin_style_vars(colors: list[dict] | None, tone: dict | None) -> dict:
+    cols = [f"{c['hex']}({c['role']})" for role in PIN_COLOR_ROLES for c in (colors or []) if c.get("role") == role and c.get("hex")]
+    return {"colors": ", ".join(cols) or "밝고 채도 높은 색", "tone": (tone or {}).get("description") or "지정 없음"}
+
+
+def pin_cells(name: str, word: str, topics: list[tuple[str, str]], has_logo: bool) -> list[str]:
+    """칸 순서(PIN_KINDS)대로 칸 설명. topics = [(기능명, 오브젝트 묘사)] PIN_TOPICS 개."""
+    logo = prompts.render("icons/_pin_cell_logo") if has_logo else prompts.render("icons/_pin_cell_monogram", name=name)
+    return ([logo, prompts.render("icons/_pin_cell_word", word=word), prompts.render("icons/_pin_cell_name", name=name)]
+            + [prompts.render("icons/_pin_cell_topic", topic=t, concept=c or t) for t, c in topics])
+
+
+def pin_grid_prompt(name: str, cells: list[str], vars: dict, forbidden: list[str]) -> str:
+    lines = "\n".join(f"{i}. {c}" for i, c in enumerate(cells, 1))
+    return prompts.render("icons/pin_grid", name=name, count=len(cells), cols=PIN_COLS, rows=PIN_ROWS, cells=lines,
+                          forbidden=", ".join(forbidden) or "없음", **vars)
+
+
+def pin_one_prompt(name: str, cell: str, vars: dict, forbidden: list[str]) -> str:
+    return prompts.render("icons/pin_one", name=name, cell=cell, forbidden=", ".join(forbidden) or "없음", **vars)
+
+
+def trim_alpha(im: Image.Image, margin: float = 0.04) -> Image.Image:
+    """알파 경계로 잘라 긴 변 대비 margin 만큼 투명 여백을 둔다(잘라낸 핀 1개 PNG)."""
+    im = im.convert("RGBA")
+    bb = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    if not bb:
+        raise ValueError("그려진 핀이 없습니다")
+    crop = im.crop(bb)
+    m = round(max(crop.size) * margin)
+    out = Image.new("RGBA", (crop.width + 2 * m, crop.height + 2 * m), (0, 0, 0, 0))
+    out.paste(crop, (m, m), crop)
+    return out
+
+
+def compose_pin_sheet(pins: list[Image.Image | None], bg_hex: str | None) -> Image.Image:
+    """잘라낸 핀(칸 순서)을 4:5 시트에 배치한다. 없는 칸(None)은 비워 둔다. 핀마다 아래로 부드러운 그림자를 깐다."""
+    from PIL import ImageFilter
+    w, h = PIN_SHEET
+    bg = tuple(int((bg_hex or "#F6F7FA").lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    sheet = Image.new("RGBA", (w, h), bg + (255,))
+    for pin, (cx, cy, side) in zip(pins, PIN_SLOTS):
+        if pin is None:
+            continue
+        pin = trim_alpha(pin, 0)
+        s = side * w / max(pin.size)
+        pin = pin.resize((max(1, round(pin.width * s)), max(1, round(pin.height * s))), Image.LANCZOS)
+        x, y = round(cx * w - pin.width / 2), round(cy * h - pin.height / 2)
+        off = max(2, round(pin.height * 0.03))
+        shadow = Image.new("RGBA", sheet.size, (0, 0, 0, 0))
+        shadow.paste((0, 0, 0, 90), (x, y + off), pin.getchannel("A"))
+        sheet = Image.alpha_composite(sheet, shadow.filter(ImageFilter.GaussianBlur(off * 1.5)))
+        layer = Image.new("RGBA", sheet.size, (0, 0, 0, 0))
+        layer.paste(pin, (x, y), pin)
+        sheet = Image.alpha_composite(sheet, layer)
+    return sheet.convert("RGB")
+
+
 def png_bytes(im: Image.Image) -> bytes:
     b = io.BytesIO()
     im.save(b, "PNG")

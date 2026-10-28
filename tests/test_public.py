@@ -68,6 +68,7 @@ def test_app_public_hides_docs(monkeypatch):
     monkeypatch.setenv("APP_PUBLIC", "1")
     try:
         importlib.reload(main)                     # docs_url 은 앱 생성 시점에 정해지므로 재로드
+        main._ready = True                         # 재로드하면 _ready 가 풀려 첫 요청이 실제 backend/data/app.db 를 초기화한다
         c = TestClient(main.app)
         assert c.get("/docs").status_code == 404
         assert c.get("/redoc").status_code == 404
@@ -75,6 +76,7 @@ def test_app_public_hides_docs(monkeypatch):
     finally:
         monkeypatch.delenv("APP_PUBLIC", raising=False)
         importlib.reload(main)                     # 다른 테스트가 문서가 켜진 앱을 보게 되돌린다
+        main._ready = True
     assert TestClient(main.app).get("/docs").status_code == 200
 
 

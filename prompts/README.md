@@ -12,11 +12,16 @@
 | `icons/render3d.md` | 3D 아이콘 1개 이미지 프롬프트(투명 PNG). 다시 그리기도 같은 문장 | `icons.render_prompt` |
 | `icons/_3d_style.md` | 3D 공통 스타일 블록 (partial, render3d 가 include) — 카메라·광원·모서리·색·재질 | — |
 | `icons/_3d_output_spec.md` | 3D 제안 출력 JSON 규격 (partial, propose3d·more3d System 이 include) | — |
+| `icons/pin_grid.md` | 핀 뱃지 세트 격자 1장(4열×2행, 투명). 로고 · 단어 · 이름 · 아이콘 세트 주제 5 를 칸마다 하나씩, 코드가 잘라 쓰고 4:5 시트를 배치한다 | `icons.pin_grid_prompt` |
+| `icons/pin_one.md` | 핀 1개 렌더(투명). 격자에서 못 잘라낸 칸만 다시 그린다 | `icons.pin_one_prompt` |
+| `icons/_pin_style.md` | 핀 공통 스타일 블록 (partial, pin_grid·pin_one 이 include) — 평면 그래픽 + 극사실 에나멜·금속, 브랜드 색·톤 | — |
+| `icons/_pin_cell_{logo,monogram,word,name,topic}.md` | 핀 칸 설명(로고 첨부 / 모노그램 / 단어 / 이름 / 아이콘 주제) (partial, 변수로 넣는다) | `icons.pin_cells` |
 | `icons/propose_system.md` · `propose_user.md` | (svg 방식, `ICON_RENDER=svg`) 기능명 10개 제안 + 도형 | `icons.propose_and_draw` |
 | `icons/redraw_system.md` · `redraw_user.md` | (svg) 아이콘 하나 다시 그리기 | `icons.redraw_one` |
 | `icons/more_system.md` · `more_user.md` | (svg) 부족한 기능 추가 제안 | `icons.propose_more` |
 | `icons/_output_spec.md` | (svg) 아이콘 출력 JSON 규격 (partial, 세 System 이 include) | — |
-| `image/background.md` | 배경 이미지 생성 (표현 방식 `{{style}}` + 구도 `{{composition}}`) | `imagegen.build_prompt` |
+| `image/background.md` | 배경 이미지 생성 (표현 방식 `{{style}}` + 구도 `{{composition}}` + 브랜드 색 `{{brand_colors}}`) | `imagegen.build_prompt` |
+| `image/_brand_colors.md` | 배경의 브랜드 색 블록 (partial): 강조색(없으면 주조색)은 포인트로 15% 이내, 큰 면은 브랜드 배경색(없으면 밝은 중성색). 강조·주조색이 없으면 붙지 않는다 | `imagegen.brand_color_line` |
 | `image/composition/{가로형,정사각,세로형}.md` | 비율군(템플릿)별 구도. 배경은 비율군마다 1장 생성 | `imagegen.build_prompt` |
 | `image/style/{실사인물,실사제품,플랫일러스트,3D렌더,그래픽패턴}.md` | 배경 형태(표현 방식). 브리프 `image_style` 또는 자동 선택(`imagegen.pick_style`)으로 파일을 고른다 | `imagegen.build_prompt` |
 | `image/product_ref.md` | 제품 누끼 이미지를 참조 이미지로 첨부할 때 background 프롬프트 앞에 붙는 문장 (`{{product_name}}`, `{{base}}`) | `imagegen.build_prompt(product=True)` |

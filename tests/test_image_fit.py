@@ -959,6 +959,10 @@ def test_composite_mode_generates_clean_background_and_pastes_original_cutout(en
     lay = rows[0]["background"]["layout"]
     assert lay["product_mode"] == "composite" and lay["product_asset_id"] == aid and lay["prompts"][0].startswith("image/product_slot@")
     assert lay["clean_file"] and lay["product_placed"]["box"][3] <= lay["product_placed"]["slot"][3]
+    # 프롬프트가 비운 자리 = 실제로 누끼를 붙인 상자(+여유), 상품 모양 문장이 함께 들어간다
+    from app import imagegen
+    assert all("이 자리에 놓일 상품은" in p for p in prompts)
+    assert any(imagegen.product_slot_vars(lay["template"], lay["product_placed"])["slot"] in p for p in prompts)
     with env["Local"]() as db:
         comp_path = db.get(env["models"].GeneratedImage, rows[0]["background"]["id"]).file_path
     comp = Image.open(storage.local(comp_path)).convert("RGB")
@@ -967,6 +971,24 @@ def test_composite_mode_generates_clean_background_and_pastes_original_cutout(en
     cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
     assert comp.getpixel((cx, cy)) != clean.getpixel((cx, cy)), "제품 자리에 누끼가 붙었다"
     assert comp.getpixel((3, 3)) == clean.getpixel((3, 3)), "제품 밖은 생성 배경 그대로"
+
+
+def test_product_scale_small_places_smaller_cutout_and_prompt_follows(env):
+    """제품 크기 '작게': 누끼를 줄인 구역에 붙이고, 배경 프롬프트도 그 자리만 비운다. 모르는 값은 422."""
+    from app import compose, imagegen
+    c, ids, prompts = env["client"], env["ids"], env["prompts"]
+    _upload_product(env)
+    d = c.get(f"/api/designs/{ids['design']}").json()
+    assert c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_scale": "아주 작게"}}).status_code == 422
+    r = c.patch(f"/api/designs/{ids['design']}", json={"brief": {**d["brief"], "product_scale": "작게"}})
+    assert r.status_code == 200 and r.json()["brief"]["product_scale"] == "작게"
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    lay = c.get(f"/api/designs/{ids['design']}/images").json()[0]["background"]["layout"]
+    p = lay["product_placed"]
+    W, H = p["canvas"]
+    sx0, sy0, sx1, sy1 = compose.product_slot(lay["template"], "작게")
+    assert p["slot"] == [round(sx0 * W), round(sy0 * H), round(sx1 * W), round(sy1 * H)]
+    assert any(imagegen.product_slot_vars(lay["template"], p)["slot"] in q for q in prompts)
 
 
 def test_opaque_product_photo_falls_back_to_reference_mode(env):
@@ -1093,3 +1115,28 @@ def test_unreviewed_campaign_input_is_editable(env):
     assert d["status"] == "미검수"
     r = c.patch(f"/api/designs/{did}", json={"brief": {**d["brief"], "description": "설명 추가"}})
     assert r.status_code == 200 and r.json()["brief"]["description"] == "설명 추가"
+
+
+def test_prompt_preview_matches_sent_prompt(env):
+    """대기 화면의 'AI 주문서'(prompt-preview)는 실제로 처음 보내는 배경 프롬프트와 같은 문장이다(모델 호출 없음)."""
+    from app import imagegen
+    c, ids, calls = env["client"], env["ids"], env["calls"]
+    pid = ids["presets"]["피드 4:5"]
+    pv = c.get(f"/api/designs/{ids['design']}/background/prompt-preview", params={"preset_id": pid}).json()
+    assert calls == [], "미리보기는 이미지 모델을 부르지 않는다"
+    assert pv["template"] == "세로형" and pv["style"] == "실사 제품·공간"
+    tags = [b["tag"] for b in pv["blocks"]]
+    assert tags[:3] == ["표현 방식", "구도", "장면"] and "반복 확인" in tags
+    c.post(f"/api/designs/{ids['design']}/background/regenerate", json={})
+    assert imagegen.prompt_blocks(env["prompts"][0]) == pv["blocks"], "첫 비율군(세로형)에 보낸 문장과 같다"
+    # preset_id 가 없으면 시안의 첫 지면, 지면이 없으면 404
+    assert c.get(f"/api/designs/{ids['design']}/background/prompt-preview").json()["template"] == "세로형"
+    assert c.get("/api/designs/9999/background/prompt-preview").status_code == 404
+
+
+def test_prompt_blocks_joins_untagged_lines():
+    from app import imagegen
+    text = "[제품 자리 — 가장 중요한 규칙] 비워 둔다.\n- 구역 안에는 받침만\n- 사람은 바깥\n[장면] 한 장면"
+    assert imagegen.prompt_blocks(text) == [
+        {"tag": "제품 자리 — 가장 중요한 규칙", "text": "비워 둔다.\n- 구역 안에는 받침만\n- 사람은 바깥"},
+        {"tag": "장면", "text": "한 장면"}]

@@ -155,6 +155,20 @@ def fit_blur(img: Image.Image, w: int, h: int) -> Image.Image:
 # 가로형은 오른쪽 구역. 배경 프롬프트(image/product_slot.md)가 같은 숫자로 그 구역을 비워 두게 한다.
 PRODUCT_SLOT = {VERTICAL: (0.14, 0.06, 0.86, 0.66), SQUARE: (0.16, 0.05, 0.84, 0.70), HORIZONTAL: (0.40, 0.08, 0.94, 0.88)}
 PRODUCT_MAX_UPSCALE = 1.5    # 누끼가 구역보다 작을 때 늘리는 상한(그 이상은 흐려지므로 구역 안에서 작게 둔다)
+# 제품 크기(캠페인 입력 product_scale): 구역의 가로·세로에 곱하는 배율. 세로형·정사각은 구역 아랫변 가운데(받침), 가로형은 구역 가운데를
+# 기준으로 줄인다. 면적은 캔버스의 약 43% / 24% / 12% — 12% 아래로는 모바일 썸네일에서 제품을 알아보기 어렵다.
+PRODUCT_SCALES = {"크게": 1.0, "보통": 0.75, "작게": 0.53}
+DEFAULT_PRODUCT_SCALE = "크게"
+
+
+def product_slot(template: str, size: str = DEFAULT_PRODUCT_SCALE) -> tuple[float, float, float, float]:
+    """제품 크기(PRODUCT_SCALES)를 적용한 제품 구역 (x0, y0, x1, y1), 캔버스 대비 비율. 크게는 PRODUCT_SLOT 그대로."""
+    x0, y0, x1, y1 = PRODUCT_SLOT[template]
+    k = PRODUCT_SCALES.get(size, 1.0)
+    w, h = (x1 - x0) * k, (y1 - y0) * k
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    top = cy - h / 2 if template == HORIZONTAL else y1 - h
+    return cx - w / 2, top, cx + w / 2, top + h
 
 
 def has_cutout(im: Image.Image) -> bool:
@@ -166,22 +180,38 @@ def has_cutout(im: Image.Image) -> bool:
     return sum(hist[:250]) / max(1, a.width * a.height) >= 0.03
 
 
-def paste_product(bg: Image.Image, product: Image.Image, template: str) -> tuple[Image.Image, dict]:
-    """생성된 빈 배경 위에 제품 누끼 원본을 그대로(AI 재생성 없이) 붙인다. 제품 구역(PRODUCT_SLOT)에 비율을 지켜 맞추고,
-    세로형·정사각은 구역 아랫변에 발을 붙여 서 있게, 가로형은 구역 가운데에 둔다. 발밑에 접지 그림자를 깐다.
-    반환: (합성 이미지 RGB, 기록용 {slot, box, scale})."""
-    bg = bg.convert("RGB")
-    W, H = bg.size
+def trim_cutout(product: Image.Image) -> Image.Image:
+    """누끼의 투명 여백을 잘라낸 RGBA. 배치 크기는 이 잘라낸 크기(실제 제품 모양) 기준이다."""
     prod = product.convert("RGBA")
     bbox = prod.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
-    if bbox:
-        prod = prod.crop(bbox)
-    sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(PRODUCT_SLOT[template], (W, H, W, H)))
+    return prod.crop(bbox) if bbox else prod
+
+
+def product_box(W: int, H: int, product: Image.Image, template: str, size: str = DEFAULT_PRODUCT_SCALE) -> dict:
+    """(W, H) 캔버스에서 제품 누끼가 실제로 놓일 상자. 제품 구역(product_slot: PRODUCT_SLOT 에 제품 크기 size 적용)에 비율을 지켜 맞추되 PRODUCT_MAX_UPSCALE 까지만
+    키우고, 세로형·정사각은 구역 아랫변에 발을 붙이고 가로형은 구역 가운데에 둔다. paste_product 와 배경 프롬프트가 같은 값을 쓴다.
+    반환: {slot, box, scale, src, canvas}. slot·box 는 픽셀 (x0, y0, x1, y1), src 는 여백을 잘라낸 누끼의 픽셀 크기 [w, h],
+    canvas 는 계산에 쓴 캔버스 크기 [W, H]."""
+    prod = trim_cutout(product)
+    sx0, sy0, sx1, sy1 = (round(f * v) for f, v in zip(product_slot(template, size), (W, H, W, H)))
     s = min((sx1 - sx0) / prod.width, (sy1 - sy0) / prod.height, PRODUCT_MAX_UPSCALE)
     pw, ph = max(1, round(prod.width * s)), max(1, round(prod.height * s))
-    prod = prod.resize((pw, ph), Image.LANCZOS)
     x = sx0 + (sx1 - sx0 - pw) // 2
     y = sy1 - ph if template != HORIZONTAL else sy0 + (sy1 - sy0 - ph) // 2
+    return {"slot": [sx0, sy0, sx1, sy1], "box": [x, y, x + pw, y + ph], "scale": round(s, 3), "src": [prod.width, prod.height],
+            "canvas": [W, H]}
+
+
+def paste_product(bg: Image.Image, product: Image.Image, template: str,
+                  size: str = DEFAULT_PRODUCT_SCALE) -> tuple[Image.Image, dict]:
+    """생성된 빈 배경 위에 제품 누끼 원본을 그대로(AI 재생성 없이) 붙인다. 위치·크기는 product_box,
+    발밑에 접지 그림자를 깐다. 반환: (합성 이미지 RGB, 기록용 {slot, box, scale, src, canvas})."""
+    bg = bg.convert("RGB")
+    W, H = bg.size
+    placed = product_box(W, H, product, template, size)
+    x, y, x1, y1 = placed["box"]
+    pw, ph = x1 - x, y1 - y
+    prod = trim_cutout(product).resize((pw, ph), Image.LANCZOS)
     canvas = bg.convert("RGBA")
     # 접지 그림자: 발밑의 납작한 타원을 흐려 깐다(제품이 허공에 뜨지 않게)
     sh_w, sh_h = round(pw * 0.78), max(6, round(ph * 0.05))
@@ -192,7 +222,7 @@ def paste_product(bg: Image.Image, product: Image.Image, template: str) -> tuple
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     layer.paste(prod, (x, y))
     canvas = Image.alpha_composite(canvas, layer)
-    return canvas.convert("RGB"), {"slot": [sx0, sy0, sx1, sy1], "box": [x, y, x + pw, y + ph], "scale": round(s, 3)}
+    return canvas.convert("RGB"), placed
 
 
 def load_logo(path: str, mime: str) -> Image.Image:

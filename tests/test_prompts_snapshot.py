@@ -144,6 +144,23 @@ def test_icon3d_render_prompt_minimal():
     _assert_snapshot("icons3d__render_minimal", icons.render_prompt("보관함", "", vars) + "\n")
 
 
+def test_pin_grid_prompt():
+    """핀 뱃지 격자: 로고 첨부 + 단어·이름 + 아이콘 주제 5개."""
+    from app import icons
+    sv = icons.pin_style_vars(BRAND["colors"], BRAND["image_tone"])
+    topics = [("보관함", "뚜껑이 살짝 열린 둥근 상자"), ("선물", "리본을 묶은 작은 상자"), ("알림", "둥근 종"),
+              ("수집", "캡슐 세 개가 담긴 진열장"), ("공개", "반쯤 열린 캡슐")]
+    cells = icons.pin_cells("쿠챠", "호기심", topics, has_logo=True)
+    _assert_snapshot("pins__grid", icons.pin_grid_prompt("쿠챠", cells, sv, ["최저가"]) + "\n")
+
+
+def test_pin_one_prompt_minimal():
+    """핀 1개 다시 그리기 + 로고·브랜드 색·톤이 없을 때의 분기(모노그램, '지정 없음')."""
+    from app import icons
+    cell = icons.pin_cells("쿠챠", "호기심", [("a", "")] * 5, has_logo=False)[0]
+    _assert_snapshot("pins__one_minimal", icons.pin_one_prompt("쿠챠", cell, icons.pin_style_vars([], {}), []) + "\n")
+
+
 # ---- 배경 이미지 (imagegen) ----
 @pytest.mark.parametrize("template", ["가로형", "정사각", "세로형"])
 def test_background_prompt(template):
@@ -180,6 +197,20 @@ def test_background_variant_prompt():
     _assert_snapshot("image__variant_가로형", imagegen.build_variant_prompt(base) + "\n")
 
 
+def test_background_brand_colors_prompt():
+    """[브랜드 색] 문장 (image/_brand_colors.md): 브랜드 배경색이 있을 때 / 없을 때(밝은 중성색) / 강조색이 없을 때(주조색)."""
+    from app import imagegen
+    _assert_snapshot("image__brand_colors_세로형",
+                     imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", colors=BRAND["colors"]) + "\n")
+    no_bg = [c for c in BRAND["colors"] if c["role"] != "배경색"]
+    no_accent = [c for c in BRAND["colors"] if c["role"] != "강조색"]
+    _assert_snapshot("image__brand_colors_lines",
+                     imagegen.brand_color_line(no_bg).strip() + "\n" + imagegen.brand_color_line(no_accent).strip() + "\n")
+    assert imagegen.brand_color_line([{"role": "배경색", "hex": "#FFFFFF"}]) == ""
+    assert (imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", colors=[])
+            == imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형"))
+
+
 # ---- 분석 화면 비전 채점 (analysis): 이미지는 보내지 않고 문장만 고정한다 ----
 def test_judge_prompt():
     from app import analysis, prompts
@@ -196,3 +227,50 @@ def test_background_product_slot_prompt():
     _assert_snapshot("image__product_slot_세로형", base + "\n")
     base = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "가로형", "실사 제품·공간", product=True, variant=True, composite=True)
     _assert_snapshot("image__product_slot_variant_가로형", imagegen.build_variant_prompt(base) + "\n")
+
+
+def test_background_product_slot_prompt_sized_to_cutout():
+    """누끼 크기를 알면 고정 구역 대신 누끼가 실제로 놓일 자리(compose.product_box + 사방 3%)만 비우고 모양을 알려 준다."""
+    from PIL import Image
+    from app import compose, imagegen
+    tall = Image.new("RGBA", (300, 900), (10, 120, 200, 255))      # 1:3 길쭉한 병
+    placed = compose.product_box(1024, 1536, tall, "세로형")
+    text = imagegen.build_prompt("쿠챠", BRAND["image_tone"], BRIEF, "세로형", "실사 제품·공간", product=True, composite=True,
+                                 placed=placed)
+    _assert_snapshot("image__product_slot_placed_세로형", text + "\n")
+
+
+@pytest.mark.parametrize("style", ["실사 인물", "실사 제품·공간", "플랫 일러스트", "3D 렌더", "그래픽 패턴"])
+def test_no_people_styles_forbid_people_everywhere(style):
+    """사람 없는 형태는 어디에서도 사람이 있다는 전제를 두지 않고, 금지를 끝에서 한 번 더 말한다(시안 12: 실사 제품·공간에 인물)."""
+    from app import imagegen
+    tone = {"description": "거리에서 백팩을 멘 청년을 담은 스트리트 사진 느낌의 실사 인물"}
+    text = imagegen.build_prompt("모노백", tone, BRIEF, "세로형", style, product=True, composite=True)
+    if style in imagegen.NO_PEOPLE_STYLES:
+        assert "사람이 등장하는 장면이면" not in text and "사람이나 주 피사체" not in text
+        assert "타깃(그리지 않음, 분위기 참고)" in text and "톤 문장에 인물이 나와도" in text
+        assert text.rstrip().endswith("한 조각도 없다.")
+    else:
+        assert "사람이 등장하는 장면이면" in text and "타깃: " in text and "한 조각도 없다" not in text
+
+
+def test_no_people_tone_drops_person_sentences_and_composite_scene_is_empty_place():
+    """시안 12 2차: 톤 문장의 '백팩을 멘 청년' 같은 사람 묘사는 사람 없는 형태에서 빼고, 투명 누끼 합성이면 [장면]은 '상황'이 아니라
+    상품이 내려놓일 빈 장소다. 인물 형태는 톤·장면을 그대로 둔다."""
+    from app import imagegen
+    tone = {"description": "거리·캠퍼스에서 백팩을 멘 청년을 담은 스트리트 사진 느낌의 실사 인물. 라임 포인트, 대비 강한 모노톤. 금지: 이미지 안의 글자, 가짜 로고."}
+    assert imagegen.tone_text("실사 제품·공간", tone["description"]) == "라임 포인트, 대비 강한 모노톤. 금지: 이미지 안의 글자, 가짜 로고"
+    assert imagegen.tone_text("실사 인물", tone["description"]) == tone["description"]
+    assert imagegen.tone_text("3D 렌더", "밝은 인물 사진.") == "지정 없음"
+    assert imagegen.tone_text("3D 렌더", "아이콘처럼 단순한 형태.") == "아이콘처럼 단순한 형태", "단어 일부(아이콘)는 사람으로 보지 않는다"
+    brief = {"product_name": "모노 노트북 백팩 20L", "key_message": "출근길도 가볍게", "target": "통학·출퇴근하는 20대"}
+    text = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 제품·공간", product=True, composite=True)
+    assert "백팩을 멘" not in text and "청년" not in text and "가방·옷" not in text
+    assert "상품이 내려놓일 장소 한 곳을 그린다" in text and "상황을 한 장면으로" not in text
+    assert "'주 피사체'는 이 비워 둔 상품 자리를 뜻한다" in text
+    people = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 인물", product=True, composite=True)
+    assert "백팩을 멘 청년" in people and "상황을 한 장면으로" in people
+    plain = imagegen.build_prompt("모노백", tone, brief, "세로형", "실사 제품·공간")
+    assert "상황을 한 장면으로" in plain and "청년" not in plain, "합성이 아니면 기본 장면, 톤 거르기는 그대로"
+    refs = imagegen.prompt_refs("세로형", "실사 제품·공간", composite=True)
+    assert any(r.startswith("image/_scene_place@") for r in refs)

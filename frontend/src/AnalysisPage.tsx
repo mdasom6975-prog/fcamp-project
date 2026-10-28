@@ -293,7 +293,7 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
                   )
                 })}
                 {judgeMsg && <p className="an-err">{judgeMsg}</p>}
-                <p className="muted an-note">배경 프롬프트에는 브랜드 색이 들어가지 않으므로 배경의 색 일치는 톤 설명에서 비롯된 <em>우연한 일치</em>의 정도입니다. 색을 직접 지시하는 것은 아이콘 프롬프트와 합성 단계(제목·CTA·스크림)입니다.</p>
+                <p className="muted an-note">배경 프롬프트는 강조색을 <em>포인트(화면의 15% 이내)</em>로만 쓰고 큰 면은 브랜드 배경색으로 두게 하므로, 배경의 브랜드 색 면적은 낮게 나올 수 있습니다. 작은 포인트 색은 주요 색 6개로 줄이는 과정에서 주변 색과 섞여 잡히지 않기도 합니다. 브랜드 색을 그대로 칠하는 것은 아이콘 프롬프트와 합성 단계(제목·CTA·스크림)입니다.</p>
 
                 {data.results.icons.length > 0 && (
                   <>
@@ -354,7 +354,7 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
                 ))}
               </tbody>
             </table>
-            <p className="muted an-note">'—' 는 그 단계에 들어가지 않는다는 뜻입니다. 예: 허용 색상과 폰트는 배경 프롬프트에 없고 합성 코드에서만 쓰이므로, 배경 이미지의 색은 톤 설명으로만 간접 유도됩니다.</p>
+            <p className="muted an-note">'—' 는 그 단계에 들어가지 않는다는 뜻입니다. 예: 폰트는 배경 프롬프트에 없고 합성 코드에서만 쓰입니다. 허용 색상은 배경 프롬프트에 포인트 색·큰 면의 색으로 들어가고, 합성 단계에서 글자·버튼 색으로 다시 쓰입니다.</p>
           </section>
 
           {/* ② 프롬프트 */}
@@ -426,7 +426,7 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
                   {data.cost.rows.map((r, i) => (
                     <tr key={i} className={r.ok ? '' : 'bad'}>
                       <td title={r.ts}>{when(r.ts)}</td>
-                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', product: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
+                      <td>{data.cost.stage_label[({ copy: 'copy', copy_fit: 'copy', background: 'background', variant: 'background', product: 'background', icon: 'icon', icon_names: 'icon', icon_redraw: 'icon', pin: 'icon', judge: 'judge' } as Record<string, string>)[r.kind] ?? ''] ?? '-'}</td>
                       <td>{KIND[r.kind] ?? r.kind}</td><td>{r.api}</td><td>{r.model}{r.served_by ? ` → ${r.served_by}` : ''}</td>
                       <td>{r.api === 'chat' ? `${tok(r.tokens_in ?? 0)} / ${tok(r.tokens_out ?? 0)}` : `${r.size ?? ''} ${r.quality ?? ''}`}</td>
                       <td>{sec(r.ms)}</td><td>{usd(r.cost_usd)}{r.estimated ? '*' : ''}</td>

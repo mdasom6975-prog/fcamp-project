@@ -3,6 +3,7 @@
 import base64
 import io
 import os
+import re
 import threading
 from datetime import datetime, timezone
 
@@ -85,6 +86,8 @@ def best_single_template(sizes: list[tuple[int, int]]) -> str:
 STYLES = {"실사 인물": "실사인물", "실사 제품·공간": "실사제품", "플랫 일러스트": "플랫일러스트",
           "3D 렌더": "3D렌더", "그래픽 패턴": "그래픽패턴"}
 AUTO_STYLE = "자동"
+# 사람이 나오면 안 되는 형태. 이 형태면 프롬프트의 사람 관련 문장을 '그리지 않는다'로 바꾸고 끝에서 한 번 더 말한다(people_vars)
+NO_PEOPLE_STYLES = ("실사 제품·공간", "3D 렌더", "그래픽 패턴")
 DEFAULT_STYLE = "실사 제품·공간"
 # 자동 선택 키워드(브랜드 image_tone 설명 + 브리프 설명에서 찾는다). 앞에 있는 규칙이 우선.
 _STYLE_RULES = [("플랫 일러스트", ("일러스트", "드로잉", "벡터", "만화")),
@@ -183,8 +186,53 @@ PRODUCT_ATTACH_VARIANT = ("첨부한 이미지는 두 장이다. 1번은 장면 
                           "모양이 부정확하므로 따라 그리지 말고, 1번에서는 장면·소품·조명·색만 참조한다. 상품은 반드시 2번 제품 원본을 따른다.")
 
 
+def brand_color_line(colors: list[dict] | None) -> str:
+    """background.md 의 {{brand_colors}} 값. 강조색(없으면 주조색)은 포인트로만, 큰 면은 브랜드 배경색(없으면 밝은 중성색).
+    문장은 prompts/image/_brand_colors.md, 분기는 여기서 계산한다. 강조·주조색이 모두 없으면 빈칸(1.7 과 같은 프롬프트)."""
+    by_role = {c.get("role"): c["hex"] for c in colors or [] if c.get("hex")}
+    accent = by_role.get("강조색") or by_role.get("주조색")
+    if not accent:
+        return ""
+    sub = [f"{by_role[r]}({r})" for r in ("주조색", "보조색") if r in by_role and by_role[r] != accent]
+    field = (f"{by_role['배경색']}(브랜드 배경색) 계열의 색" if by_role.get("배경색")
+             else "흰색, 밝은 회색, 연한 크림 같은 밝은 중성색")
+    return "\n" + prompts.render("image/_brand_colors", accent=accent, field=field,
+                                 sub=f"{', '.join(sub)} 는 쓰더라도 아주 작게 쓴다. " if sub else "")
+
+
+def people_vars(style: str) -> dict:
+    """background.md·product_slot.md 의 사람 관련 변수. 사람 없는 형태(NO_PEOPLE_STYLES)면 금지 문장, 인물 형태면 예전 문장·빈칸.
+    분기는 여기서 계산해 md 에는 조건문을 두지 않는다."""
+    if style in NO_PEOPLE_STYLES:
+        return {"target_label": "타깃(그리지 않음, 분위기 참고)",
+                "tone_people": " 톤 문장에 인물이 나와도 이 형태에서는 사람을 그리지 않고 색감·조명·질감만 따른다.",
+                "repeat_people": " 사람·얼굴·손·팔 등 신체 일부는 한 명도, 한 조각도 없다.",
+                "people": "사람·얼굴·손·팔·신체 일부를 화면 어디에도 그리지 않는다. 몸에 걸치는 물건은 바닥이나 받침 위에 내려놓인 모습으로만 그린다."}
+    return {"target_label": "타깃", "tone_people": "", "repeat_people": "",
+            "people": "사람이 등장하는 장면이면 사람은 구역 바깥(옆이나 뒤편, 초점이 흐린 거리)에 두고, 사람의 손·팔·몸이 구역 안으로 "
+                      "들어오거나 상품을 든 모습을 그리지 않는다. 구역 위쪽도 사람의 머리나 몸이 걸치지 않게 한다."}
+
+
+# 사람 없는 형태에서 톤 문장에서 뺄 사람 묘사 단어. 이 단어가 든 문장은 통째로 뺀다(금지 문장을 덧붙여도 구체 명사를 따라 그렸다)
+TONE_PEOPLE_WORDS = ("인물", "사람", "청년", "남성", "여성", "남자", "여자", "소년", "소녀", "모델", "얼굴", "가족", "커플",
+                     "학생", "직장인", "포즈", "멘 ", "메고", "착용")
+
+
+def tone_text(style: str, description: str | None) -> str:
+    """background.md 의 {{tone}}. 사람 없는 형태(NO_PEOPLE_STYLES)면 사람 묘사가 든 문장을 빼고(색감·조명·질감 문장만 남김),
+    남는 문장이 없으면 '지정 없음'. 인물 형태는 그대로. 끝의 마침표는 md 문장이 붙이므로 뗀다(사람 없는 형태만, 스냅샷 유지)."""
+    text = (description or "").strip()
+    if not text:
+        return "지정 없음"
+    if style not in NO_PEOPLE_STYLES:
+        return text
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip() and not any(w in s for w in TONE_PEOPLE_WORDS)]
+    return " ".join(kept).rstrip(". ") or "지정 없음"
+
+
 def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style: str | None = None,
-                 single: bool = False, product: bool = False, variant: bool = False, composite: bool = False) -> str:
+                 single: bool = False, product: bool = False, variant: bool = False, composite: bool = False,
+                 colors: list[dict] | None = None, placed: dict | None = None) -> str:
     """입력 내용을 번역 없이 한국어 그대로 프롬프트로 만든다. 브랜드명·문구는 글자로 그려지지 않게 넣지 않는다.
 
     문장은 prompts/image/background.md, 템플릿별 구도는 prompts/image/composition/<가로형|정사각|세로형>.md,
@@ -195,6 +243,8 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     composite=True 면 제품을 이미지에 그리지 않고 제품 구역(compose.PRODUCT_SLOT)을 비워 두게 한다(product_slot.md). 제품 누끼는 생성 뒤 코드가
     그 자리에 그대로 붙이므로 참조 이미지로 첨부하지 않는다(product 는 무시).
     비율군별 생성이라도 규격 비율로 조금은 잘라(cover_crop) 쓰므로 구도 규칙은 중앙 영역에 주 피사체를 두게 한다.
+    colors 는 브랜드 허용 색상(BrandVersion.colors). 주면 [브랜드 톤] 뒤에 [브랜드 색] 문장이 붙는다(brand_color_line).
+    placed 는 생성 크기 기준 compose.product_box 결과. composite 일 때 주면 고정 구역 대신 누끼가 실제로 놓일 자리만 비운다(product_slot_vars).
     """
     style = style or pick_style(tone, brief)[0]
     if style not in STYLES:
@@ -204,18 +254,64 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
     composition = prompts.render(f"image/composition/{SINGLE_COMPOSITION if single else template}")
     style_text = prompts.render(f"image/style/{STYLES[style]}", target=target)
     # composite: 상품명·설명이 장면에 들어가면 모델이 비워 둔 구역에 같은 종류의 물건을 그린다 → 중립어로 바꾸고 설명은 뺀다
-    text = prompts.render("image/background", product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
-                          description="" if composite else brief.get("description") or "",
-                          key_message=brief.get("key_message") or "지정 없음", target=target,
-                          tone=tone.get("description") or "지정 없음", composition=composition, style=style_text)
+    pv = people_vars(style)
+    scene = prompts.render(f"image/{scene_name(style, composite)}",
+                           product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
+                           description="" if composite else brief.get("description") or "",
+                           key_message=brief.get("key_message") or "지정 없음", target=target, target_label=pv["target_label"])
+    text = prompts.render("image/background", scene=scene, tone=tone_text(style, tone.get("description")),
+                          composition=composition, style=style_text, brand_colors=brand_color_line(colors), **pv)
     if composite:
-        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
-        text = prompts.render("image/product_slot",
-                              slot=f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", base=text)
+        text = prompts.render("image/product_slot", base=text, people=people_vars(style)["people"],
+                              **product_slot_vars(template, placed))
     elif product:
         attach = PRODUCT_ATTACH_VARIANT if variant else PRODUCT_ATTACH
         text = prompts.render("image/product_ref", product_name=brief.get("product_name"), attach=attach, base=text)
     return text
+
+
+SLOT_MARGIN = 0.03    # 누끼 상자 바깥으로 더 비워 두는 여유(캔버스 대비, 사방). 접지 그림자·가장자리 소품 겹침 방지
+
+
+def product_slot_vars(template: str, placed: dict | None = None) -> dict:
+    """product_slot.md 의 {{slot}}·{{shape}}. placed(compose.product_box 결과)가 있으면 누끼가 실제로 놓일 상자에 사방 SLOT_MARGIN 을
+    더한 자리와 상품 모양·바닥 높이를, 없으면 비율군 고정 구역(compose.PRODUCT_SLOT)과 빈 shape 를 준다.
+    길쭉한 병이나 저해상도 누끼는 고정 구역의 일부만 차지하므로, 실제 자리만 비워야 나머지가 빈 받침으로 남지 않는다."""
+    if not placed:
+        x0, y0, x1, y1 = (round(v * 100) for v in compose.PRODUCT_SLOT[template])
+        return {"slot": f"가로 {x0}~{x1}%, 세로 {y0}~{y1}%", "shape": ""}
+    W, H = placed["canvas"]
+    bx0, by0, bx1, by1 = placed["box"]
+    x0, y0 = max(0.0, bx0 / W - SLOT_MARGIN), max(0.0, by0 / H - SLOT_MARGIN)
+    x1, y1 = min(1.0, bx1 / W + SLOT_MARGIN), min(1.0, by1 / H + SLOT_MARGIN)
+    r = (bx1 - bx0) / max(1, by1 - by0)
+    kind = "세로로 긴 물건" if r < 0.8 else "가로로 넓은 물건" if r > 1.25 else "정사각에 가까운 물건"
+    ratio = f"1:{1 / r:.1f}" if r < 1 else f"{r:.1f}:1"
+    shape = (f" 이 자리에 놓일 상품은 {kind}(가로:세로 {ratio})으로, 화면 가로의 약 {round((bx1 - bx0) / W * 100)}%, "
+             f"세로의 약 {round((by1 - by0) / H * 100)}%를 차지하며 바닥이 세로 {round(by1 / H * 100)}% 높이에 닿는다. "
+             "받침의 윗면은 그 높이에 맞추고, 이 자리 바깥은 비워 두지 말고 [장면]의 공간·소품으로 자연스럽게 채운다.")
+    return {"slot": f"가로 {round(x0 * 100)}~{round(x1 * 100)}%, 세로 {round(y0 * 100)}~{round(y1 * 100)}%", "shape": shape}
+
+
+def scene_name(style: str, composite: bool) -> str:
+    """[장면] partial 이름. 투명 누끼를 합성하는 사람 없는 형태는 '상품이 내려놓일 빈 장소'(_scene_place), 그 외는 기본 장면(_scene)."""
+    return "_scene_place" if composite and style in NO_PEOPLE_STYLES else "_scene"
+
+
+def prompt_blocks(text: str) -> list[dict]:
+    """프롬프트를 '[태그] 본문' 블록으로 나눈다(대기 화면의 주문서 미리보기용). 태그 없이 이어지는 줄은 앞 블록에 붙인다."""
+    blocks: list[dict] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        m = re.match(r"\s*\[([^\]]+)\]\s*(.*)", line)
+        if m:
+            blocks.append({"tag": m.group(1).strip(), "text": m.group(2).strip()})
+        elif blocks:
+            blocks[-1]["text"] = f"{blocks[-1]['text']}\n{line.strip()}".strip()
+        else:
+            blocks.append({"tag": "", "text": line.strip()})
+    return blocks
 
 
 def build_variant_prompt(base_prompt: str) -> str:
@@ -224,10 +320,13 @@ def build_variant_prompt(base_prompt: str) -> str:
 
 
 def prompt_refs(template: str, style: str, variant: bool = False, single: bool = False,
-                product: bool = False, composite: bool = False) -> list[str]:
+                product: bool = False, composite: bool = False, colors: list[dict] | None = None) -> list[str]:
     """결과 기록용: 이 배경을 만든 프롬프트 파일들의 이름@버전#해시."""
     refs = [prompts.ref("image/background"), prompts.ref(f"image/composition/{SINGLE_COMPOSITION if single else template}"),
-            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common")]
+            prompts.ref(f"image/style/{STYLES[style]}"), prompts.ref("image/_common"), prompts.ref("legal/_image_common"),
+            prompts.ref(f"image/{scene_name(style, composite)}")]
+    if brand_color_line(colors):
+        refs.append(prompts.ref("image/_brand_colors"))
     refs = ([prompts.ref("image/same_scene")] + refs) if variant else refs
     if composite:
         return [prompts.ref("image/product_slot")] + refs
@@ -366,10 +465,12 @@ def _is_fidelity_error(e: Exception) -> bool:
 
 def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
                      quality: str = OPENAI_QUALITY, model: str | None = None,
-                     product: Image.Image | None = None) -> Image.Image:
+                     product: Image.Image | None = None, kind: str | None = None,
+                     transparent: bool = False) -> Image.Image:
     """참조 이미지와 같은 장면을 (w, h) 크기·다른 구도로 다시 만든다 (OpenAI images.edit). 비용·한도는 생성 1장과 같다.
     reference 는 다른 비율군의 배경(없으면 None), product 는 제품 누끼 이미지(투명 PNG, 없으면 None).
-    둘 다 주면 [배경, 제품] 순서로 첨부한다. 하나는 있어야 한다."""
+    둘 다 주면 [배경, 제품] 순서로 첨부한다. 하나는 있어야 한다. kind 는 호출 기록용(없으면 variant/product).
+    transparent 면 투명 배경 PNG(RGBA)로 받는다(핀 뱃지 격자: 로고를 첨부하면서 잘라 쓸 알파가 필요하다)."""
     import openai
     if usage("openai")["exhausted"]:
         raise QuotaExceeded(f"오늘 설정한 이미지 생성 한도({DAILY_LIMIT}회)를 모두 사용했습니다. "
@@ -384,12 +485,13 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
         raise ValueError("참조 이미지나 제품 이미지가 필요합니다")
     model = model or OPENAI_MODEL
     extra = {"input_fidelity": VARIANT_FIDELITY} if (VARIANT_FIDELITY and fidelity_supported(model)) else {}
+    alpha = {"background": "transparent", "output_format": "png"} if transparent else {}
     def _edit(**kw):
-        kind = "variant" if reference is not None else "product"
-        with calllog.timed("images.edit", kind, "openai", model, size=f"{w}x{h}", quality=quality) as info:
+        k = kind or ("variant" if reference is not None else "product")
+        with calllog.timed("images.edit", k, "openai", model, size=f"{w}x{h}", quality=quality) as info:
             info["prompt_text"] = {"prompt": prompt}
             r = client().with_options(timeout=240.0, max_retries=0).images.edit(
-                model=model, image=files if len(files) > 1 else files[0], prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **kw)
+                model=model, image=files if len(files) > 1 else files[0], prompt=prompt, size=f"{w}x{h}", quality=quality, n=1, **alpha, **kw)
             calllog.note_image_usage(info, r)
             return r
     try:
@@ -408,7 +510,7 @@ def generate_variant(prompt: str, w: int, h: int, reference: Image.Image | None,
             raise QuotaExceeded("OpenAI 크레딧(결제 한도)이 부족합니다. OpenAI 결제 설정을 확인해 주세요")
         raise QuotaExceeded("OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요")
     _bump(provider="openai")
-    return Image.open(io.BytesIO(base64.b64decode(r.data[0].b64_json))).convert("RGB")
+    return Image.open(io.BytesIO(base64.b64decode(r.data[0].b64_json))).convert("RGBA" if transparent else "RGB")
 
 
 def generate_background(prompt: str, w: int, h: int, quality: str = OPENAI_QUALITY,

@@ -99,6 +99,9 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const [logoName, setLogoName] = useState('')
   const [logoDim, setLogoDim] = useState<{ w: number; h: number } | null>(null)
   const [logoSqDim, setLogoSqDim] = useState<{ w: number; h: number } | null>(null)
+  // 로고 칸별 업로드 오류·안내. 저장 카드의 msg 는 화면 밖에 있을 수 있어 로고 칸 바로 아래에 띄운다
+  const [logoNote, setLogoNote] = useState<{ ok: boolean; text: string } | null>(null)
+  const [logoSqNote, setLogoSqNote] = useState<{ ok: boolean; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [baseline, setBaseline] = useState('')      // 불러온/저장한 시점의 폼 (변경 여부 비교용)
   const [oldView, setOldView] = useState(false)       // 현재 버전이 아닌 이전 버전을 보는 중
@@ -124,7 +127,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const set = (f: BrandForm) => setForm(f)
 
   const newBrand = () => {
-    setSelected(null); setSavedId(null); setVersions([]); setViewVersion(null); setLogoName(''); setLogoDim(null); setMsg(null)
+    setSelected(null); setSavedId(null); setVersions([]); setViewVersion(null); setLogoName(''); setLogoDim(null); setMsg(null); setLogoNote(null); setLogoSqNote(null)
     const f0 = emptyForm(defaults.color_roles, defaults.levels)
     setForm(f0); setBaseline(JSON.stringify(f0)); setOldView(false)
   }
@@ -133,7 +136,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     const b = await api.brand(id, versionId)
     const v = b.version
     setSelected(id); setVersions(b.versions); setViewVersion(v.id); setMsg(null); setSavedId(null)
-    setLogoName(v.logo_asset_id ? `등록된 로고 (파일 #${v.logo_asset_id})` : ''); setLogoDim(null); setLogoSqDim(null)
+    setLogoName(v.logo_asset_id ? `등록된 로고 (파일 #${v.logo_asset_id})` : ''); setLogoDim(null); setLogoSqDim(null); setLogoNote(null); setLogoSqNote(null)
     const loaded: BrandForm = {
       name: b.name,
       description: b.description ?? '',
@@ -176,9 +179,15 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     }
   }
 
-  const upload = async (kind: 'logo' | 'font' | 'tone_ref', file: File | undefined, onOk: (r: { id: number; width: number | null; height: number | null; name: string }) => void) => {
+  // onErr 를 주면 오류를 저장 카드(msg) 대신 그 칸에 띄운다
+  const upload = async (kind: 'logo' | 'font' | 'tone_ref', file: File | undefined,
+    onOk: (r: { id: number; width: number | null; height: number | null; name: string; note?: string | null }) => void,
+    opts: { square?: boolean; onErr?: (text: string) => void } = {}) => {
     if (!file) return
-    try { onOk(await api.upload(kind, file)); setMsg(null) } catch (e) { setMsg({ ok: false, text: [(e as Error).message] }) }
+    try { onOk(await api.upload(kind, file, { square: opts.square })); setMsg(null) } catch (e) {
+      const text = (e as Error).message
+      if (opts.onErr) opts.onErr(text); else setMsg({ ok: false, text: [text] })
+    }
   }
 
   const setColor = (i: number, c: Partial<ColorRow>) =>
@@ -267,12 +276,13 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
         <section className="card">
           <header><h3>로고</h3><span className="tag-note">원본 비율 고정 · 재생성 금지</span></header>
           <div className="logo-row">
-            <div className="logo-box">
+            <button type="button" className="logo-box" title="로고 파일 선택" aria-label="로고 파일 선택"
+              onClick={() => logoInput.current?.click()}>
               {form.logo_asset_id ? (
                 <img src={`/api/assets/${form.logo_asset_id}/file`} alt="로고"
                   onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && i.naturalHeight) setLogoDim({ w: i.naturalWidth, h: i.naturalHeight }) }} />
-              ) : <span className="muted">로고 없음</span>}
-            </div>
+              ) : <span className="muted">클릭해서 로고 선택</span>}
+            </button>
             <label className="logo-margin">최소 여백 (로고 크기 대비 %)
               <input type="number" min={0} max={100} value={form.logo_margin_percent ?? ''}
                 onChange={(e) => set({ ...form, logo_margin_percent: e.target.value === '' ? null : Number(e.target.value) })} />
@@ -291,47 +301,49 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
                 onChange={(e) => {
                   const f = e.target.files?.[0]
                   e.target.value = ''
-                  if (f && f.size > 300 * 1024) { setMsg({ ok: false, text: ['로고 파일은 300KB 이하여야 합니다'] }); return }
+                  if (f && f.size > 300 * 1024) { setLogoNote({ ok: false, text: '로고 파일은 300KB 이하여야 합니다' }); return }
                   upload('logo', f, (r) => {
                     set({ ...form, logo_asset_id: r.id })
-                    setLogoName(r.name); setLogoDim(r.width && r.height ? { w: r.width, h: r.height } : null)
-                  })
+                    setLogoName(r.name); setLogoDim(r.width && r.height ? { w: r.width, h: r.height } : null); setLogoNote(null)
+                  }, { onErr: (text) => setLogoNote({ ok: false, text }) })
                 }} />
               <button type="button" className="logo-btn" onClick={() => logoInput.current?.click()}>
                 {form.logo_asset_id ? '원본 파일 교체' : '로고 파일 선택'}
               </button>
+              {logoNote && <div className={logoNote.ok ? 'logo-note' : 'logo-note err'}>{logoNote.text}</div>}
             </div>
           </div>
           {/* 정사각 로고: Google PMax 처럼 1:1 로고 자산을 요구하는 지면용. 합성에는 쓰지 않고 검수·내보내기에만 쓴다 */}
           <div className="logo-row" style={{ marginTop: 10 }}>
-            <div className="logo-box">
+            <button type="button" className="logo-box" title="정사각 로고 선택" aria-label="정사각 로고 선택"
+              onClick={() => logoSqInput.current?.click()}>
               {form.logo_square_asset_id ? (
                 <img src={`/api/assets/${form.logo_square_asset_id}/file`} alt="정사각 로고"
                   onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && i.naturalHeight) setLogoSqDim({ w: i.naturalWidth, h: i.naturalHeight }) }} />
-              ) : <span className="muted">정사각 로고 없음</span>}
-            </div>
+              ) : <span className="muted">클릭해서 정사각 로고 선택</span>}
+            </button>
             <div className="logo-info">
               <div className="logo-name">정사각 로고 (선택){logoSqDim && <span className="logo-ratio">{logoSqDim.w}×{logoSqDim.h}</span>}</div>
-              <div className="logo-help">Google PMax 처럼 1:1 로고 자산을 요구하는 지면에 쓰입니다. 1:1, 128×128 이상(권장 1200×1200), PNG·SVG. 기본 로고는 변형하지 않으므로 심볼형 파일을 따로 올리세요. 검수와 내보내기에만 쓰이고 이미지 합성에는 쓰지 않습니다.</div>
+              <div className="logo-help">Google PMax 처럼 1:1 로고 자산을 요구하는 지면에 쓰입니다. 1:1, 128×128 이상(권장 1200×1200), PNG·SVG. 1:1 이 아니면 로고는 그대로 두고 투명 여백을 넣어 정사각으로 만듭니다. 심볼형 파일이 있으면 그쪽이 더 잘 보입니다. 검수와 내보내기에만 쓰이고 이미지 합성에는 쓰지 않습니다.</div>
               <input ref={logoSqInput} type="file" hidden accept=".png,.svg,image/png,image/svg+xml"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
                   e.target.value = ''
-                  if (f && f.size > 300 * 1024) { setMsg({ ok: false, text: ['로고 파일은 300KB 이하여야 합니다'] }); return }
+                  if (f && f.size > 300 * 1024) { setLogoSqNote({ ok: false, text: '로고 파일은 300KB 이하여야 합니다' }); return }
+                  // 1:1 검사와 정사각 만들기는 서버(square)가 한다. 만들었으면 note 로 안내가 온다
                   upload('logo', f, (r) => {
-                    if (r.width && r.height && (Math.abs(r.width / r.height - 1) > 0.05 || Math.min(r.width, r.height) < 128)) {
-                      setMsg({ ok: false, text: [`정사각 로고는 1:1 이고 128×128 이상이어야 합니다 (올린 파일 ${r.width}×${r.height})`] }); return
-                    }
                     set({ ...form, logo_square_asset_id: r.id })
                     setLogoSqDim(r.width && r.height ? { w: r.width, h: r.height } : null)
-                  })
+                    setLogoSqNote(r.note ? { ok: true, text: r.note } : null)
+                  }, { square: true, onErr: (text) => setLogoSqNote({ ok: false, text }) })
                 }} />
               <div className="row">
                 <button type="button" className="logo-btn" onClick={() => logoSqInput.current?.click()}>
                   {form.logo_square_asset_id ? '정사각 로고 교체' : '정사각 로고 선택'}
                 </button>
-                {form.logo_square_asset_id && <button type="button" onClick={() => { set({ ...form, logo_square_asset_id: null }); setLogoSqDim(null) }}>제거</button>}
+                {form.logo_square_asset_id && <button type="button" onClick={() => { set({ ...form, logo_square_asset_id: null }); setLogoSqDim(null); setLogoSqNote(null) }}>제거</button>}
               </div>
+              {logoSqNote && <div className={logoSqNote.ok ? 'logo-note' : 'logo-note err'}>{logoSqNote.text}</div>}
             </div>
           </div>
         </section>

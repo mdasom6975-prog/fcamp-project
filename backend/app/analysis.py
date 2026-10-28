@@ -1,8 +1,9 @@
 """분석 화면(학습·개발용) 계산. 검수와 무관하게, 한 캠페인에 대해 세 가지를 한 페이지에 모은다.
 
 1. 입력 ↔ 결과: 브랜드 규칙·캠페인 입력이 어느 단계(카피·배경·아이콘 프롬프트 / 합성 코드 / 검수)에서 반영되는지 표로,
-   생성 배경·아이콘의 주요 색을 뽑아 브랜드 색과의 거리(ΔE, CIE76)를 수치로. 배경 프롬프트에는 색이 들어가지 않으므로
-   배경의 색 일치는 '우연한 일치'의 정도이고, 아이콘(색 지시 포함)에서만 의도한 일치를 본다.
+   생성 배경·아이콘의 주요 색을 뽑아 브랜드 색과의 거리(ΔE, CIE76)를 수치로. 배경 프롬프트는 강조색을 포인트(15% 이내)로만
+   지시하고 큰 면은 브랜드 배경색으로 두게 하므로(image/_brand_colors) 배경의 일치 면적은 낮게 나올 수 있다.
+   아이콘은 주조·보조·강조색만 쓰라고 지시하므로 면적 일치가 그대로 의도한 일치다.
    버튼을 누르면 Claude 가 배경 1장을 보고 톤·내용·표현 방식·금지 요소·글자 항목을 1~5점으로 채점한다(채팅 1회 과금,
    kind=judge, prompts/analysis/judge_*.md). 사람 평가를 대신하지 않는 참고값이다.
 2. 보낸 프롬프트: 호출 기록에 전문이 저장된 건(recorded) → DB 에 남은 배경·아이콘 프롬프트(stored) →
@@ -24,7 +25,7 @@ from . import db as db_module
 from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
 STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant", "product"),
-          "icon": ("icon", "icon_names", "icon_redraw"), "judge": ("judge",)}
+          "icon": ("icon", "icon_names", "icon_redraw", "pin"), "judge": ("judge",)}
 STAGE_OF = {k: st for st, ks in STAGES.items() for k in ks}
 STAGE_LABEL = {"copy": "시안 생성(카피)", "background": "배경 이미지 생성", "icon": "아이콘 생성", "judge": "비전 채점"}
 NEAR_DE = 20.0            # 이 ΔE 이하면 '브랜드 색에 가깝다'고 본다 (CIE76: 10 이하 거의 같은 색, 20 이하 같은 계열)
@@ -117,7 +118,7 @@ def mapping(bv: BrandVersion, brief: dict) -> list[dict]:
         ("logo", "로고", f"자리 {bv.logo_position or '좌상단(기본)'} · 여백 {(bv.logo_margin or {}).get('percent', '-')}%",
          {"copy": None, "background": None, "icon": None, "compose": "지면 모서리에 배치(자리·여백)", "review": "크기·여백 검사"}),
         ("colors", "허용 색상", _hexes(bv),
-         {"copy": None, "background": None, "icon": "주조·보조·강조색을 '이 색만 쓴다'로 지시", "compose": "제목 글자색·CTA 버튼·스크림", "review": "합성 색 검사"}),
+         {"copy": None, "background": "[브랜드 색] 줄: 강조색은 포인트(15% 이내), 큰 면은 브랜드 배경색", "icon": "주조·보조·강조색을 '이 색만 쓴다'로 지시", "compose": "제목 글자색·CTA 버튼·스크림", "review": "합성 색 검사"}),
         ("fonts", "폰트", ", ".join(f"{f.get('role')} {f.get('name') or '업로드'}" for f in (bv.fonts or [])) or "없음",
          {"copy": None, "background": None, "icon": None, "compose": "제목·본문 글꼴", "review": "글꼴 검사"}),
         ("icon_style", "아이콘 스타일", f"모서리 {st.get('corner') or '둥근'} · 재질 {st.get('material') or '자동'} · 굵기 {st.get('stroke_width') or 2}",

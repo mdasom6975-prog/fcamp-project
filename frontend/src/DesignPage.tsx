@@ -7,7 +7,7 @@ import ImageGrid, { fileUrl, inImageChanged, inImageDefault, type ImgRow, type I
 import DevStats from './DevStats'
 import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
-import { busy as overlay } from './Busy'
+import { busy as overlay, type Order, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
 
 type PresetLite = {
@@ -19,7 +19,7 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string; in_image?: InImage }[]
@@ -45,7 +45,7 @@ const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플�
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
   calls?: { total: number; images: number; chats: number; by_kind: Record<string, { count: number }> }
   quality?: string }
-const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', product: '배경(제품 참조)', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성' }
+const CALL_KIND: Record<string, string> = { background: '배경', variant: '배경 변형', product: '배경(제품 참조)', icon: '아이콘', copy: '카피', copy_fit: '카피 지면 맞춤', icon_names: '기능명', icon_redraw: '아이콘 재작성', pin: '핀 뱃지' }
 type ImgSettings = {
   models: { model: string; default: boolean; usd: number | null; estimated: boolean; input_fidelity: boolean }[]
   modes: string[]; default_mode: string; quality: string; provider: string; usd_krw: number
@@ -66,6 +66,11 @@ type Screen = 'design' | 'edit' | 'review'
 type View = 'master' | 'setup' | 'copy' | 'images' | 'icons' | 'edit' | 'review'
 
 type PanelView = 'copy' | 'images' | 'icons'
+// 대기 화면의 'AI 주문서': 이 지면(없으면 첫 지면)의 배경 프롬프트 미리보기(모델 호출 없음). 못 받으면 null
+const orderPreview = (designId: number, presetId?: number): Promise<Order | null> =>
+  fetch(`/api/designs/${designId}/background/prompt-preview${presetId != null ? `?preset_id=${presetId}` : ''}`)
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+
 function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
   designId: number; brandName: string; versionNo: number | null; imageStyle: string
   locked: boolean    // 검수 완료된 캠페인: 이미지 재생성·생성 설정 변경 불가
@@ -108,6 +113,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   const [tab, setTab] = useState<'ads' | 'copy'>('ads')
   const [picking, setPicking] = useState(false)
   const [iconKey] = useState(0)      // 아이콘 세트를 지운 뒤 패널 다시 불러오기
+  const [iconCount, setIconCount] = useState(0)   // 아이콘 세트 개수가 바뀌면 핀 뱃지 주제를 다시 불러온다
   const [lightbox, setLightbox] = useState(false)   // 카드를 누르면 크게 보기(스크롤 없이)
 
   const loadImgs = useCallback(() =>
@@ -167,7 +173,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   })
 
   // 배경은 시안당 1회만 생성하고, 아직 합성이 없는 나머지 매체도 같은 배경을 각 규격 크기로 맞춰 이어서 합성한다(추가 생성 비용 없음).
-  const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate))
+  const makeImage = (presetId: number, regenerate: boolean) => overlay.run('이미지 만드는 중… 배경 생성과 지면 합성에 1~2분 걸립니다', () => makeImageInner(presetId, regenerate),
+    { order: orderPreview(designId, presetId) })
   const makeImageInner = async (presetId: number, regenerate: boolean) => {
     setImgBusy(presetId); setImgErr({})
     try {
@@ -193,7 +200,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   // 배경은 합성본이 있는 매체의 비율군만 1장씩 새로 만들고(합성본이 없으면 모든 비율군), 그 매체를 새 배경으로 다시 합성한다.
   // 아직 합성하지 않은 비율군은 나중에 그 매체를 합성할 때 현재 장면을 참조해 만든다(쓰지 않는 비율군 호출 없음).
   const regenBackground = () => overlay.run(
-    '배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner())
+    '배경 새로 만드는 중… 합성본이 있는 비율군마다 1장 만든 뒤 매체를 다시 합성합니다 (1~3분)', () => regenBackgroundInner(),
+    { order: orderPreview(designId) })
   const regenBackgroundInner = async () => {
     setBgBusy(true); setBgMsg(null); setBgNote(null)
     try {
@@ -458,7 +466,8 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
           </div>}
 
           {view === 'icons' && <IconPanel key={iconKey} designId={designId} versionNo={versionNo} ask
-            ready={groups.some((g) => imgs[g.preset_id]?.composite)} />}
+            ready={groups.some((g) => imgs[g.preset_id]?.composite)} onCount={setIconCount} />}
+          {SHOW_PINS && view === 'icons' && <PinPanel designId={designId} iconCount={iconCount} />}
 
           {view !== 'icons' && <div className="pick-bar">
             <span className="pick-text">
@@ -747,11 +756,12 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
 type IconItem = {
   id: number; position: number; name: string; concept?: string; width: number; height: number
   render: '3d' | 'svg'; has_svg: boolean; has_source: boolean
-  style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[] }
+  style: { render?: string; stroke_width?: number; corner: string; fill?: string; color?: string; colors?: string[]; model?: string; quality?: string; bbox?: number[]
+    origin?: { grid?: string } | null; source_size?: number[] }
   violations: { detail: string }[]
 }
 
-function IconPanel({ designId, versionNo, ready, ask }: { designId: number; versionNo: number | null; ready: boolean; ask: boolean }) {
+function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: number; versionNo: number | null; ready: boolean; ask: boolean; onCount?: (n: number) => void }) {
   const [items, setItems] = useState<IconItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [want, setWant] = useState(false)      // 아이콘도 생성할지 여부
@@ -765,6 +775,21 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   const [gridLabel, setGridLabel] = useState<string | null>(null)
   const calls = (n: number) => (gridCells >= 2 ? Math.ceil(n / gridCells) : n)
   const [filling, setFilling] = useState(false)
+  const [fresh, setFresh] = useState<number[]>([])   // 방금 렌더된 아이콘 id (등장 애니메이션)
+  const markFresh = (before: IconItem[], after: IconItem[]) => {
+    const old = new Set(before.map((a) => a.id))
+    setFresh(after.filter((a) => !old.has(a.id)).map((a) => a.id))
+  }
+  // 렌더하는 동안 덮개에 깔 스케치 카드: 시안 브리프의 기능명 후보(비용 없음) 중 아직 렌더하지 않은 것. 서버가 고르는 순서와 같다
+  const sketchCands = async (n: number): Promise<SketchCard[]> => {
+    try {
+      const d = await fetch(`/api/designs/${designId}`).then((r) => r.json())
+      const done = new Set(items.map((a) => a.name))
+      const list = ((d?.brief?.icon_candidates ?? []) as { name?: string; concept?: string }[])
+        .filter((c) => c.name && !done.has(c.name)).slice(0, n).map((c) => ({ name: c.name as string, concept: c.concept }))
+      return list.length ? list : Array.from({ length: n }, () => ({ name: '?', concept: '기능명을 정하는 중' }))
+    } catch { return [] }
+  }
   // 기능명 후보(렌더 전, 비용 없음): 카피 호출에서 받은 15개. 사용자가 고른 것만 렌더한다(쓰지 않을 아이콘은 만들지 않음)
   type Cand = { name: string; concept: string; rendered: boolean }
   const [cands, setCands] = useState<Cand[] | null>(null)
@@ -782,12 +807,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     } catch (e) { setCandErr((e as Error).message) }
   }
   const togglePick = (name: string) => setPicked((p) => (p.includes(name) ? p.filter((x) => x !== name) : [...p, name]))
-  const renderPicked = () => overlay.run(`고른 아이콘 ${picked.length}개 렌더하는 중… (1개당 10~20초)`, renderPickedInner)
+  const renderPicked = () => overlay.run(`고른 아이콘 ${picked.length}개 렌더하는 중… (1개당 10~20초)`, renderPickedInner,
+    { sketch: picked.map((n) => ({ name: n, concept: cands?.find((c) => c.name === n)?.concept })) })
   const renderPickedInner = async () => {
     setBusy(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons`, { names: picked })
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       setCands((l) => l && l.map((c) => ({ ...c, rendered: c.rendered || j.icons.some((a: IconItem) => a.name === c.name) })))
       setPicked([])
       if (!j.complete) setNote(`${j.made}개를 렌더했습니다. 세트는 ${j.icons.length}/${j.requested}개 — 검수·내보내기에는 ${j.requested}개가 필요합니다.`)
@@ -820,13 +846,15 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
     fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
   }, [designId])
+  useEffect(() => { if (loaded) onCount?.(items.length) }, [loaded, items.length, onCount])
 
-  const generate = () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner)
+  const generate = async () => overlay.run('아이콘 세트 만드는 중… 기능명을 정하고 10개를 렌더합니다 (2~3분)', generateInner,
+    { sketch: await sketchCands(target) })
   const generateInner = async () => {
     setBusy(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons`, {})
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       if (!j.complete) setNote(`목표 ${j.requested}개 중 ${j.made}개만 만들어졌습니다. 아래 '부족한 아이콘 채우기'로 나머지를 이어서 만들 수 있습니다.`)
     } catch (e) {
       setErr((e as Error).message)
@@ -836,12 +864,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   }
 
   // 세트가 목표 개수에 못 미칠 때(크레딧 소진 등) 빠진 만큼만 이어서 만든다. 아이콘 1개당 이미지 1장 비용
-  const fill = () => overlay.run('부족한 아이콘 채우는 중… (1개당 10~20초)', () => fillInner())
+  const fill = async () => overlay.run('부족한 아이콘 채우는 중… (1개당 10~20초)', () => fillInner(),
+    { sketch: await sketchCands(target - items.length) })
   const fillInner = async () => {
     setFilling(true); setErr(null); setNote(null)
     try {
       const j = await post(`/api/designs/${designId}/icons/fill`, {})
-      setItems(j.icons); setVer((v) => v + 1)
+      markFresh(items, j.icons); setItems(j.icons); setVer((v) => v + 1)
       if (!j.complete) setNote(`${j.made}개를 채웠지만 아직 목표 ${j.requested}개 중 ${j.icons.length}개입니다. 다시 시도할 수 있습니다.`)
     } catch (e) {
       setErr((e as Error).message)
@@ -865,12 +894,13 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
     }
   }
 
-  const redraw = (id: number) => overlay.run('아이콘 다시 그리는 중… (10~20초)', () => redrawInner(id))
+  const redraw = (id: number) => overlay.run('아이콘 다시 그리는 중… (10~20초)', () => redrawInner(id), {
+    sketch: items.filter((a) => a.id === id).map((a) => ({ name: a.name, concept: a.concept })) })
   const redrawInner = async (id: number) => {
     setOne(id); setErr(null)
     try {
       const a = await post(`/api/designs/${designId}/icons/${id}/regenerate`, {})
-      setItems((l) => l.map((x) => (x.id === id ? a : x))); setVer((v) => v + 1)
+      setItems((l) => l.map((x) => (x.id === id ? a : x))); setVer((v) => v + 1); setFresh([a.id])
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -880,6 +910,12 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
 
   if (!loaded) return null
   const st = items[0]?.style
+  // 3D 원본 표기: 1장 렌더는 1024, 격자 렌더는 잘라낸 조각이라 아이콘마다 크기가 다르다(source_size 가 없는 예전 아이콘은 대략값)
+  const srcGrid = st?.origin?.grid
+  const srcLong = items.map((i) => i.style.source_size).filter((v): v is number[] => !!v).map((v) => Math.max(v[0], v[1]))
+  const srcText = !srcGrid ? '원본 1024'
+    : srcLong.length === items.length ? `원본: ${srcGrid} 격자에서 잘라낸 ${Math.min(...srcLong)}~${Math.max(...srcLong)}px 조각`
+    : `원본: ${srcGrid} 격자에서 잘라낸 약 200~350px 조각`
   const vLabel = versionNo ? `브랜드 규칙 v${versionNo}` : '이 브랜드 규칙 버전'
 
   // 아직 세트가 없을 때: 광고 이미지가 있어야 생성 여부를 묻는다
@@ -947,7 +983,7 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       {items.length < target && candidatePicker(target - items.length)}
       {st && items[0].render === '3d' ? (
         <p className="muted">
-          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px (원본 1024)
+          적용 스타일 — 3D 렌더({st.model} {st.quality}) · 모서리 {st.corner} · 색 {(st.colors || []).join(', ')} · 투명 배경 · 크기 {items[0].width}×{items[0].height}px ({srcText})
         </p>
       ) : st && (
         <p className="muted">
@@ -956,7 +992,8 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
       )}
       <div className="icongrid">
         {items.map((a) => (
-          <figure key={a.id} className="iconcell">
+          <figure key={`${a.id}-${fresh.includes(a.id) ? ver : 0}`} className={fresh.includes(a.id) ? 'iconcell icon-reveal' : 'iconcell'}
+            style={fresh.includes(a.id) ? { animationDelay: `${fresh.indexOf(a.id) * 90}ms` } : undefined}>
             <img src={`/api/icons/${a.id}/png?v=${ver}`} alt={a.name} title={a.concept || a.name} />
             <figcaption>{a.position}. {a.name}</figcaption>
             {a.concept && <div className="muted icon-concept">{a.concept}</div>}
@@ -976,6 +1013,132 @@ function IconPanel({ designId, versionNo, ready, ask }: { designId: number; vers
   )
 }
 
+// 핀 뱃지 세트 영역 표시 여부. 아직 상품성이 부족해 화면에서만 숨긴다(백엔드 API·코드는 그대로)
+const SHOW_PINS = false
+
+type PinPiece = { slot: number; kind: 'logo' | 'word' | 'name' | 'topic'; label: string; width?: number; height?: number; missing?: boolean; retried?: boolean }
+type PinItem = { id: number; width: number; height: number; created_at: string; pins: PinPiece[]
+  meta: { name: string; word: string; topics: string[]; logo: boolean; model?: string; quality?: string; grid?: string; retried?: number[]; missing?: string[] } }
+type PinTopic = { name: string; concept: string }
+
+// 핀 뱃지 세트: 아이콘 격자와 같은 방식 — 4×2 격자 1장(투명)에 핀 8개(로고 · 단어 · 이름 · 아이콘 세트 주제 5)를 그려 잘라 쓰고,
+// 잘라낸 핀으로 4:5 시트를 배치한다. 격자 1장 + 못 잘라낸 칸만 1장씩 비용. iconCount 가 바뀌면(아이콘 세트 생성·채우기) 주제를 다시 불러온다
+function PinPanel({ designId, iconCount }: { designId: number; iconCount?: number }) {
+  const [pins, setPins] = useState<PinItem[]>([])
+  const [info, setInfo] = useState<{ has_logo: boolean; grid: string; topic_source: string; topic_count: number } | null>(null)
+  const [topics, setTopics] = useState<PinTopic[]>([])
+  const [picked, setPicked] = useState<string[]>([])
+  const [name, setName] = useState('')
+  const [word, setWord] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [fresh, setFresh] = useState<number | null>(null)
+  const need = info?.topic_count ?? 5
+
+  useEffect(() => {
+    fetch(`/api/designs/${designId}/pins`).then((r) => r.json()).then((j) => {
+      if (!Array.isArray(j?.pins)) return
+      setPins(j.pins); setInfo({ has_logo: j.has_logo, grid: j.grid, topic_source: j.topic_source, topic_count: j.topic_count })
+      const list: PinTopic[] = j.topics ?? []
+      setTopics(list)
+      // 고른 주제가 아직 목록에 있으면 유지하고, 아니면 앞에서부터 채운다
+      setPicked((p) => {
+        const keep = p.filter((n) => list.some((t) => t.name === n))
+        return keep.length === j.topic_count ? keep : list.slice(0, j.topic_count).map((t) => t.name)
+      })
+      setName((v) => v || (j.defaults?.name ?? '')); setWord((v) => v || (j.defaults?.word ?? ''))
+    }).catch(() => undefined)
+  }, [designId, iconCount])
+
+  const toggle = (n: string) => setPicked((p) => (p.includes(n) ? p.filter((x) => x !== n) : p.length < need ? [...p, n] : p))
+  const make = () => overlay.run(`핀 뱃지 세트 만드는 중… ${info?.grid ?? '4x2'} 격자 한 장에 핀 8개를 그려 잘라냅니다 (30초~1분)`, makeInner, {
+    sketch: [{ name: '로고', concept: '로고 핀' }, { name: word, concept: '단어 핀' }, { name, concept: '이름 핀' },
+      ...picked.map((n) => ({ name: n, concept: topics.find((t) => t.name === n)?.concept }))] })
+  const makeInner = async () => {
+    setBusy(true); setErr(null)
+    try {
+      const p: PinItem = await post(`/api/designs/${designId}/pins`, { name, word, topics: picked })
+      setPins((l) => [p, ...l]); setFresh(p.id)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async (id: number) => {
+    if (!window.confirm('이 핀 뱃지 세트(시트와 잘라낸 핀)를 지웁니다. 계속할까요?')) return
+    const r = await fetch(`/api/designs/${designId}/pins/${id}`, { method: 'DELETE' })
+    if (r.ok) setPins((l) => l.filter((p) => p.id !== id))
+    else setErr('지우지 못했습니다')
+  }
+
+  if (!info) return null
+  const fromIcons = info.topic_source === 'icons'
+  return (
+    <div className="imgblock icon-step">
+      <strong>핀 뱃지 세트</strong>
+      <DevStats designId={designId} kinds={['pin']} label="핀 뱃지 생성" refreshKey={`${busy}-${pins.length}`} />
+      <p className="muted">
+        아이콘 세트와 같은 방식으로 {info.grid} 격자 한 장에 극사실주의 일러스트 에나멜 핀 8개를 투명 배경으로 그려 하나씩 잘라내고, 잘라낸 핀으로 4:5 시트를 배치합니다.
+        핀은 브랜드 로고{info.has_logo ? '(등록한 로고를 참고 이미지로 첨부)' : '(로고가 없어 이름 첫 글자 모노그램)'} · 아래 단어 · 이름 · 아이콘 세트 주제 {need}개입니다.
+        격자 1장 비용이고, 격자에서 잘라내지 못한 핀만 1장씩 다시 그립니다.
+      </p>
+      <div className="row pin-form">
+        <label>이름 핀 <input value={name} maxLength={20} disabled={busy} onChange={(e) => setName(e.target.value)} /></label>
+        <label>나를 표현하는 단어 <input value={word} maxLength={12} disabled={busy} placeholder="예: 호기심" onChange={(e) => setWord(e.target.value)} /></label>
+      </div>
+      {topics.length < need ? (
+        <div className="notice err">핀 주제는 아이콘 세트에서 가져옵니다. 아이콘 세트(또는 기능명 후보)가 {need}개 이상 있어야 만들 수 있습니다.</div>
+      ) : (
+        <div className="icon-cands">
+          <p className="muted">주제 {need}개 고르기 — {fromIcons ? '이 규칙 버전의 아이콘 세트' : '아직 아이콘 세트가 없어 기능명 후보'}에서 ({picked.length}/{need})</p>
+          <div className="icon-cand-grid">
+            {topics.map((t) => (
+              <label key={t.name} className="icon-cand" title={t.concept}>
+                <input type="checkbox" disabled={busy || (!picked.includes(t.name) && picked.length >= need)}
+                  checked={picked.includes(t.name)} onChange={() => toggle(t.name)} />
+                <span>{t.name}</span>
+                {t.concept && <span className="muted icon-cand-concept">{t.concept}</span>}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="row">
+        <button className="primary" disabled={busy || !word.trim() || picked.length !== need} onClick={make}>
+          {pins.length ? '한 장 더 만들기' : '핀 뱃지 세트 만들기'} (격자 이미지 1장)
+        </button>
+      </div>
+      {err && <div className="notice err">{err}</div>}
+      {pins.map((p) => (
+        <figure key={p.id} className={fresh === p.id ? 'pinset icon-reveal' : 'pinset'}>
+          <a className="pinsheet" href={`/api/pins/${p.id}/png`} target="_blank" rel="noreferrer"><img src={`/api/pins/${p.id}/png`} alt={`핀 뱃지 시트: ${p.meta.name}`} /></a>
+          <div className="pinset-body">
+            <figcaption className="muted">
+              “{p.meta.name}” · “{p.meta.word}” · 주제 {(p.meta.topics || []).join(', ')} · 시트 {p.width}×{p.height}px · {fmtDate(p.created_at)}
+            </figcaption>
+            {(p.meta.missing?.length ?? 0) > 0 && <span className="badge b-need">잘라내지 못한 핀: {p.meta.missing!.join(', ')} — 한 장 더 만들어 주세요</span>}
+            <div className="pin-pieces">
+              {p.pins.map((x) => (
+                <a key={x.slot} className={x.missing ? 'pin-piece missing' : 'pin-piece'} href={x.missing ? undefined : `/api/pins/${p.id}/pieces/${x.slot}`}
+                  target="_blank" rel="noreferrer" title={x.retried ? '격자에서 잘라내지 못해 1장으로 다시 그림' : undefined}>
+                  {x.missing ? <span className="pin-piece-empty">없음</span> : <img src={`/api/pins/${p.id}/pieces/${x.slot}`} alt={x.label} />}
+                  <span>{x.label}{x.retried ? ' *' : ''}</span>
+                </a>
+              ))}
+            </div>
+            <div className="row">
+              <a href={`/api/pins/${p.id}/png`} download={`pins_${p.id}.png`}>4:5 시트 PNG</a>
+              <a href={`/api/pins/${p.id}/grid`} target="_blank" rel="noreferrer">격자 원본</a>
+              <button type="button" onClick={() => remove(p.id)}>지우기</button>
+            </div>
+          </div>
+        </figure>
+      ))}
+    </div>
+  )
+}
+
 const fmtDate = (iso: string) => {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -988,9 +1151,20 @@ const campaignMeta = (d: Design) =>
 
 type Brief = {
   product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null; image_style: string
+  product_scale: string
   required_phrases: string[]; forbidden_phrases: string[]
 }
-const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', required_phrases: [], forbidden_phrases: [] }
+// 제품 크기(서버 compose.PRODUCT_SCALES): 투명 누끼를 붙이는 구역을 받침 기준으로 줄인다
+const PRODUCT_SCALES = [
+  { v: '크게', label: '크게 — 제품이 주인공 (화면의 약 43%)' },
+  { v: '보통', label: '보통 — 제품과 배경을 함께 (약 24%)' },
+  { v: '작게', label: '작게 — 배경이 주인공, 제품은 포인트 (약 12%)' },
+]
+const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', required_phrases: [], forbidden_phrases: [] }
+// 저장된 캠페인 입력을 폼 값으로 (캠페인 열기·수정 취소)
+const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
+  product_scale: d.brief.product_scale ?? '크게',
+  required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
 
@@ -1000,6 +1174,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [platforms, setPlatforms] = useState<PlatformLite[]>([])
   const [designs, setDesigns] = useState<Design[]>([])
+  const [iconCount, setIconCount] = useState(0)   // 아이콘 세트 캠페인: 아이콘 개수가 바뀌면 핀 뱃지 주제를 다시 불러온다
   const [activeId, setActiveId] = useState<number | null>(null)
   const [loaded, setLoaded] = useState(false)
   // 새 캠페인
@@ -1051,15 +1226,19 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   useEffect(() => { setActiveId(null); setEditing(false); setBrandPanel(false); loadDesigns() }, [loadDesigns])
 
   const active = designs.find((d) => d.id === activeId) ?? null
+  // 이 시안의 생성 작업을 기다리는 동안 덮개에 브랜드 퀴즈를 띄운다(덮개를 띄울 때마다 새로 받음, 비용 없음)
+  useEffect(() => {
+    if (activeId === null) return
+    overlay.setQuizSource(() => fetch(`/api/designs/${activeId}/quiz`).then((r) => r.json()).then((j) => (j.items ?? []) as QuizItem[]))
+    return () => overlay.setQuizSource(null)
+  }, [activeId])
   const ws = useWorkspace(active?.id ?? null, active?.brand.id ?? null, active?.brand.name ?? '', `${activeId}-${wsTick}-${copyKey}-${view}-${active?.status}`)
   useEffect(() => { setView('master') }, [activeId])
   useEffect(() => { if (hasCopy === false) setView('setup') }, [hasCopy])
-  useEffect(() => { if (hasCopy === true && view === 'setup' && !editing) setView('copy') }, [hasCopy, editing, view])
 
   const openCampaign = (d: Design) => {
     setActiveId(d.id); setMsg(null)
-    setBrief({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
-      required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
+    setBrief(briefOf(d))
     setPicked(d.presets.map((p) => p.id))
     setEditing(false); setHasCopy(null); setRules(null); setScreen('design'); setEditPreset(null)
     if (d.kind === '광고 이미지') {
@@ -1075,6 +1254,12 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
       setRules({ req: b.version.required_phrases.length, ban: b.version.forbidden_phrases.length })).catch(() => setRules(null))
   }
   const backToList = () => { setActiveId(null); setEditing(false); setMsg(null) }
+  // 수정 취소: 저장하지 않은 입력·규격 선택을 저장된 값으로 되돌리고 입력 요약으로 돌아간다
+  const cancelEdit = () => {
+    if (active) { setBrief(briefOf(active)); setPicked(active.presets.map((p) => p.id)) }
+    setEditing(false)
+  }
+  const reviewed = !!ws.data.review?.reviewed   // 유효한 검수 결과가 있는지 (입력을 저장하면 무효화된다)
   const toggle = (id: number) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
   const createCampaign = async () => {
@@ -1127,8 +1312,10 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     try {
       await patchDesign(active.id, { brief, preset_version_ids: active.kind === '광고 이미지' ? picked : null })
       await loadDesigns()
-      setEditing(false)
-      setMsg({ ok: true, text: '입력을 저장했습니다.' })
+      setEditing(false); setWsTick((t) => t + 1)
+      setMsg({ ok: true, text: reviewed
+        ? '입력을 저장했습니다. 기존 검수 결과는 무효화되었으니 ⑦ 검수·내보내기에서 다시 검수해 주세요.'
+        : '입력을 저장했습니다.' })
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
     } finally {
@@ -1144,7 +1331,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
       await patchDesign(active.id, { brief, preset_version_ids: picked })
       await loadDesigns()
       const j = await post(`/api/designs/${active.id}/copy`, {})
-      setHasCopy(true); setEditing(false); setCopyKey((k) => k + 1)
+      setHasCopy(true); setEditing(false); setCopyKey((k) => k + 1); goView('copy')
       if (j.failures?.length) setMsg({ ok: false, text: `일부 지면의 생성에 실패했습니다: ${j.failures.join(', ')}` })
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
@@ -1278,6 +1465,9 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   const setupSteps = (
     <div className="setup-grid">
       <div className="setup-main">
+        {hasCopy && reviewed && (
+          <div className="notice">이미 검수한 캠페인입니다. 입력을 저장하면 기존 검수 결과가 무효화되어 ⑦ 검수·내보내기에서 다시 검수해야 합니다.</div>
+        )}
         <section className="card step-card">
           <header><h3><span className="step-no">①</span> 규격 선택</h3><span className="muted">선택 {picked.length}개</span></header>
           {visiblePlats.length === 0 ? <p className="muted">선택할 수 있는 규격이 없습니다.</p> : (
@@ -1342,6 +1532,11 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             <input value={brief.key_message} maxLength={200} placeholder="예: 오늘 주문하면 내일 아침 신선하게 도착합니다" onChange={(e) => setBrief({ ...brief, key_message: e.target.value })} />
             <span className="counter">{brief.key_message.length}/200</span>
           </label>
+          <label className="msg-field">상품 설명 <span className="opt">(선택)</span>
+            <textarea value={brief.description} maxLength={1000} rows={3} placeholder="예: 산지 직송 채소와 과일을 새벽 7시 전에 문 앞까지 배송합니다"
+              onChange={(e) => setBrief({ ...brief, description: e.target.value })} />
+            <span className="counter">{brief.description.length}/1000</span>
+          </label>
           <label className="msg-field">배경 형태 <span className="opt">(선택)</span>
             <select value={brief.image_style} onChange={(e) => setBrief({ ...brief, image_style: e.target.value })}>
               {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1378,6 +1573,14 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                     <button type="button" onClick={() => setBrief({ ...brief, product_image_asset_id: null })}>삭제</button>
                   )}
                 </div>
+                {brief.product_image_asset_id && (
+                  <label className="product-scale">제품 크기
+                    <select value={brief.product_scale} onChange={(e) => setBrief({ ...brief, product_scale: e.target.value })}>
+                      {PRODUCT_SCALES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+                    </select>
+                    <span className="muted">투명 누끼를 배경에 붙일 때의 크기입니다. 바꾸면 배경을 새로 만들어야 반영됩니다.</span>
+                  </label>
+                )}
               </div>
             </div>
           </div>
@@ -1411,7 +1614,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             <button className="primary" disabled={!canGenerate} onClick={generateCampaign}>{busy ? '생성 중…' : '시안 생성하기'}</button>
           </div>
           <p className="muted board-foot">브랜드 규칙 + 선택 규격을 함께 반영해 시안 {3}개를 만듭니다. 지면 수에 따라 수십 초 걸릴 수 있습니다.</p>
-          {hasCopy && <button type="button" className="link" onClick={() => setEditing(false)}>입력 닫기</button>}
+          {hasCopy && <button type="button" className="link" disabled={busy} onClick={cancelEdit}>수정 취소</button>}
         </section>
       </aside>
     </div>
@@ -1467,7 +1670,8 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
         {d.kind !== '광고 이미지' ? (
           <section className="card" id="sec-copy">
             <header><h3>아이콘 세트</h3></header>
-            <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} />
+            <IconPanel designId={d.id} versionNo={d.brand.version_no} ready ask={false} onCount={setIconCount} />
+            {SHOW_PINS && <PinPanel designId={d.id} iconCount={iconCount} />}
           </section>
         ) : hasCopy === null ? (
           <p className="muted">불러오는 중…</p>
@@ -1499,7 +1703,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                   <div className="camp-msg">{d.brief.key_message || d.brief.product_name}</div>
                 </div>
                 <button type="button" disabled={locked} title={locked ? '검수가 완료된 캠페인은 수정할 수 없습니다' : undefined}
-                  onClick={() => { setEditing(true) }}>입력 수정</button>
+                  onClick={() => { setBrief(briefOf(d)); setPicked(d.presets.map((p) => p.id)); setEditing(true) }}>입력 수정</button>
               </div>
               <dl className="camp-input-grid">
                 <dt>서비스·상품</dt><dd>{d.brief.product_name}</dd>
@@ -1507,6 +1711,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <dt>핵심 메시지</dt><dd>{d.brief.key_message || <span className="muted">없음</span>}</dd>
                 <dt>타깃</dt><dd>{d.brief.target || <span className="muted">없음</span>}</dd>
                 <dt>배경 형태</dt><dd>{d.brief.image_style ?? '자동'}</dd>
+                {d.brief.product_image_asset_id && <><dt>제품 크기</dt><dd>{d.brief.product_scale ?? '크게'}</dd></>}
                 <dt>제품 이미지</dt><dd>{d.brief.product_image_asset_id
                   ? <img className="prod-thumb" src={`/api/assets/${d.brief.product_image_asset_id}/file`} alt="제품 이미지" />
                   : <span className="muted">없음</span>}</dd>
@@ -1514,7 +1719,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 <dt>금지 표현</dt><dd>{eff ? (eff.forbidden_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.forbidden_source})</span> : null}</dd>
                 <dt>규격</dt><dd>{d.presets.map((p) => `${p.platform} · ${p.name}`).join(' / ') || '없음'}</dd>
               </dl>
-              {!locked && <p className="muted">검수 전까지는 입력을 수정할 수 있습니다. 입력을 바꿔도 이미 만든 이미지는 자동으로 바뀌지 않으니, 필요하면 배경을 새로 생성하세요.</p>}
+              {!locked && <p className="muted">검수 완료 전까지는 입력을 수정할 수 있습니다. 저장하면 기존 검수 결과는 무효화되어 다시 검수해야 합니다{reviewed ? ' (현재 검수 결과 있음)' : ''}. 입력을 바꿔도 이미 만든 카피·이미지는 자동으로 바뀌지 않으니, 필요하면 다시 생성하세요.</p>}
             </section>
           )
           const panelTitle = view === 'copy' ? '③ 카피·시안 선택' : view === 'images' ? '④ 이미지 생성·편집' : '⑤ 아이콘 세트'
