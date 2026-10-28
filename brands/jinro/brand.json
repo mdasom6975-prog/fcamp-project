@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "jinro",
+  "brand": {
+    "name": "참이슬",
+    "description": "하이트진로의 대표 소주 브랜드. 성인을 대상으로 하는 주류 광고",
+    "logo_asset_id": null,
+    "logo_margin_percent": 18,
+    "logo_position": "우하단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#00A651"
+      },
+      {
+        "role": "보조색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "강조색",
+        "hex": "#0072BC"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1A1A1A"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F2F8F3"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "유리·반투명"
+    },
+    "image_tone": {
+      "description": "저녁 식탁의 따뜻한 조명, 맑고 깨끗한 초록 병 이미지는 상표를 직접 그리지 말고 투명한 초록 유리병으로 표현. 성인의 모임 분위기. 미성년자로 보이는 인물·운전·임산부 장면 금지. 이미지 안의 글자 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "담백함 · 정겨움 · 편안한 존댓말. 음주를 권하거나 건강·성공과 연결 짓지 않는다. 성인 대상.",
+      "headline_max_chars": 20,
+      "polite": true
+    },
+    "required_phrases": [
+      "참이슬",
+      "지나친 음주는 건강에 해롭습니다"
+    ],
+    "forbidden_phrases": [
+      "건강에 좋은",
+      "숙취 없음",
+      "마셔라",
+      "원샷",
+      "음주 권장",
+      "스트레스 해소",
+      "성공",
+      "미성년자",
+      "운전"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "주류",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "주류 + 만 19세 이상 + 경고 문구 필수 (※ 경고 문구는 시연용 자리표시. 실제 집행 문구는 법정 문구로 교체)"
+    ]
+  }
+}

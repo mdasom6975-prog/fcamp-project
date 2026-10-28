@@ -1,0 +1,21 @@
+{
+  "slug": "samsung",
+  "brand": "samsung",
+  "placements": [
+    "Instagram 피드",
+    "PMax 가로 1.91:1",
+    "디스플레이 네이티브 2:1",
+    "업로드형 336×280"
+  ],
+  "brief": {
+    "product_name": "갤럭시 AI 스마트폰",
+    "description": "일상의 번역, 요약, 검색을 도와주는 AI 기능을 담은 스마트폰 신제품 소개.",
+    "key_message": "일상이 더 똑똑해지는 AI 스마트폰",
+    "target": "20~40대 스마트폰 교체 고려층",
+    "image_style": "3D 렌더",
+    "product_scale": "크게",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

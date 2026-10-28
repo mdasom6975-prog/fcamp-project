@@ -1,0 +1,20 @@
+{
+  "slug": "jinro",
+  "brand": "jinro",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1"
+  ],
+  "brief": {
+    "product_name": "참이슬 저녁 모임",
+    "description": "하루를 마치고 가까운 사람들과 식탁에 둘러앉아 나누는 저녁 모임을 담은 캠페인. 만 19세 이상 성인 대상.",
+    "key_message": "수고한 하루, 따뜻한 한 자리",
+    "target": "만 19세 이상 성인",
+    "image_style": "실사 인물",
+    "product_scale": "크게",
+    "layout": "기본",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

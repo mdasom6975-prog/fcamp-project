@@ -1,0 +1,21 @@
+{
+  "slug": "nike",
+  "brand": "nike",
+  "placements": [
+    "Instagram 스토리",
+    "Instagram 피드",
+    "PMax 가로 1.91:1",
+    "업로드형 300×250"
+  ],
+  "brief": {
+    "product_name": "나이키 러닝 시즌",
+    "description": "달리기를 시작하거나 이어가는 사람들을 위한 러닝화와 러닝 웨어 캠페인.",
+    "key_message": "오늘도 한 걸음 더",
+    "target": "20~40대 러닝 입문자와 동호인",
+    "image_style": "실사 인물",
+    "product_scale": "크게",
+    "layout": "상단 문구",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

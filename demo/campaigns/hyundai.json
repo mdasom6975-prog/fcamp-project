@@ -1,0 +1,21 @@
+{
+  "slug": "hyundai",
+  "brand": "hyundai",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1",
+    "업로드형 336×280"
+  ],
+  "brief": {
+    "product_name": "전기 SUV 시승 이벤트",
+    "description": "도심과 가족 이동에 맞춘 전기 SUV를 직접 타보는 시승 신청 캠페인.",
+    "key_message": "전기차, 이제 직접 타보세요",
+    "target": "30~50대 가족 단위 차량 구매 고려층",
+    "image_style": "실사 제품·공간",
+    "product_scale": "크게",
+    "layout": "기본",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

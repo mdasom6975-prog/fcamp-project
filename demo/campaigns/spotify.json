@@ -1,0 +1,21 @@
+{
+  "slug": "spotify",
+  "brand": "spotify",
+  "placements": [
+    "Instagram 스토리",
+    "Instagram 피드",
+    "PMax 가로 1.91:1",
+    "디스플레이 네이티브 1:1"
+  ],
+  "brief": {
+    "product_name": "스포티파이 프리미엄",
+    "description": "광고 없이 음악을 듣고 오프라인 재생과 자유로운 곡 이동을 지원하는 구독 서비스.",
+    "key_message": "끊기지 않는 나만의 플레이리스트",
+    "target": "20~30대 음악 감상층",
+    "image_style": "그래픽 패턴",
+    "product_scale": "크게",
+    "layout": "상단 문구",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

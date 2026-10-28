@@ -1,0 +1,21 @@
+{
+  "slug": "baemin",
+  "brand": "baemin",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "디스플레이 네이티브 1:1",
+    "채널 메시지 와이드이미지형 800×600"
+  ],
+  "brief": {
+    "product_name": "배민 야식 배달",
+    "description": "늦은 저녁 집에서 즐기는 야식을 앱으로 주문해 집 앞에서 받는 배달 서비스.",
+    "key_message": "오늘 야식은 뭐 먹지? 배민에서 골라봐",
+    "target": "20~30대 1인 가구, 야식 선호 직장인",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "상단 문구",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

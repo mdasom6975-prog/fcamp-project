@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "kurly",
+  "brand": {
+    "name": "마켓컬리",
+    "description": "엄선한 식품과 생활 상품을 새벽 배송으로 전하는 온라인 장보기 서비스",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "logo_position": "좌상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#5F0080"
+      },
+      {
+        "role": "보조색",
+        "hex": "#FA622F"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#333333"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "연보라",
+        "hex": "#F7F2FA"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "무광 플라스틱"
+    },
+    "image_tone": {
+      "description": "깨끗한 대리석·나무 질감 위 신선한 재료. 자연광, 정돈된 푸드 스타일링, 보라색 포인트. 포장 상태가 아닌 재료 본연의 모습. 이미지 안의 글자와 실제 브랜드 패키지 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "신뢰감 · 정갈함 · 품질 중심의 존댓말. 산지·시기 등 확인되지 않은 사실을 쓰지 않는다.",
+      "headline_max_chars": 20,
+      "polite": true
+    },
+    "required_phrases": [
+      "마켓컬리"
+    ],
+    "forbidden_phrases": [
+      "최저가",
+      "무농약 보장",
+      "100% 신선",
+      "건강에 좋은",
+      "다이어트 효과",
+      "항암"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "신선식품 커머스",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "식품 업종 + 보라색 팔레트, 품질 중심 어조"
+    ]
+  }
+}

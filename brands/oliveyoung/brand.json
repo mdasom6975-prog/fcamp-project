@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "oliveyoung",
+  "brand": {
+    "name": "올리브영",
+    "description": "화장품과 헬스·뷰티 제품을 오프라인 매장과 온라인으로 판매하는 국내 H&B 스토어",
+    "logo_asset_id": null,
+    "logo_margin_percent": 16,
+    "logo_position": "자동",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#9BCE26"
+      },
+      {
+        "role": "보조색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "강조색",
+        "hex": "#FF6B6B"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#3C3C3C"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F7F9F2"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "채움",
+      "material": "소프트 고무"
+    },
+    "image_tone": {
+      "description": "산뜻한 연두색 포인트, 깨끗하고 밝은 화장대 위 제품 컷. 부드러운 확산광, 맑은 피부 톤의 모델. 과도한 보정·비포/애프터 연출 금지. 이미지 안의 글자와 실제 제품 패키지 문구 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "산뜻함 · 발랄함 · 제품 사용 경험 중심의 존댓말. 의학적 효능이나 치료를 암시하는 표현 금지.",
+      "headline_max_chars": 18,
+      "polite": true
+    },
+    "required_phrases": [
+      "올리브영"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "주름 개선",
+      "미백 효과 보장",
+      "피부 재생",
+      "의약품",
+      "부작용 없음",
+      "100% 효과"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "뷰티·헬스",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "화장품 업종 규제 표현이 걸리는 시연(주름·미백 등 기능성 표현)"
+    ]
+  }
+}

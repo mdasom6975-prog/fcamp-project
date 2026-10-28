@@ -1,0 +1,21 @@
+{
+  "slug": "kgc",
+  "brand": "kgc",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "채널 메시지 와이드이미지형 800×600",
+    "PMax 가로 1.91:1"
+  ],
+  "brief": {
+    "product_name": "정관장 홍삼정 선물세트",
+    "description": "명절과 감사의 계절에 부모님께 드리는 홍삼 제품 선물세트. 일상 속 건강 관리 습관을 제안한다.",
+    "key_message": "정성을 담아 건네는 건강한 마음",
+    "target": "30~50대 부모님 선물을 준비하는 자녀 세대",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

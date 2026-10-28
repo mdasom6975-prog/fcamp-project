@@ -1,0 +1,21 @@
+{
+  "slug": "kurly",
+  "brand": "kurly",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1",
+    "채널 메시지 와이드이미지형 800×600"
+  ],
+  "brief": {
+    "product_name": "컬리 제철 과일 기획전",
+    "description": "제철 과일을 골라 소개하는 기획전. 아침 식사나 간식으로 즐기기 좋은 과일을 모았다.",
+    "key_message": "제철 과일, 가장 맛있는 때에",
+    "target": "30~40대 가정 장보기 담당자",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "기본",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

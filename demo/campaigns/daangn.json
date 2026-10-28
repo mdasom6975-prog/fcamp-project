@@ -1,0 +1,20 @@
+{
+  "slug": "daangn",
+  "brand": "daangn",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "디스플레이 네이티브 1:1"
+  ],
+  "brief": {
+    "product_name": "당근 동네 중고거래",
+    "description": "집에서 안 쓰는 물건을 가까운 이웃과 직접 만나 거래하는 중고거래 기능.",
+    "key_message": "우리 동네에서 찾는 중고, 당근에서",
+    "target": "동네 생활권 30~50대",
+    "image_style": "플랫 일러스트",
+    "product_scale": "보통",
+    "layout": "좌우 반전",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}
