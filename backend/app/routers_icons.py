@@ -77,7 +77,9 @@ def _old_files(a: IconAsset | None) -> list[str]:
 def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w, h, forbidden, existing=None, origin=None):
     """3d 방식: 렌더된 투명 PNG 를 live area 에 맞춰 저장한다. 원본(1장 렌더 1024 또는 격자에서 잘라낸 조각)은 source_path 에 따로 두고
     그 크기를 style.source_size 에 남긴다(격자 조각은 아이콘마다 크기가 달라 화면·내보내기 표기에 쓴다).
-    origin: 격자에서 온 아이콘이면 {"grid": "4x3", "cell": k, "method": ..., "mismatch": bool} — 분석용. 수가 안 맞은 격자는 위반으로 알린다."""
+    origin: 격자에서 온 아이콘이면 {"grid": "4x3", "cell": k, "method": ..., "blobs", "requested", "mismatch": bool} — 분석용으로만 남긴다.
+    덩어리 수가 요청과 달라도 위반으로 알리지 않는다: 남은 아이콘은 자기 칸에 덩어리가 하나뿐이었던 것이고(0개·2개 칸은 1장 렌더로
+    다시 그림), 더 그려진 경우(12개 중 13개)에는 '13개만 그려져'라는 틀린 문구까지 나왔다."""
     fitted, info = icons.fit_alpha(im, w, h)
     uid = uuid.uuid4().hex[:10]
     src = storage.put_image(f"icon3d_{uid}_src.png", im)
@@ -87,8 +89,6 @@ def _save3d(db, d, bv, batch, pos, name, concept, prompt, im, style, palette, w,
         viol.append({"type": "background", "detail": "배경이 투명하지 않습니다. 다시 그려 주세요"})
     if info["clipped"]:
         viol.append({"type": "clipped", "detail": "오브젝트가 가장자리에 잘렸습니다. 다시 그려 주세요"})
-    if origin and origin.get("mismatch"):
-        viol.append({"type": "grid", "detail": f"격자에 요청한 {origin['requested']}개 중 {origin['blobs']}개만 그려져 이름과 짝이 어긋났을 수 있습니다. 다르면 다시 그려 주세요"})
     st = {"render": "3d", "model": icons.MODEL_3D, "quality": icons.QUALITY_3D, "origin": origin,
           "prompt_ref": prompts.ref("icons/render3d"), "style_ref": prompts.ref("icons/_3d_style"),
           "corner": style["corner"], "material": style.get("material") or "자동",

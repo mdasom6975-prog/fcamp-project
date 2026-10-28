@@ -335,7 +335,7 @@ def test_grid_default_renders_ten_icons_in_one_call(env, monkeypatch):
 
 
 def test_grid_retries_failed_cells_with_single_render(env, monkeypatch):
-    """모델이 한 칸을 비우면(덩어리 11개) 그 아이콘만 1장 렌더로 다시 그린다. 수가 안 맞은 격자의 나머지는 '짝 어긋남' 경고."""
+    """모델이 한 칸을 비우면(덩어리 11개) 그 아이콘만 1장 렌더로 다시 그린다. 수가 안 맞은 격자의 나머지는 위반 없이 origin 에만 기록."""
     from app import icons
     c = env["client"]
     did = _icon_set_design(env)
@@ -353,7 +353,8 @@ def test_grid_retries_failed_cells_with_single_render(env, monkeypatch):
     by = {a["name"]: a for a in j["icons"]}
     assert by["후보5"]["style"]["origin"]["retried"] is True and not by["후보5"]["violations"]
     assert all(by[f"후보{i}"]["style"]["origin"]["method"] == "cell" for i in (1, 2, 3, 4, 6))
-    assert all(any(v["type"] == "grid" for v in by[f"후보{i}"]["violations"]) for i in (1, 6, 10)), "11/12 → 짝 어긋남 경고"
+    assert all(not by[f"후보{i}"]["violations"] for i in (1, 6, 10)), "11/12 라도 화면 경고는 없다"
+    assert all(by[f"후보{i}"]["style"]["origin"]["mismatch"] is True and by[f"후보{i}"]["style"]["origin"]["blobs"] == 11 for i in (1, 6, 10))
 
 
 def test_grid_quota_exhausted_is_not_retried(env, monkeypatch):
