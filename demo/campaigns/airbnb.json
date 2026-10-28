@@ -1,0 +1,21 @@
+{
+  "slug": "airbnb",
+  "brand": "airbnb",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1"
+  ],
+  "brief": {
+    "product_name": "에어비앤비 가을 근교 여행",
+    "description": "가을 단풍 시기에 떠나는 근교 숙소를 소개하는 캠페인. 한적한 곳에서 머무는 여행을 제안한다.",
+    "key_message": "머무는 것이 여행이 되는 곳",
+    "target": "20~40대 커플·친구 여행객",
+    "image_style": "실사 제품·공간",
+    "product_scale": "크게",
+    "layout": "기본",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

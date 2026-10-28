@@ -1,0 +1,21 @@
+{
+  "slug": "starbucks",
+  "brand": "starbucks",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "디스플레이 네이티브 2:1",
+    "디스플레이 네이티브 1:1"
+  ],
+  "brief": {
+    "product_name": "스타벅스 가을 시즌 음료",
+    "description": "가을 시즌 한정 음료와 디저트를 소개하는 캠페인. 따뜻한 음료를 매장과 앱에서 주문할 수 있다.",
+    "key_message": "가을 한 잔의 여유",
+    "target": "20~40대 카페 이용자",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

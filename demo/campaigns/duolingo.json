@@ -1,0 +1,21 @@
+{
+  "slug": "duolingo",
+  "brand": "duolingo",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "디스플레이 네이티브 1:1",
+    "PMax 정사각형 1:1"
+  ],
+  "brief": {
+    "product_name": "듀오링고 하루 5분 영어",
+    "description": "하루 몇 분씩 게임처럼 푸는 짧은 레슨으로 영어를 꾸준히 학습하는 앱.",
+    "key_message": "하루 5분, 오늘도 한 레슨",
+    "target": "20~30대 학습 의욕은 있지만 시간이 부족한 직장인·학생",
+    "image_style": "플랫 일러스트",
+    "product_scale": "크게",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

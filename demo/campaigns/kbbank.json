@@ -1,0 +1,21 @@
+{
+  "slug": "kbbank",
+  "brand": "kbbank",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1",
+    "업로드형 300×250"
+  ],
+  "brief": {
+    "product_name": "KB 적금 첫걸음",
+    "description": "사회초년생이 매달 일정 금액을 모아가는 정기적금 상품 안내. 금리와 우대 조건은 별도 확인이 필요하다.",
+    "key_message": "작게 시작해도 차곡차곡 쌓이는 습관",
+    "target": "20대 사회초년생",
+    "image_style": "플랫 일러스트",
+    "product_scale": "크게",
+    "layout": "기본",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

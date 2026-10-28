@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "starbucks",
+  "brand": {
+    "name": "스타벅스 코리아",
+    "description": "커피와 음료, 디저트를 매장과 앱에서 제공하는 글로벌 커피 전문점의 국내 운영사",
+    "logo_asset_id": null,
+    "logo_margin_percent": 24,
+    "logo_position": "자동",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#00704A"
+      },
+      {
+        "role": "진한초록",
+        "hex": "#1E3932"
+      },
+      {
+        "role": "연한초록",
+        "hex": "#D4E9E2"
+      },
+      {
+        "role": "강조색",
+        "hex": "#CBA258"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F2F0EB"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1E3932"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "자동"
+    },
+    "image_tone": {
+      "description": "따뜻한 조명의 카페 분위기, 갓 만든 음료의 질감, 초록과 크림 톤. 여유로운 오후 장면, 얕은 심도. 이미지 안의 글자와 실제 로고·컵 문양 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "여유로움 · 따뜻함 · 감성적인 존댓말. 카페인 효과나 건강 효능을 말하지 않는다.",
+      "headline_max_chars": 22,
+      "polite": true
+    },
+    "required_phrases": [
+      "스타벅스"
+    ],
+    "forbidden_phrases": [
+      "건강에 좋은",
+      "다이어트",
+      "각성 효과",
+      "피로 회복",
+      "무제한",
+      "최저가"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "커피·F&B",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "이미지 톤 필수 + 로고 자동 위치 + 시즌 캠페인"
+    ]
+  }
+}

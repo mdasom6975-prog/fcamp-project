@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "hyundai",
+  "brand": {
+    "name": "현대자동차",
+    "description": "승용·SUV·전기차 라인업을 운영하는 국내 자동차 제조사",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "logo_position": "우상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#002C5F"
+      },
+      {
+        "role": "보조색",
+        "hex": "#00AAD2"
+      },
+      {
+        "role": "보조회색",
+        "hex": "#E4DCD3"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1A1A1A"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FFFFFF"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "각진",
+      "fill": "윤곽",
+      "material": "금속"
+    },
+    "image_tone": {
+      "description": "차분한 도심과 자연 풍경 속 차량, 깊은 남색 계열의 신뢰감 있는 톤. 정지 상태의 차량, 깨끗한 반사. 이미지 안의 글자·번호판·실제 도로 표지판 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "신뢰감 · 차분함 · 미래지향. 연비·주행거리·안전 수치는 확인된 값만 쓴다.",
+      "headline_max_chars": 20,
+      "polite": true
+    },
+    "required_phrases": [
+      "현대자동차"
+    ],
+    "forbidden_phrases": [
+      "연비 1위",
+      "무사고",
+      "최고 안전",
+      "주행거리 보장",
+      "경쟁사",
+      "최저가",
+      "0원"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "모빌리티",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "수치·비교 표현 금지 + 금속 재질 아이콘"
+    ]
+  }
+}

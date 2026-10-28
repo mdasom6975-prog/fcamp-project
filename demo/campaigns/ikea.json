@@ -1,0 +1,21 @@
+{
+  "slug": "ikea",
+  "brand": "ikea",
+  "placements": [
+    "Instagram 피드",
+    "디스플레이 네이티브 2:1",
+    "PMax 가로 1.91:1",
+    "업로드형 336×280"
+  ],
+  "brief": {
+    "product_name": "이케아 가을 수납 정리",
+    "description": "작은 집에서도 옷장, 책상, 현관을 깔끔하게 정리할 수 있는 수납 가구와 소품 제안.",
+    "key_message": "작은 공간도 넉넉하게, 수납으로 바꿔요",
+    "target": "20~30대 1~2인 가구",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "좌우 반전",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

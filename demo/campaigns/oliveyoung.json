@@ -1,0 +1,21 @@
+{
+  "slug": "oliveyoung",
+  "brand": "oliveyoung",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "디스플레이 네이티브 1:1",
+    "PMax 가로 1.91:1"
+  ],
+  "brief": {
+    "product_name": "올리브영 데일리 선케어",
+    "description": "일상에서 가볍게 쓰는 자외선 차단 제품과 스킨케어를 모아 소개하는 기획전.",
+    "key_message": "매일 가볍게, 산뜻한 선케어 루틴",
+    "target": "20~30대 여성, 데일리 스킨케어 관심층",
+    "image_style": "실사 제품·공간",
+    "product_scale": "보통",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

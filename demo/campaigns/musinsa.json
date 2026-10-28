@@ -1,0 +1,21 @@
+{
+  "slug": "musinsa",
+  "brand": "musinsa",
+  "placements": [
+    "Instagram 피드",
+    "Instagram 스토리",
+    "Facebook 피드",
+    "PMax 정사각형 1:1"
+  ],
+  "brief": {
+    "product_name": "무신사 가을 신상 스타일",
+    "description": "가을 시즌에 맞춘 아우터와 니트 신상품을 모아 소개하는 시즌 기획전.",
+    "key_message": "가을 옷장, 지금 바꿔요",
+    "target": "20대 패션 관심층",
+    "image_style": "실사 인물",
+    "product_scale": "크게",
+    "layout": "상단 문구",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}
