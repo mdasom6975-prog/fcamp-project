@@ -35,6 +35,18 @@ async function j<T>(r: Response): Promise<T> {
   return body as T
 }
 
+// 같은 GET 이 같은 순간에 여러 컴포넌트에서 나가면(캠페인을 열 때 /copy·/images·/brands 가 2~3번) 한 번만 보내고 결과를 나눠 준다.
+// 서버리스(Vercel)에서는 동시 요청 수만큼 함수 인스턴스가 새로 떠서 콜드 스타트(~3초)가 생기므로 동시 요청 수를 줄이는 것이 중요하다.
+// 응답이 오면 바로 지우므로 캐시가 아니다(다음 호출은 다시 서버로 간다). ok 가 아니면 null.
+const inflight = new Map<string, Promise<unknown>>()
+export function getJson<T = any>(url: string): Promise<T | null> {
+  const cur = inflight.get(url)
+  if (cur) return cur as Promise<T | null>
+  const p = fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : null)).finally(() => inflight.delete(url))
+  inflight.set(url, p)
+  return p
+}
+
 export const api = {
   defaults: () => fetch('/api/brand-defaults').then((r) => j<{ levels: Record<string, Level>; color_roles: string[] }>(r)),
   providedFonts: () => fetch('/api/fonts/provided').then((r) => j<{ name: string; label: string }[]>(r)),

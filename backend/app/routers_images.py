@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -10,8 +11,8 @@ from sqlalchemy.orm import Session
 from . import calllog, compose, imagegen
 from . import storage
 from .db import BASE_DIR
-from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, GeneratedImage,
-                     IconAsset, PresetVersion, ReviewResult)
+from .models import (ArchivedImage, Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
+                     GeneratedImage, IconAsset, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, get_db, get_design, latest_image
 from .routers_review import ensure_unlocked, invalidate_icon_reviews, invalidate_reviews
 
@@ -151,8 +152,9 @@ def design_settings(db: Session, d: Design) -> dict:
 
 @router.put("/designs/{design_id}/image-settings")
 def set_image_settings(design_id: int, image_model: str | None = Body(None, embed=True),
-                       bg_mode: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
-    """시안의 생성 설정(이미지 모델·배경 방식)을 브리프에 저장한다. 다음 배경 생성·재생성부터 적용된다(기존 배경은 그대로)."""
+                       bg_mode: str | None = Body(None, embed=True),
+                       image_style: str | None = Body(None, embed=True), db: Session = Depends(get_db)):
+    """시안의 생성 설정(이미지 모델·배경 방식·배경 형태)을 브리프에 저장한다. 다음 배경 생성·재생성부터 적용된다(기존 배경은 그대로)."""
     d = get_design(db, design_id, ad_only=True)
     ensure_unlocked(d)
     brief = dict(d.brief or {})
@@ -164,9 +166,15 @@ def set_image_settings(design_id: int, image_model: str | None = Body(None, embe
         if bg_mode not in imagegen.BG_MODES:
             raise HTTPException(400, f"배경 방식은 {list(imagegen.BG_MODES)} 중 하나")
         brief["bg_mode"] = bg_mode
+    if image_style is not None:
+        image_style = image_style.strip() or imagegen.AUTO_STYLE
+        if image_style != imagegen.AUTO_STYLE and image_style not in imagegen.STYLES:
+            raise HTTPException(400, f"배경 형태는 {[imagegen.AUTO_STYLE, *imagegen.STYLES]} 중 하나")
+        brief["image_style"] = image_style
     d.brief = brief
     db.commit()
-    return {"settings": design_settings(db, d), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode")}
+    return {"settings": design_settings(db, d), "image_model": brief.get("image_model"), "bg_mode": brief.get("bg_mode"),
+            "image_style": brief.get("image_style")}
 
 
 @router.get("/designs/{design_id}/image-settings")
@@ -504,13 +512,24 @@ def regenerate_background(design_id: int, style: str | None = Body(None, embed=T
 @router.post("/designs/{design_id}/reset-generated")
 def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True),
                     include_icons: bool = Body(False, embed=True), db: Session = Depends(get_db)):
-    """시안의 생성 결과(배경·합성·편집 요소·검수 결과)만 지운다. 브랜드·규격·입력 내용(brief)은 유지하고,
+    """시안의 생성 결과(배경·합성·편집 요소·검수 결과)를 사용자 화면에서 지운다. 생성 이미지는 지우지 않고 ArchivedImage 로
+    옮겨 파일을 보존한다(개발자 품질 비교용, 분석 화면에서 본다). 브랜드·규격·입력 내용(brief)은 유지하고,
     카피는 include_copy=True, 아이콘 세트는 include_icons=True 일 때만 지운다(세트는 브랜드 규칙 버전 소유라 같은 버전을
     쓰는 다른 캠페인에서도 사라진다). 이미지 생성 API 호출 테스트를 처음부터 다시 하기 위한 용도."""
     d = get_design(db, design_id, ad_only=True)
-    imgs = db.scalars(select(GeneratedImage).where(GeneratedImage.design_id == design_id)).all()
-    paths = {g.file_path for g in imgs}
+    imgs = db.scalars(select(GeneratedImage).where(GeneratedImage.design_id == design_id)
+                      .order_by(GeneratedImage.id)).all()
+    paths: set[str] = set()                            # 지울 파일(이미지는 보관하므로 아이콘 파일만 담긴다)
+    batch = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    names: dict[int, str] = {}
     for g in imgs:
+        if g.preset_version_id not in names:
+            pv = db.get(PresetVersion, g.preset_version_id)
+            names[g.preset_version_id] = f"{pv.placement.platform.name} · {pv.placement.name}" if pv else ""
+        db.add(ArchivedImage(design_id=design_id, batch=batch, preset_version_id=g.preset_version_id,
+                             preset_name=names[g.preset_version_id], kind=g.kind, file_path=g.file_path,
+                             width=g.width, height=g.height, prompt=g.prompt, copy_variant_id=g.copy_variant_id,
+                             brand_version_id=g.brand_version_id, layout=g.layout or {}, created_at=g.created_at))
         db.delete(g)
     icons_deleted = 0
     if include_icons:
@@ -538,7 +557,7 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
             removed += 1
         _delete_thumbs(p)                              # 이 시안의 축소본 캐시(파일 이름 기준, 모든 크기)도 정리
     db.commit()
-    return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy,
+    return {"deleted_images": len(imgs), "archived_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy,
             "icons_deleted": icons_deleted}
 
 
@@ -668,6 +687,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
                   "crop": crop, "warnings": [], "elements": [], **({"product_fit": product_fit} if product_fit else {})}
         kind_path = storage.put_image(f"sep_{uuid.uuid4().hex[:10]}.png", out_img)
+        prewarm_thumbs(kind_path, out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
                              file_path=kind_path, width=w, height=h, brand_version_id=bv.id, layout=report)
     else:
@@ -697,6 +717,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
         if not bv.logo_asset_id:
             report["warnings"].append("브랜드에 로고가 등록되어 있지 않습니다")
         path = storage.put_image(f"cmp_{uuid.uuid4().hex[:10]}.png", out_img)
+        prewarm_thumbs(path, out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
                              file_path=path, width=w, height=h, copy_variant_id=sel.id,
                              brand_version_id=bv.id, layout=report)
@@ -720,8 +741,30 @@ THUMB_SIDE = 360
 THUMB_SIDES = (THUMB_SIDE, 720, 1080, 1600)     # 요청 크기를 올림해 이 단계로만 만든다(캐시 파일 수를 제한)
 
 
+PREWARM_SIDES = (THUMB_SIDE, 720, 1080)   # 합성본을 저장할 때 미리 만들어 두는 단계(그리드 360, 보기 전용 시안 720·1080)
+
+
 def _thumb_key(file_path: str, side: int = THUMB_SIDE) -> str:
     return f"thumbs/{Path(file_path).stem}_{side}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
+
+
+def _thumb_jpeg(im: Image.Image, step: int) -> tuple[Image.Image, int]:
+    """썸네일 한 단계. 원본보다 키우지 않는다. 반환: (이미지, JPEG 품질)."""
+    t = im.convert("RGB")
+    t.thumbnail((step, step), Image.LANCZOS)
+    return t, (82 if step == THUMB_SIDE else 90)
+
+
+def prewarm_thumbs(file_path: str, im: Image.Image) -> None:
+    """합성본을 저장하는 자리에서 썸네일 단계를 미리 만든다. 서버리스(Vercel)에서는 첫 조회 때 원본을 내려받아 줄이느라
+    장당 0.6~1.5초가 걸리고 인스턴스의 /tmp 캐시도 자주 비므로, 저장할 때 Supabase 에 같이 올려 둔다. 실패해도 합성은 그대로
+    (조회 때 예전처럼 만든다)."""
+    for step in PREWARM_SIDES:
+        try:
+            t, q = _thumb_jpeg(im, step)
+            storage.put_image(_thumb_key(file_path, step), t, "JPEG", quality=q)
+        except Exception:          # noqa: BLE001 — 썸네일은 보조 파일이라 합성 결과를 막지 않는다
+            log.exception("썸네일 미리 생성 실패: %s %s", file_path, step)
 
 
 def _delete_thumbs(file_path: str) -> None:
@@ -739,7 +782,6 @@ def image_thumb(image_id: int, side: int | None = None, db: Session = Depends(ge
     step = next((s for s in THUMB_SIDES if s >= (side or 0)), THUMB_SIDES[-1])
     out = _thumb_key(g.file_path, step)
     if not storage.exists(out):
-        im = Image.open(storage.local(g.file_path)).convert("RGB")
-        im.thumbnail((step, step), Image.LANCZOS)
-        storage.put_image(out, im, "JPEG", quality=82 if step == THUMB_SIDE else 90)
+        t, q = _thumb_jpeg(Image.open(storage.local(g.file_path)), step)
+        storage.put_image(out, t, "JPEG", quality=q)
     return storage.response(out, "image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

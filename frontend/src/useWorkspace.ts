@@ -1,6 +1,7 @@
 // 작업 화면(3열)의 왼쪽 메뉴 상태·오른쪽 레일·보기 전용 시안이 함께 쓰는 캠페인 요약 데이터.
 // 카피·이미지·아이콘·검수·호출 지표를 한 번에 불러와 상태 점과 숫자를 만든다. refreshKey 가 바뀌면 다시 불러온다.
 import { useCallback, useEffect, useState } from 'react'
+import { getJson } from './api'
 
 export type Variant = { variant_no: number; headline: string; body: string; cta: string; selected: boolean }
 export type WorkspaceData = {
@@ -28,7 +29,7 @@ const EMPTY: WorkspaceData = {
   iconCount: 0, iconTarget: 10, review: null, calls: null, usage: null,
 }
 
-const j = async (url: string) => { const r = await fetch(url); return r.ok ? r.json() : null }
+const j = (url: string) => getJson(url)     // 동시 요청은 하나로(api.getJson)
 
 export function useWorkspace(designId: number | null, brandId: number | null, brandName: string, refreshKey: unknown) {
   const [data, setData] = useState<WorkspaceData>({ ...EMPTY, brandName })

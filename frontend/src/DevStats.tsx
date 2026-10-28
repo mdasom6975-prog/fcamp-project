@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getJson } from './api'
 
 // 개발자 지표: 이 시안이 부른 외부 모델 호출의 횟수·실패·소요·토큰·비용. 절감 효과를 화면에서 바로 비교하기 위한 것.
 // 서버(GET /api/designs/{id}/api-calls)가 종류별로 집계하고, 비용은 backend/app/pricing.py 로 계산한다
@@ -57,7 +58,7 @@ export default function DevStats({ designId, kinds, label, refreshKey }: {
   const kindsKey = kinds.join(',')
 
   const load = useCallback(() =>
-    fetch(`/api/designs/${designId}/api-calls`).then((r) => r.json()).then((j: ApiCalls) => {
+    getJson<ApiCalls>(`/api/designs/${designId}/api-calls`).then((j) => {
       if (!j || typeof j.total !== 'number') return
       const now = sum(j, kindsKey.split(','))
       if (prev.current && now.count + now.failed > prev.current.count + prev.current.failed) {

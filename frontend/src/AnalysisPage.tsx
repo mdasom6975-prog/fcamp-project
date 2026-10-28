@@ -147,6 +147,63 @@ function Scores({ j, items }: { j: Judgment; items: string[] }) {
   )
 }
 
+type Archived = { id: number; kind: string; preset: string; width: number; height: number; created_at: string; prompt: string | null
+  model?: string | null; quality?: string | null; style?: string | null; mode?: string | null; template?: string | null; provider?: string | null }
+type ArchivedBatch = { batch: string; archived_at: string; items: Archived[] }
+
+// ④ 초기화한 이미지 보관본: '시안 이미지 초기화'로 사용자 화면에서 지운 이미지. 파일은 보존되어 있어 품질 비교에 쓴다
+function ArchivedSection({ designId }: { designId: number }) {
+  const [batches, setBatches] = useState<ArchivedBatch[]>([])
+  const [picked, setPicked] = useState<number[]>([])   // 비교할 보관본 id (최대 2장, 오래된 선택부터 밀려난다)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    setPicked([]); setErr(null)
+    fetch(`/api/designs/${designId}/analysis/archived`).then(async (r) => {
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.detail || '보관본을 불러오지 못했습니다')
+      setBatches(j.batches ?? [])
+    }).catch((e) => setErr((e as Error).message))
+  }, [designId])
+  const all = useMemo(() => batches.flatMap((b) => b.items.map((i) => ({ ...i, batch: b.batch, archived_at: b.archived_at }))), [batches])
+  const sel = picked.map((id) => all.find((x) => x.id === id)).filter((x): x is NonNullable<typeof x> => !!x)
+  const toggle = (id: number) => setPicked((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id].slice(-2))
+  const meta = (a: Archived) => [a.model, a.quality, a.style, a.mode, a.template].filter(Boolean).join(' · ') || '-'
+  return (
+    <section className="card">
+      <header><h3><span className="step-no">④</span> 초기화한 이미지 보관본</h3><span className="muted">{all.length}장 · 사용자 화면에서는 지워졌고 분석에서만 보입니다 · 2장을 골라 나란히 비교</span></header>
+      {err && <p className="an-err">{err}</p>}
+      {!err && !all.length && <p className="muted">보관된 이미지가 없습니다. '시안 이미지 초기화'를 하면 그 시점의 이미지가 여기에 남습니다.</p>}
+      {sel.length > 0 && (
+        <div className="an-arch-compare">
+          {sel.map((a) => (
+            <figure key={a.id}>
+              <img src={`/api/archived-images/${a.id}/file`} alt={`${a.preset} ${a.kind}`} />
+              <figcaption><strong>{a.kind === 'background' ? '배경' : '합성'}</strong> · {a.preset} · {a.width}×{a.height}<br /><span className="muted">{meta(a)}</span></figcaption>
+            </figure>
+          ))}
+          {sel.length === 1 && <p className="muted">비교할 이미지를 하나 더 고르세요.</p>}
+        </div>
+      )}
+      {batches.map((b) => (
+        <div key={b.batch} className="an-arch-batch">
+          <h4>초기화 {when(b.archived_at)} <span className="muted">· {b.items.length}장</span></h4>
+          <div className="an-arch-grid">
+            {b.items.map((a) => (
+              <label key={a.id} className={`an-arch-card${picked.includes(a.id) ? ' on' : ''}`}>
+                <input type="checkbox" checked={picked.includes(a.id)} onChange={() => toggle(a.id)} />
+                <img src={`/api/archived-images/${a.id}/thumb`} alt="" loading="lazy" />
+                <span><strong>{a.kind === 'background' ? '배경' : '합성'}</strong> · {a.kind === 'background' ? a.template ?? '' : a.preset}</span>
+                <span className="muted">{a.width}×{a.height} · {meta(a)}</span>
+                {a.prompt && <details onClick={(e) => e.stopPropagation()}><summary>프롬프트</summary><pre className="prompt">{a.prompt}</pre></details>}
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export default function AnalysisPage({ workBrandId }: { workBrandId: number | null }) {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [brandId, setBrandId] = useState<number | null>(workBrandId)
@@ -438,6 +495,9 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
               </table>
             </details>
           </section>
+
+          {/* ④ 초기화한 이미지 보관본 */}
+          <ArchivedSection designId={data.design.id} />
         </>
       )}
     </main>

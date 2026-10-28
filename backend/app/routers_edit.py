@@ -14,7 +14,8 @@ from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnap
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db, get_design, latest_image
 from .routers_copy import select_variant
 from .routers_review import ensure_unlocked
-from .routers_images import _color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image
+from .routers_images import (_color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image,
+                             prewarm_thumbs)
 
 router = APIRouter(prefix="/api", dependencies=[Depends(calllog.track_design)])   # 호출 기록에 시안 id
 # 편집 미리보기 크기(긴 변 px). 화면이 보여 줄 크기 × 픽셀 배율(max_px)을 보내면 그 크기로, 안 보내면 PREVIEW_MAX.
@@ -110,6 +111,7 @@ def _render_rows(db, d, pv, rows, bg_path):
 def _save_render(db, d, pv, rows, bg_row, comp_prev, copy_variant_id: int | None = None, snapshot: bool = True) -> dict:
     img, measure, warns = _render_rows(db, d, pv, rows, bg_row.file_path)
     path = storage.put_image(f"edt_{uuid.uuid4().hex[:10]}.png", img)
+    prewarm_thumbs(path, img)
     layout = {"template": compose.template_for(pv.production_width, pv.production_height),
               "canvas": [pv.production_width, pv.production_height], "edited": True, "warnings": warns,
               "elements": [], "margin_source": "편집됨"}
