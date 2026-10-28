@@ -228,11 +228,11 @@ def delete_brand(brand_id: int, db: Session = Depends(get_db)):
     keep = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
     keep |= {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
     keep |= {a for (a,) in db.execute(select(Asset.file_path)).all()}
-    from .routers_images import _thumb_key
+    from .routers_images import _delete_thumbs
     removed = 0
     for p in files - keep:
         if storage.delete(p):
             removed += 1
-        storage.delete(_thumb_key(p))
+        _delete_thumbs(p)
     db.commit()
     return {"deleted": brand_id, **counts, "deleted_files": removed}
