@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "kgc",
+  "brand": {
+    "name": "정관장",
+    "description": "홍삼을 중심으로 한 건강기능식품을 판매하는 국내 건강식품 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 22,
+    "logo_position": "우상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#B5121B"
+      },
+      {
+        "role": "보조색",
+        "hex": "#1A1A1A"
+      },
+      {
+        "role": "강조색",
+        "hex": "#C9A24A"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#2A2A2A"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FBF7F0"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "각진",
+      "fill": "윤곽",
+      "material": "금속"
+    },
+    "image_tone": {
+      "description": "고급스럽고 단정한 전통 색감, 붉은색과 금색의 절제된 포인트. 따뜻한 조명의 정돈된 제품 컷, 가족이 함께하는 차분한 장면. 약효를 암시하는 의료 연출(흰 가운, 청진기) 금지. 이미지 안의 글자 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "신뢰 · 정성 · 품위 있는 존댓말. 질병 예방·치료·면역 효과를 단정하지 않는다.",
+      "headline_max_chars": 22,
+      "polite": true
+    },
+    "required_phrases": [
+      "정관장"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "질병 예방",
+      "암",
+      "면역력 강화",
+      "피로 회복 보장",
+      "의약품",
+      "부작용 없음",
+      "100% 효과"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "건강기능식품",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "건강기능식품 규제 시연(효능 단정 표현이 입력 단계에서 걸림)"
+    ]
+  }
+}

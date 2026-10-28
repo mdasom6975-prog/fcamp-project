@@ -1671,7 +1671,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
             <button className="primary" disabled={!canGenerate} onClick={generateCampaign}>{busy ? '생성 중…' : '시안 생성하기'}</button>
           </div>
           <p className="muted board-foot">브랜드 규칙 + 선택 규격을 함께 반영해 시안 {3}개를 만듭니다. 지면 수에 따라 수십 초 걸릴 수 있습니다.</p>
-          {hasCopy && <button type="button" className="link" disabled={busy} onClick={cancelEdit}>수정 취소</button>}
+          {hasCopy && <button type="button" className="board-cancel" disabled={busy} onClick={cancelEdit}>수정 취소</button>}
         </section>
       </aside>
     </div>

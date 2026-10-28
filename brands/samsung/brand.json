@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "samsung",
+  "brand": {
+    "name": "삼성전자 갤럭시",
+    "description": "스마트폰, 태블릿, 웨어러블 등 갤럭시 제품군을 선보이는 글로벌 전자 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "logo_position": "좌상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#1428A0"
+      },
+      {
+        "role": "보조색",
+        "hex": "#000000"
+      },
+      {
+        "role": "보조회색",
+        "hex": "#F4F4F4"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#000000"
+      },
+      {
+        "role": "강조색",
+        "hex": "#2189FF"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 1.5,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "유리·반투명"
+    },
+    "image_tone": {
+      "description": "미래적이고 깨끗한 스튜디오, 유리와 빛의 반사, 짙은 파랑과 검정 그라데이션. 제품은 정면 또는 사선 구도. 이미지 안의 글자·실제 화면 UI·타사 로고 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "혁신적 · 간결 · 기술을 쉽게 풀어주는 존댓말. 성능 비교나 최고 표현을 쓰지 않는다.",
+      "headline_max_chars": 18,
+      "polite": true
+    },
+    "required_phrases": [
+      "갤럭시"
+    ],
+    "forbidden_phrases": [
+      "세계 최초",
+      "업계 최고",
+      "압도적 1위",
+      "경쟁사 대비",
+      "배터리 무제한",
+      "최저가"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "권장",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "전자·IT",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "비교·최상급 표현 금지 + 유리/반투명 3D 재질 아이콘"
+    ]
+  }
+}

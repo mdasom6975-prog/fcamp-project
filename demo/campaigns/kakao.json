@@ -1,0 +1,21 @@
+{
+  "slug": "kakao",
+  "brand": "kakao",
+  "placements": [
+    "비즈보드 배너 1029×258",
+    "채널 메시지 와이드이미지형 800×600",
+    "디스플레이 네이티브 2:1",
+    "디스플레이 네이티브 1:1"
+  ],
+  "brief": {
+    "product_name": "카카오톡 선물하기",
+    "description": "받는 사람의 주소를 몰라도 카카오톡으로 선물을 보낼 수 있는 선물하기 서비스.",
+    "key_message": "마음을 전하는 가장 쉬운 방법",
+    "target": "20~40대 기념일 선물 구매층",
+    "image_style": "3D 렌더",
+    "product_scale": "크게",
+    "layout": "중앙 정렬",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}

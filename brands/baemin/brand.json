@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "baemin",
+  "brand": {
+    "name": "배달의민족",
+    "description": "음식 배달과 장보기를 연결하는 국내 배달 플랫폼. 유쾌하고 재치 있는 말투로 알려져 있다",
+    "logo_asset_id": null,
+    "logo_margin_percent": 15,
+    "logo_position": "우상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#2AC1BC"
+      },
+      {
+        "role": "보조색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "강조색",
+        "hex": "#FFC000"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#212121"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F5F5F5"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 3,
+      "corner": "둥근",
+      "fill": "채움",
+      "material": "클레이"
+    },
+    "image_tone": {
+      "description": "따뜻하고 식욕을 돋우는 음식 사진, 민트 포인트 컬러. 위에서 내려다본 테이블 구도, 자연광, 약간 장난스러운 소품. 이미지 안의 글자와 실제 매장 간판 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "유쾌함 · 재치 · 친구에게 말하듯 편한 반말체. 과장된 맛 보장은 하지 않는다.",
+      "headline_max_chars": 14,
+      "polite": false
+    },
+    "required_phrases": [
+      "배달의민족"
+    ],
+    "forbidden_phrases": [
+      "최저가",
+      "무조건 무료배달",
+      "배달 시간 보장",
+      "맛 보장",
+      "위생 1등"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "수정가능",
+      "icon_style": "권장",
+      "image_tone": "수정가능",
+      "voice": "수정가능",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "푸드 딜리버리",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "반말 어조 + 폰트 제목만 지정 + 대부분 수정가능 등급"
+    ]
+  }
+}

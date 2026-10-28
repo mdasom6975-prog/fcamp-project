@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "spotify",
+  "brand": {
+    "name": "스포티파이",
+    "description": "음악과 팟캐스트를 스트리밍으로 듣는 오디오 서비스",
+    "logo_asset_id": null,
+    "logo_margin_percent": 20,
+    "logo_position": "우하단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#1DB954"
+      },
+      {
+        "role": "보조색",
+        "hex": "#191414"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#FFFFFF"
+      },
+      {
+        "role": "회색",
+        "hex": "#B3B3B3"
+      },
+      {
+        "role": "배경색",
+        "hex": "#121212"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "채움",
+      "material": "자동"
+    },
+    "image_tone": {
+      "description": "어두운 배경 위 선명한 초록 포인트, 듀오톤 그래픽과 겹치는 도형. 음악을 듣는 순간의 감정이 담긴 추상적 비주얼. 이미지 안의 글자와 실제 앨범 커버·아티스트 얼굴 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "감각적 · 간결 · 플레이리스트 제목 같은 짧은 문장. 편한 반말과 존댓말을 섞지 않는다.",
+      "headline_max_chars": 12,
+      "polite": false
+    },
+    "required_phrases": [
+      "스포티파이"
+    ],
+    "forbidden_phrases": [
+      "무제한 무료",
+      "모든 음악",
+      "최저가",
+      "독점 공개",
+      "1위"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "필수",
+      "icon_style": "권장",
+      "image_tone": "권장",
+      "voice": "수정가능",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "음악·스트리밍",
+    "source": "시연용 브랜드 데이터 (공개된 브랜드 아이덴티티를 바탕으로 작성)",
+    "checked_at": "2026-10-27",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공개된 브랜드 아이덴티티를 바탕으로 한 근사값(시연용). 실제 집행 전 공식 브랜드 가이드로 확인 필요",
+      "금지·필수 표현과 어조는 시연을 위해 임의로 구성한 값이며 해당 기업의 공식 가이드가 아님",
+      "로고 파일 없음 — 화면에서 직접 업로드",
+      "다크 배경 팔레트 + 그래픽 패턴"
+    ]
+  }
+}

@@ -359,6 +359,12 @@ def test_thumbnail_endpoint_caches_small_jpeg(env):
     token = next(r["composite"]["file"] for r in comp if r["preset_id"] == p["피드 4:5"])
     assert token.startswith("cmp_") and (__import__("app.db", fromlist=["x"]).STORAGE_DIR / "thumbs" / f"{token}_360.jpg").exists()
     assert c.get("/api/generated/999999/thumb").status_code == 404
+    # side 를 주면 그 크기 이상으로 올림한 단계(720·1080·1600)로, 원본보다 키우지는 않는다. 단계별로 캐시한다
+    big = Image.open(io.BytesIO(c.get(f"/api/generated/{cid}/thumb?side=700").content))
+    assert max(big.size) == min(720, routers_images.THUMB_SIDES[1]) or max(big.size) < 720    # 원본이 720 보다 작으면 원본 크기
+    assert (__import__("app.db", fromlist=["x"]).STORAGE_DIR / "thumbs" / f"{token}_720.jpg").exists()
+    assert max(Image.open(io.BytesIO(c.get(f"/api/generated/{cid}/thumb?side=99999").content)).size) <= 1600
+    assert max(Image.open(io.BytesIO(c.get(f"/api/generated/{cid}/thumb?side=100").content)).size) == 360
 
 
 def test_tighten_zooms_when_subject_is_small_and_keeps_copy_space():

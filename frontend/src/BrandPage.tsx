@@ -179,6 +179,25 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     }
   }
 
+  // 브랜드와 딸린 캠페인·생성 결과·업로드 파일까지 지운다(되돌릴 수 없음). 지우기 전에 캠페인 수를 보여 주고 확인받는다
+  const remove = async () => {
+    if (selected === null) return
+    setBusy(true); setMsg(null)
+    try {
+      const n = await api.brandDesignCount(selected)
+      const ok = window.confirm(`'${form.name}' 브랜드를 삭제할까요?\n\n모든 버전과 캠페인 ${n}개, 생성한 카피·이미지·아이콘·검수 결과·업로드한 로고가 함께 삭제되며 되돌릴 수 없습니다.`)
+      if (!ok) return
+      await api.deleteBrand(selected)
+      await loadBrands()
+      newBrand()
+      setMsg({ ok: true, text: ['브랜드를 삭제했습니다.'] })
+    } catch (e) {
+      setMsg({ ok: false, text: [(e as Error).message] })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // onErr 를 주면 오류를 저장 카드(msg) 대신 그 칸에 띄운다
   const upload = async (kind: 'logo' | 'font' | 'tone_ref', file: File | undefined,
     onOk: (r: { id: number; width: number | null; height: number | null; name: string; note?: string | null }) => void,
@@ -460,6 +479,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
             {msg && <div className={msg.ok ? 'notice ok' : 'notice err'}>{msg.text.map((t, i) => <div key={i}>{t}</div>)}</div>}
             <button className="primary bp-save" disabled={busy || !form.name.trim() || !dirty} onClick={save}>{selected ? '새 버전으로 저장' : '브랜드 저장'}</button>
             {selected !== null && !dirty && <p className="muted bp-nochange">변경 사항이 없습니다.</p>}
+            {selected !== null && <button className="bp-del" disabled={busy} onClick={remove}>브랜드 삭제</button>}
             {onGoDesign && savedId !== null && savedId === selected && (
               <button className="bp-go" onClick={() => onGoDesign(savedId)}>시안 만들러 가기 →</button>
             )}

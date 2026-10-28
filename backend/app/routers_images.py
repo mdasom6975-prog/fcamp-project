@@ -536,7 +536,7 @@ def reset_generated(design_id: int, include_copy: bool = Body(False, embed=True)
     for p in paths - still:
         if storage.delete(p):
             removed += 1
-        storage.delete(_thumb_key(p))                  # 이 시안의 축소본 캐시(파일 이름 기준)도 정리
+        _delete_thumbs(p)                              # 이 시안의 축소본 캐시(파일 이름 기준, 모든 크기)도 정리
     db.commit()
     return {"deleted_images": len(imgs), "deleted_files": removed, "copy_cleared": include_copy,
             "icons_deleted": icons_deleted}
@@ -717,19 +717,29 @@ def image_file(image_id: int, db: Session = Depends(get_db)):
 THUMB_SIDE = 360
 
 
-def _thumb_key(file_path: str) -> str:
-    return f"thumbs/{Path(file_path).stem}_{THUMB_SIDE}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
+THUMB_SIDES = (THUMB_SIDE, 720, 1080, 1600)     # 요청 크기를 올림해 이 단계로만 만든다(캐시 파일 수를 제한)
+
+
+def _thumb_key(file_path: str, side: int = THUMB_SIDE) -> str:
+    return f"thumbs/{Path(file_path).stem}_{side}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
+
+
+def _delete_thumbs(file_path: str) -> None:
+    for side in THUMB_SIDES:
+        storage.delete(_thumb_key(file_path, side))
 
 
 @router.get("/generated/{image_id}/thumb")
-def image_thumb(image_id: int, db: Session = Depends(get_db)):
-    """썸네일 그리드용 축소본(긴 변 360px JPEG). 생성 결과는 바뀌지 않으므로 id 기준으로 파일 캐시한다."""
+def image_thumb(image_id: int, side: int | None = None, db: Session = Depends(get_db)):
+    """축소본 JPEG. 기본은 썸네일 그리드용 긴 변 360px. side 를 주면 그 크기 이상으로 올림한 단계(720·1080·1600)로 받는다
+    (화면에 그릴 크기 × 픽셀 배율을 보내 흐리지 않게). 원본보다 키우지는 않는다. 생성 결과는 바뀌지 않으므로 단계별로 파일 캐시한다."""
     g = db.get(GeneratedImage, image_id)
     if not g or not storage.exists(g.file_path):
         raise HTTPException(404, "이미지를 찾을 수 없습니다")
-    out = _thumb_key(g.file_path)
+    step = next((s for s in THUMB_SIDES if s >= (side or 0)), THUMB_SIDES[-1])
+    out = _thumb_key(g.file_path, step)
     if not storage.exists(out):
         im = Image.open(storage.local(g.file_path)).convert("RGB")
-        im.thumbnail((THUMB_SIDE, THUMB_SIDE), Image.LANCZOS)
-        storage.put_image(out, im, "JPEG", quality=82)
+        im.thumbnail((step, step), Image.LANCZOS)
+        storage.put_image(out, im, "JPEG", quality=82 if step == THUMB_SIDE else 90)
     return storage.response(out, "image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

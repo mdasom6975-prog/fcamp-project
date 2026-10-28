@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import smallbiz
-from .models import Asset, Brand, BrandVersion
+from . import smallbiz, storage
+from .models import (ApiCall, Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, Export,
+                     GeneratedImage, IconAsset, Judgment, PinSheet, ReviewResult)
 from .routers_assets import PROVIDED_FONTS, get_db
 from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandIn
 
@@ -154,3 +155,84 @@ def update_brand(brand_id: int, body: BrandIn, db: Session = Depends(get_db)):
     brand.current_version_id = v.id
     db.commit()
     return {"id": brand.id, "name": brand.name, "description": brand.description, "version": _version_out(v), "warnings": _warnings(body)}
+
+
+def _asset_ids_of(v: BrandVersion) -> set[int]:
+    ids = {v.logo_asset_id, v.logo_square_asset_id, *(v.image_tone or {}).get("reference_asset_ids", []),
+           *(f.get("asset_id") for f in v.fonts or [])}
+    return {i for i in ids if i}
+
+
+@router.delete("/brands/{brand_id}")
+def delete_brand(brand_id: int, db: Session = Depends(get_db)):
+    """브랜드와 딸린 것을 모두 지운다: 모든 버전, 이 브랜드의 캠페인(생성 이미지·카피·편집 요소·검수·내보내기·핀 뱃지·호출 기록),
+    브랜드 버전이 소유한 아이콘 세트, 다른 곳에서 쓰지 않는 업로드 파일(로고·폰트·기준 이미지·제품 이미지).
+    되돌릴 수 없으므로 화면에서 확인을 거친 뒤에만 부른다."""
+    brand = db.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, "브랜드를 찾을 수 없습니다")
+    versions = db.scalars(select(BrandVersion).where(BrandVersion.brand_id == brand_id)).all()
+    vids = [v.id for v in versions]
+    designs = db.scalars(select(Design).where(Design.brand_id == brand_id)).all()
+    dids = [d.id for d in designs]
+
+    files: set[str] = set()
+    asset_ids: set[int] = {a for v in versions for a in _asset_ids_of(v)}
+    asset_ids |= {i for (i,) in db.execute(select(Asset.id).where(Asset.brand_id == brand_id)).all()}
+    asset_ids |= {d.brief.get("product_image_asset_id") for d in designs if (d.brief or {}).get("product_image_asset_id")}
+
+    counts = {"designs": len(designs), "versions": len(versions)}
+    for g in db.scalars(select(GeneratedImage).where(GeneratedImage.design_id.in_(dids))).all() if dids else []:
+        files.add(g.file_path)
+        db.delete(g)
+    for p in db.scalars(select(PinSheet).where(PinSheet.design_id.in_(dids))).all() if dids else []:
+        m = p.meta or {}
+        files.update(f for f in [p.file_path, m.get("source_path"), *[x.get("path") for x in m.get("pins") or []]] if f)
+        db.delete(p)
+    for e in db.scalars(select(Export).where(Export.design_id.in_(dids))).all() if dids else []:
+        if e.zip_path:
+            files.add(e.zip_path)
+        db.delete(e)
+    if dids:
+        for model in (Element, DesignSnapshot, ReviewResult, CopyVariant):
+            for r in db.scalars(select(model).where(model.design_id.in_(dids))).all():
+                db.delete(r)
+        for model in (ApiCall, Judgment):
+            for r in db.scalars(select(model).where(model.design_id.in_(dids))).all():
+                db.delete(r)
+    for a in db.scalars(select(IconAsset).where(IconAsset.brand_version_id.in_(vids))).all() if vids else []:
+        files.update(p for p in (a.png_path, a.source_path) if p)
+        db.delete(a)
+    for d in designs:
+        db.delete(d)
+    brand.current_version_id = None
+    db.flush()
+    for v in versions:
+        db.delete(v)
+    db.delete(brand)
+    db.flush()
+
+    # 다른 브랜드·시안이 같은 에셋을 가리키면 남긴다
+    still_used: set[int] = set()
+    for v in db.scalars(select(BrandVersion)).all():
+        still_used |= _asset_ids_of(v)
+    for d in db.scalars(select(Design)).all():
+        if (d.brief or {}).get("product_image_asset_id"):
+            still_used.add(d.brief["product_image_asset_id"])
+    for aid in asset_ids - still_used:
+        a = db.get(Asset, aid)
+        if a:
+            files.add(a.file_path)
+            db.delete(a)
+    db.flush()
+    keep = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
+    keep |= {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
+    keep |= {a for (a,) in db.execute(select(Asset.file_path)).all()}
+    from .routers_images import _delete_thumbs
+    removed = 0
+    for p in files - keep:
+        if storage.delete(p):
+            removed += 1
+        _delete_thumbs(p)
+    db.commit()
+    return {"deleted": brand_id, **counts, "deleted_files": removed}

@@ -1,0 +1,22 @@
+{
+  "slug": "notion",
+  "brand": "notion",
+  "placements": [
+    "Instagram 피드",
+    "PMax 가로 1.91:1",
+    "PMax 정사각형 1:1",
+    "업로드형 336×280",
+    "업로드형 320×100"
+  ],
+  "brief": {
+    "product_name": "노션 팀 워크스페이스",
+    "description": "흩어진 문서와 일정, 프로젝트를 한 곳에 모아 팀이 함께 관리하는 워크스페이스.",
+    "key_message": "흩어진 일을 한 곳에 모으세요",
+    "target": "스타트업·중소기업 팀 리더와 실무자",
+    "image_style": "플랫 일러스트",
+    "product_scale": "작게",
+    "layout": "좌우 반전",
+    "required_phrases": [],
+    "forbidden_phrases": []
+  }
+}
