@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app import storage
 from app.db import Base
 from app.main import app
-from app.models import Asset, Brand, BrandVersion, Design, GeneratedImage
+from app.models import ArchivedImage, Asset, Brand, BrandVersion, Design, GeneratedImage
 from app.routers_assets import get_db
 
 
@@ -53,6 +53,9 @@ def test_delete_brand_cascades_and_keeps_others(Local):
         key = "gen_test.png"
         storage.put(key, _png(), "image/png")
         s.add(GeneratedImage(design_id=a_design, preset_version_id=1, kind="background", file_path=key, width=1, height=1))
+        storage.put("arch_a.png", _png(), "image/png")
+        s.add(ArchivedImage(design_id=a_design, batch="b", preset_version_id=1, kind="background", file_path="arch_a.png",
+                            width=1, height=1))
         logo_key = s.get(Asset, a_logo).file_path
         s.commit()
 
@@ -63,9 +66,10 @@ def test_delete_brand_cascades_and_keeps_others(Local):
         assert s.get(Brand, a_id) is None and s.get(Asset, a_logo) is None
         assert not s.scalars(select(BrandVersion).where(BrandVersion.brand_id == a_id)).all()
         assert not s.scalars(select(Design).where(Design.brand_id == a_id)).all()
-        assert not s.scalars(select(GeneratedImage)).all()
+        assert not s.scalars(select(GeneratedImage)).all() and not s.scalars(select(ArchivedImage)).all()
         assert s.get(Brand, b_id) and s.get(Asset, b_logo)
     assert not storage.exists("gen_test.png") and not storage.exists(logo_key)
+    assert not storage.exists("arch_a.png"), "초기화로 보관해 둔 이미지도 브랜드와 함께 지운다"
     assert c.get(f"/api/brands/{b_id}").status_code == 200
     assert c.get(f"/api/brands/{a_id}").status_code == 404
     assert c.delete(f"/api/brands/{a_id}").status_code == 404
