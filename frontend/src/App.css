@@ -517,7 +517,8 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .board .x { border: none; background: none; color: var(--text-3); padding: 2px 6px; }
 .board-line { margin: 6px 0; font-size: 13px; color: var(--text-2); }
 .sep-note { margin: 10px 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text); font-size: 13px; }
-.board-actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 12px; }
+.board-actions { display: grid; grid-template-columns: auto 1fr; gap: 8px; margin-top: 12px; }
+.board-actions button { padding: 7px 14px; font-size: 14px; white-space: nowrap; }
 .board-foot { font-size: 12px; text-align: center; margin: 8px 0 0; }
 
 .product-img { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
