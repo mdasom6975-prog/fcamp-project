@@ -197,6 +197,27 @@ class GeneratedImage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class ArchivedImage(Base):
+    """'시안 이미지 초기화'로 사용자 화면에서 지운 생성 이미지의 보관본(개발자 품질 비교용, 분석 화면에서만 본다).
+    GeneratedImage 행을 그대로 옮기고 파일은 지우지 않는다. 시안·규격 행을 가리키는 FK 는 두지 않는다(스냅샷 값만 남김)."""
+    __tablename__ = "archived_images"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    design_id: Mapped[int] = mapped_column(Integer, index=True)
+    batch: Mapped[str] = mapped_column(String(20))               # 같은 초기화에서 옮긴 묶음(초기화 시각 YYYYMMDDHHMMSSffffff)
+    archived_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    preset_version_id: Mapped[int] = mapped_column(Integer)
+    preset_name: Mapped[str] = mapped_column(String(200), default="")   # '플랫폼 · 지면 이름' 스냅샷
+    kind: Mapped[str] = mapped_column(String(12))                # background | composite
+    file_path: Mapped[str] = mapped_column(String(500))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    copy_variant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    brand_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    layout: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)   # 원래 이미지를 만든 시각
+
+
 class IconAsset(Base):
     """아이콘 세트의 개별 아이콘.
     - 3d (기본): 이미지 모델이 투명 PNG 를 렌더. prompt·source_path(1024 원본) 를 남기고 elements=[] svg="" 이다.

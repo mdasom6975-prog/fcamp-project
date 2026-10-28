@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import smallbiz, storage
-from .models import (ApiCall, Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, Export,
+from .models import (ApiCall, ArchivedImage, Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, Export,
                      GeneratedImage, IconAsset, Judgment, PinSheet, ReviewResult)
 from .routers_assets import PROVIDED_FONTS, get_db
 from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandIn
@@ -185,6 +185,9 @@ def delete_brand(brand_id: int, db: Session = Depends(get_db)):
     for g in db.scalars(select(GeneratedImage).where(GeneratedImage.design_id.in_(dids))).all() if dids else []:
         files.add(g.file_path)
         db.delete(g)
+    for g in db.scalars(select(ArchivedImage).where(ArchivedImage.design_id.in_(dids))).all() if dids else []:
+        files.add(g.file_path)                     # 초기화로 보관해 둔 이미지도 브랜드와 함께 지운다
+        db.delete(g)
     for p in db.scalars(select(PinSheet).where(PinSheet.design_id.in_(dids))).all() if dids else []:
         m = p.meta or {}
         files.update(f for f in [p.file_path, m.get("source_path"), *[x.get("path") for x in m.get("pins") or []]] if f)
@@ -226,6 +229,7 @@ def delete_brand(brand_id: int, db: Session = Depends(get_db)):
             db.delete(a)
     db.flush()
     keep = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
+    keep |= {p for (p,) in db.execute(select(ArchivedImage.file_path)).all()}
     keep |= {p for row in db.execute(select(IconAsset.png_path, IconAsset.source_path)).all() for p in row if p}
     keep |= {a for (a,) in db.execute(select(Asset.file_path)).all()}
     from .routers_images import _thumb_key

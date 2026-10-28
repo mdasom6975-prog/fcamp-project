@@ -96,14 +96,14 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
     fetch(`/api/designs/${designId}/image-settings`).then((r) => r.json()).then((j) => setAutoMode(j?.settings?.bg_mode ?? null)).catch(() => undefined)
   }, [designId, imageStyle, genSettings.bg_mode])
   const curMode = genSettings.bg_mode ?? autoMode ?? imgSettings?.default_mode ?? 'per_ratio'
-  const saveSettings = async (patch: { image_model?: string; bg_mode?: string }) => {
+  const saveSettings = async (patch: { image_model?: string; bg_mode?: string; image_style?: string }) => {
     setSettingsMsg(null)
     try {
       await fetch(`/api/designs/${designId}/image-settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
         .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '저장 실패') })
       onDesignChange()
       setSettingsMsg('저장했습니다. 다음 배경 생성·재생성부터 적용됩니다 (기존 배경은 그대로).')
-    } catch (e) { setSettingsMsg((e as Error).message) }
+    } catch (e) { setSettingsMsg((e as Error).message); setBgStyle(imageStyle) }
   }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -243,11 +243,11 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   // 이미지 생성 API 테스트용: 생성 결과(배경·합성·편집 내용·검수)만 지우고 브랜드·규격·입력·카피는 유지한다
   // 이미지 초기화는 이미지(배경·합성·편집·검수)만 지운다. 아이콘 세트 초기화는 ⑤ 아이콘 패널의 별도 버튼
   const resetGenerated = async () => {
-    if (!window.confirm('이 시안의 생성 이미지, 편집 내용, 검수 결과를 모두 지웁니다. (브랜드·규격·입력 내용·카피·아이콘 세트는 유지)\n계속할까요?')) return
+    if (!window.confirm('이 시안의 생성 이미지, 편집 내용, 검수 결과를 화면에서 지웁니다. (생성 이미지 파일은 분석 메뉴의 보관본으로 남습니다. 브랜드·규격·입력 내용·카피·아이콘 세트도 유지)\n계속할까요?')) return
     setBgBusy(true); setBgMsg(null)
     try {
       const j = await post(`/api/designs/${designId}/reset-generated`, { include_copy: false, include_icons: false })
-      setBgMsg(`생성 이미지 ${j.deleted_images}건을 초기화했습니다. 아이콘 세트는 그대로입니다 (⑤ 아이콘에서 따로 초기화).`)
+      setBgMsg(`생성 이미지 ${j.deleted_images}건을 초기화했습니다. 이미지는 분석 메뉴에 보관됩니다. 아이콘 세트는 그대로입니다 (⑤ 아이콘에서 따로 초기화).`)
       await loadImgs()
     } catch (e) {
       setBgMsg((e as Error).message)
@@ -413,7 +413,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
             {settingsMsg && <p className="muted">{settingsMsg}</p>}
             <div className="row">
               <label className="muted">배경 형태{' '}
-                <select value={bgStyle} disabled={bgBusy || locked} onChange={(e) => setBgStyle(e.target.value)}>
+                <select value={bgStyle} disabled={bgBusy || locked} onChange={(e) => { setBgStyle(e.target.value); saveSettings({ image_style: e.target.value }) }}>
                   {IMAGE_STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </label>

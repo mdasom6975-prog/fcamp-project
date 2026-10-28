@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session                                  # noqa: E402
 
 from app import db, models, storage                                # noqa: E402,F401  (models: 테이블 등록)
 
-PATH_COLUMNS = {"assets": ["file_path"], "generated_images": ["file_path"], "icon_assets": ["png_path", "source_path"], "pin_sheets": ["file_path"],
+PATH_COLUMNS = {"assets": ["file_path"], "generated_images": ["file_path"], "archived_images": ["file_path"], "icon_assets": ["png_path", "source_path"], "pin_sheets": ["file_path"],
                 "exports": ["zip_path"]}
 FROM_FILES = {"api_calls", "prompt_logs", "judgments", "kv"}    # 파일에서 채우는 테이블(SQLite 에는 없다)
 
