@@ -45,6 +45,10 @@ export const api = {
     fetch('/api/brands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => j<any>(r)),
   update: (id: number, b: BrandForm) =>
     fetch(`/api/brands/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => j<any>(r)),
+  deleteBrand: (id: number) =>
+    fetch(`/api/brands/${id}`, { method: 'DELETE' }).then((r) => j<{ deleted: number; designs: number; versions: number; deleted_files: number }>(r)),
+  brandDesignCount: (id: number) =>
+    fetch(`/api/designs?brand_id=${id}`).then((r) => j<unknown[]>(r)).then((l) => l.length),
   // square: 정사각 로고 칸. 1:1 이 아니면 서버가 투명 여백을 넣어 정사각으로 저장하고 note 에 안내를 돌려준다
   upload: (kind: 'logo' | 'font' | 'tone_ref' | 'product', file: File, opts: { square?: boolean } = {}) => {
     const f = new FormData()
