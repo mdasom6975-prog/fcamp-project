@@ -40,6 +40,10 @@ export const smallProductNote = (bg: ImgOut | undefined) => {
   return `제품 이미지${size}가 작아 ${p.scale}배까지만 키워 제품 자리보다 작게 들어갔습니다. 더 큰 누끼를 올리면 자리를 채웁니다.`
 }
 
+// 서버 썸네일 단계(routers_images.THUMB_SIDES). 요청 크기를 이 단계로 올림해 보내면 비슷한 크기의 요청이 같은 URL 이 되어
+// 브라우저가 한 번만 받는다(보기 전용 시안의 큰 카드·작은 카드가 같은 720 단계를 각각 요청하던 문제)
+export const THUMB_SIDES = [360, 720, 1080, 1600]
+export const thumbStep = (side: number) => THUMB_SIDES.find((s) => s >= side) ?? THUMB_SIDES[THUMB_SIDES.length - 1]
 export const thumbUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/thumb?v=${c.file ?? c.id}`
 export const fileUrl = (c: NonNullable<ImgOut>) => `/api/generated/${c.id}/file?v=${c.file ?? c.id}`
 

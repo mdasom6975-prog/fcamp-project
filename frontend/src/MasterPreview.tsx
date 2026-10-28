@@ -3,6 +3,7 @@
 // 저장·검수·내보내기 대상이 아니다.
 import { useState } from 'react'
 import type { WorkspaceData } from './useWorkspace'
+import { thumbStep } from './ImageGrid'
 
 type PresetLite = { id: number; platform: string; name: string; width: number | null; height: number | null }
 
@@ -15,7 +16,7 @@ export default function MasterPreview({ data, presets, compact }: { data: Worksp
   const [pick, setPick] = useState<number | null>(null)
   const cur = ordered.find((c) => c.preset_id === pick) ?? ordered[0] ?? null
   // 카드에 그려질 긴 변(CSS px) × 화면 픽셀 배율을 보내 흐리지 않게 한다(서버가 720·1080·1600 단계로 올림). 카드 폭은 큰 카드 약 460, 작은 카드 약 320
-  const longSide = Math.round((compact ? 320 : 460) * Math.max(1, cur && cur.width ? cur.height / cur.width : 1) * (window.devicePixelRatio || 1))
+  const longSide = thumbStep(Math.round((compact ? 320 : 460) * Math.max(1, cur && cur.width ? cur.height / cur.width : 1) * (window.devicePixelRatio || 1)))
   const img = cur ? `/api/generated/${cur.id}/thumb?side=${longSide}&v=${cur.file ?? cur.id}`
     : data.backgroundId ? `/api/generated/${data.backgroundId}/thumb?side=${longSide}&v=${data.backgroundFile ?? data.backgroundId}` : null
   const card = (

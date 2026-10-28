@@ -351,6 +351,12 @@ def test_thumbnail_endpoint_caches_small_jpeg(env):
                                          headline="제목", selected=True, batch_no=1))
         db.commit()
     cid = c.post(f"/api/designs/{ids['design']}/presets/{p['피드 4:5']}/image", json={"regenerate_background": False}).json()["composite"]["id"]
+    # 합성본을 저장할 때 360·720·1080 단계를 미리 만들어 둔다(서버리스에서 첫 조회가 느리지 않게). 조회 전에 이미 있어야 한다
+    from app.db import STORAGE_DIR
+    comp0 = c.get(f"/api/designs/{ids['design']}/images").json()
+    token0 = next(r["composite"]["file"] for r in comp0 if r["preset_id"] == p["피드 4:5"])
+    assert all((STORAGE_DIR / "thumbs" / f"{token0}_{s}.jpg").exists() for s in routers_images.PREWARM_SIDES)
+    assert not (STORAGE_DIR / "thumbs" / f"{token0}_1600.jpg").exists()
     r = c.get(f"/api/generated/{cid}/thumb")
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     im = Image.open(io.BytesIO(r.content))

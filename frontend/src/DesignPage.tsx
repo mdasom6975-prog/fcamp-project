@@ -9,6 +9,7 @@ import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
 import { busy as overlay, type Order, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
+import { getJson } from './api'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -122,17 +123,17 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   const [lightbox, setLightbox] = useState(false)   // 카드를 누르면 크게 보기(스크롤 없이)
 
   const loadImgs = useCallback(() =>
-    fetch(`/api/designs/${designId}/images`).then((r) => r.json()).then((rows: ImgRow[]) => {
+    getJson<ImgRow[]>(`/api/designs/${designId}/images`).then((rows) => {
       if (Array.isArray(rows)) setImgs(Object.fromEntries(rows.map((x) => [x.preset_id, x])))
     }), [designId])
 
   const loadUsage = useCallback(() =>
-    fetch('/api/image-usage').then((r) => r.json()).then((u: ImgUsage) => u && typeof u.used === 'number' && setUsage(u))
+    getJson<ImgUsage>('/api/image-usage').then((u) => u && typeof u.used === 'number' && setUsage(u))
       .catch(() => {}), [])
 
   useEffect(() => {
     loadUsage()
-    fetch(`/api/designs/${designId}/copy`).then((r) => r.json()).then((g) => Array.isArray(g) && setGroups(g))
+    getJson(`/api/designs/${designId}/copy`).then((g) => Array.isArray(g) && setGroups(g))
     loadImgs()
   }, [designId, loadImgs])
 
@@ -681,7 +682,7 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
   const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
   const [loaded, setLoaded] = useState(false)
   const load = useCallback(() =>
-    fetch(`/api/designs/${design.id}/images`).then((r) => r.json()).then((rows: ImgRow[]) => {
+    getJson<ImgRow[]>(`/api/designs/${design.id}/images`).then((rows) => {
       if (Array.isArray(rows)) setImgs(Object.fromEntries(rows.map((x) => [x.preset_id, x])))
     }).finally(() => setLoaded(true)), [design.id])
   useEffect(() => { load() }, [load])
@@ -692,7 +693,7 @@ function EditScreen({ design, presetId, onPick, onBack, onReview }: {
   const [switchNote, setSwitchNote] = useState<{ ok: boolean; text: string } | null>(null)
   const [editVer, setEditVer] = useState(0)       // 다시 합성한 뒤 편집 패널을 새로 불러온다
   const loadVariants = useCallback(() =>
-    fetch(`/api/designs/${design.id}/copy`).then((r) => r.json()).then((g: CopyGroup[]) => {
+    getJson<CopyGroup[]>(`/api/designs/${design.id}/copy`).then((g) => {
       const first = Array.isArray(g) ? g.find((x) => x.variants.length > 0) : undefined
       setVariants(first?.variants ?? [])
     }).catch(() => undefined), [design.id])
@@ -856,8 +857,8 @@ function IconPanel({ designId, versionNo, ready, ask, onCount }: { designId: num
   )
 
   useEffect(() => {
-    fetch(`/api/designs/${designId}/icons`).then((r) => r.json()).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
-    fetch('/api/icon-settings').then((r) => r.json()).then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
+    getJson(`/api/designs/${designId}/icons`).then((l) => { if (Array.isArray(l)) setItems(l); setLoaded(true) })
+    getJson('/api/icon-settings').then((j) => { if (j?.count) setTarget(j.count); setGridCells(j?.grid_cells ?? 0); setGridLabel(j?.grid ?? null) }).catch(() => undefined)
     fetch(`/api/designs/${designId}/icon-style`).then((r) => (r.ok ? r.json() : null)).then((j) => setStyle(j && j.version_no ? j : null)).catch(() => setStyle(null))
   }, [designId])
   useEffect(() => { if (loaded) onCount?.(items.length) }, [loaded, items.length, onCount])
@@ -1305,7 +1306,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   }, [workId])
 
   const loadBrands = useCallback(() =>
-    fetch('/api/brands').then((r) => r.json()).then((b: BrandLite[]) => { setBrands(b); return b }), [])
+    getJson<BrandLite[]>('/api/brands').then((b) => { setBrands(b ?? []); return b ?? [] }), [])
 
   useEffect(() => {
     loadBrands().then((b) => {
@@ -1336,13 +1337,13 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
     setPicked(d.presets.map((p) => p.id))
     setEditing(false); setHasCopy(null); setRules(null); setScreen('design'); setEditPreset(null)
     if (d.kind === '광고 이미지') {
-      fetch(`/api/designs/${d.id}/copy`).then((r) => r.json())
+      getJson(`/api/designs/${d.id}/copy`)
         .then((g) => setHasCopy(Array.isArray(g) && g.some((x: { variants: unknown[] }) => x.variants.length > 0)))
         .catch(() => setHasCopy(false))
     } else setHasCopy(true)
     // 이 캠페인이 쓰는 브랜드 규칙 버전의 필수·금지 표현 수
-    fetch(`/api/brands/${d.brand.id}`).then((r) => r.json()).then((b: { versions: { id: number; version_no: number }[] }) => {
-      const vid = b.versions.find((v) => v.version_no === d.brand.version_no)?.id
+    getJson<{ versions: { id: number; version_no: number }[] }>(`/api/brands/${d.brand.id}`).then((b) => {
+      const vid = b!.versions.find((v) => v.version_no === d.brand.version_no)?.id
       return fetch(`/api/brands/${d.brand.id}${vid ? `?version_id=${vid}` : ''}`).then((r) => r.json())
     }).then((b: { version: { required_phrases: string[]; forbidden_phrases: string[] } }) =>
       setRules({ req: b.version.required_phrases.length, ban: b.version.forbidden_phrases.length })).catch(() => setRules(null))

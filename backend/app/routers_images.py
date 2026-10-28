@@ -668,6 +668,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
         report = {"template": compose.template_for(w, h), "canvas": [w, h], "separate_assets": True,
                   "crop": crop, "warnings": [], "elements": [], **({"product_fit": product_fit} if product_fit else {})}
         kind_path = storage.put_image(f"sep_{uuid.uuid4().hex[:10]}.png", out_img)
+        prewarm_thumbs(kind_path, out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
                              file_path=kind_path, width=w, height=h, brand_version_id=bv.id, layout=report)
     else:
@@ -697,6 +698,7 @@ def compose_preset(db: Session, design_id: int, preset_id: int, regenerate_backg
         if not bv.logo_asset_id:
             report["warnings"].append("브랜드에 로고가 등록되어 있지 않습니다")
         path = storage.put_image(f"cmp_{uuid.uuid4().hex[:10]}.png", out_img)
+        prewarm_thumbs(path, out_img)
         row = GeneratedImage(design_id=design_id, preset_version_id=preset_id, kind="composite",
                              file_path=path, width=w, height=h, copy_variant_id=sel.id,
                              brand_version_id=bv.id, layout=report)
@@ -720,8 +722,30 @@ THUMB_SIDE = 360
 THUMB_SIDES = (THUMB_SIDE, 720, 1080, 1600)     # 요청 크기를 올림해 이 단계로만 만든다(캐시 파일 수를 제한)
 
 
+PREWARM_SIDES = (THUMB_SIDE, 720, 1080)   # 합성본을 저장할 때 미리 만들어 두는 단계(그리드 360, 보기 전용 시안 720·1080)
+
+
 def _thumb_key(file_path: str, side: int = THUMB_SIDE) -> str:
     return f"thumbs/{Path(file_path).stem}_{side}.jpg"   # 파일 이름 기준(행 id 재사용 대비)
+
+
+def _thumb_jpeg(im: Image.Image, step: int) -> tuple[Image.Image, int]:
+    """썸네일 한 단계. 원본보다 키우지 않는다. 반환: (이미지, JPEG 품질)."""
+    t = im.convert("RGB")
+    t.thumbnail((step, step), Image.LANCZOS)
+    return t, (82 if step == THUMB_SIDE else 90)
+
+
+def prewarm_thumbs(file_path: str, im: Image.Image) -> None:
+    """합성본을 저장하는 자리에서 썸네일 단계를 미리 만든다. 서버리스(Vercel)에서는 첫 조회 때 원본을 내려받아 줄이느라
+    장당 0.6~1.5초가 걸리고 인스턴스의 /tmp 캐시도 자주 비므로, 저장할 때 Supabase 에 같이 올려 둔다. 실패해도 합성은 그대로
+    (조회 때 예전처럼 만든다)."""
+    for step in PREWARM_SIDES:
+        try:
+            t, q = _thumb_jpeg(im, step)
+            storage.put_image(_thumb_key(file_path, step), t, "JPEG", quality=q)
+        except Exception:          # noqa: BLE001 — 썸네일은 보조 파일이라 합성 결과를 막지 않는다
+            log.exception("썸네일 미리 생성 실패: %s %s", file_path, step)
 
 
 def _delete_thumbs(file_path: str) -> None:
@@ -739,7 +763,6 @@ def image_thumb(image_id: int, side: int | None = None, db: Session = Depends(ge
     step = next((s for s in THUMB_SIDES if s >= (side or 0)), THUMB_SIDES[-1])
     out = _thumb_key(g.file_path, step)
     if not storage.exists(out):
-        im = Image.open(storage.local(g.file_path)).convert("RGB")
-        im.thumbnail((step, step), Image.LANCZOS)
-        storage.put_image(out, im, "JPEG", quality=82 if step == THUMB_SIDE else 90)
+        t, q = _thumb_jpeg(Image.open(storage.local(g.file_path)), step)
+        storage.put_image(out, t, "JPEG", quality=q)
     return storage.response(out, "image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
