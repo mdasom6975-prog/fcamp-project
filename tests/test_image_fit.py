@@ -1228,3 +1228,53 @@ def test_bg_mode_default_is_single_for_people_styles(monkeypatch):
     assert imagegen.settings_for({}, "실사 제품·공간")["bg_mode"] == "per_ratio"
     assert imagegen.settings_for({}, None)["bg_mode"] == "per_ratio"
     assert imagegen.settings_for({"bg_mode": "per_ratio"}, "실사 인물")["bg_mode"] == "per_ratio"
+
+
+def test_image_style_saved_from_settings_applies_to_first_image(env):
+    """배경 형태를 image-settings 로 저장하면 '이미지 생성'(배경 새로 생성이 아닌 첫 합성)도 그 형태로 만든다."""
+    c, ids = env["client"], env["ids"]
+    did, p = ids["design"], ids["presets"]
+    assert c.put(f"/api/designs/{did}/image-settings", json={"image_style": "수채화"}).status_code == 400
+    r = c.put(f"/api/designs/{did}/image-settings", json={"image_style": "플랫 일러스트"})
+    assert r.status_code == 200 and r.json()["image_style"] == "플랫 일러스트"
+    assert c.get(f"/api/designs/{did}").json()["brief"]["image_style"] == "플랫 일러스트"
+    _select_copy(env, p.values())
+    name = next(iter(p))
+    assert c.post(f"/api/designs/{did}/presets/{p[name]}/image", json={"regenerate_background": False}).status_code == 200
+    bg = next(r for r in c.get(f"/api/designs/{did}/images").json() if r["preset_id"] == p[name])["background"]
+    assert bg["layout"]["style"] == "플랫 일러스트" and bg["layout"]["style_reason"] == "브리프에서 지정"
+    # 빈 값은 '자동'으로 되돌린다
+    assert c.put(f"/api/designs/{did}/image-settings", json={"image_style": " "}).json()["image_style"] == "자동"
+
+
+def test_reset_keeps_generated_images_as_archive_for_analysis(env):
+    """'시안 이미지 초기화'는 사용자 화면(images)에서는 지우되 파일은 보존하고, 분석 화면 보관본으로 옮긴다."""
+    c, ids = env["client"], env["ids"]
+    did, p = ids["design"], ids["presets"]
+    c.put(f"/api/designs/{did}/image-settings", json={"image_style": "플랫 일러스트"})
+    _select_copy(env, p.values())
+    for pid in p.values():
+        assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+
+    j = c.post(f"/api/designs/{did}/reset-generated", json={"include_copy": False, "include_icons": False}).json()
+    assert j["archived_images"] == j["deleted_images"] > 0 and j["deleted_files"] == 0
+    assert all(not r.get("background") and not r.get("composite") for r in c.get(f"/api/designs/{did}/images").json())
+
+    a = c.get(f"/api/designs/{did}/analysis/archived").json()
+    assert len(a["batches"]) == 1
+    items = a["batches"][0]["items"]
+    assert {i["kind"] for i in items} == {"background", "composite"}
+    assert len([i for i in items if i["kind"] == "background"]) == len({i["id"] for i in items if i["kind"] == "background"})
+    bg = next(i for i in items if i["kind"] == "background")
+    assert bg["style"] == "플랫 일러스트" and bg["preset"] and bg["prompt"]
+    assert c.get(f"/api/archived-images/{bg['id']}/file").status_code == 200
+    assert c.get(f"/api/archived-images/{bg['id']}/thumb").headers["content-type"] == "image/jpeg"
+    assert c.get("/api/archived-images/999999/file").status_code == 404
+
+    # 다시 만들어 두 번째로 초기화하면 보관 묶음이 하나 더 생긴다(최근이 먼저)
+    _select_copy(env, p.values())
+    pid = next(iter(p.values()))
+    assert c.post(f"/api/designs/{did}/presets/{pid}/image", json={"regenerate_background": False}).status_code == 200
+    assert c.post(f"/api/designs/{did}/reset-generated", json={}).status_code == 200
+    b = c.get(f"/api/designs/{did}/analysis/archived").json()["batches"]
+    assert len(b) == 2 and b[0]["batch"] > b[1]["batch"] == a["batches"][0]["batch"]
