@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | Meta | Instagram 피드 | 확인됨 | 1440×1800 | https://www.facebook.com/business/ads-guide/update/image/instagram-feed | 2026-10-14 |
 | Meta | Instagram 스토리 | 확인됨 | 1440×2560 | https://www.facebook.com/business/ads-guide/update/image/instagram-story | 2026-10-14 |
-| Meta | Facebook 피드 | 충돌 | 1440×1800 | https://www.facebook.com/business/ads-guide/update/image/facebook-feed/link-clicks | 2026-10-14 |
+| Meta | Facebook 피드 | 확인됨 | 1440×1800 | https://www.facebook.com/business/ads-guide/update/image/facebook-feed/link-clicks | 2026-10-14 |
 | 카카오 | 디스플레이 네이티브 2:1 | 확인됨 | 1200×600 | https://kakaobusiness.gitbook.io/main/ad/moment/performance/displayad/content-guide<br>http://developers.kakao.com/docs/ko/kakaomoment/creatives-display | 2026-10-14 |
 | 카카오 | 디스플레이 네이티브 1:1 | 확인됨 | 500×500 | https://kakaobusiness.gitbook.io/main/ad/moment/performance/displayad/content-guide<br>http://developers.kakao.com/docs/ko/kakaomoment/creatives-display | 2026-10-14 |
 | 카카오 | 비즈보드 배너 1029×258 | 확인됨 | 1029×258 | https://kakaobusiness.gitbook.io/main/ad/moment/performance/talkboard/content-guide<br>http://developers.kakao.com/docs/ko/kakaomoment/creatives-display | 2026-10-14 |
@@ -39,7 +39,7 @@
 | Meta | Facebook 피드 | 최소 높이 | 750px (4:5 기준) | 강제 | 확인됨 |  |
 | Meta | Facebook 피드 | 비율 허용 오차 | 3% | 강제 | 확인됨 |  |
 | Meta | Facebook 피드 | 권장 해상도 | 1440x1800 | 권장 | 확인됨 |  |
-| Meta | Facebook 피드 | 허용 비율 범위 | 4:5 (본문 기준) | 권장 | 충돌 | 검색 요약은 1.91:1~4:5 범위로 표기. 본문에는 4:5만 있음. 범위 미확정 |
+| Meta | Facebook 피드 | 허용 비율 범위 | 4:5 | 권장 | 확인됨 | 공식 페이지 재확인(2026-10-29): 4:5만 표기. 1.91:1~4:5 범위는 제3자 자료에만 있어 채택하지 않음 |
 | 카카오 | 디스플레이 네이티브 2:1 | 최소 크기 | 1200x600 | 미표기 | 확인됨 | 필수 여부 구분이 표에 없음 |
 | 카카오 | 디스플레이 네이티브 2:1 | 파일 형식 | JPG, JPEG, PNG | 미표기 | 확인됨 |  |
 | 카카오 | 디스플레이 네이티브 2:1 | 최대 용량 | 500KB | 미표기 | 확인됨 |  |
@@ -87,7 +87,6 @@
 ## 찾지 못해 '확인 필요'로 둔 값
 
 - Meta · Instagram 피드: 안전영역: 확인 불가
-- Meta · Facebook 피드 · 허용 비율 범위: [충돌] 검색 요약은 1.91:1~4:5 범위로 표기. 본문에는 4:5만 있음. 범위 미확정
 - Meta · Facebook 피드: 안전영역: 확인 불가
 - Google Ads · PMax 가로 1.91:1: 한국어 등 전각 문자는 글자당 2자로 계산 (PMax 문서). 안전영역: 확인 불가
 - Google Ads · PMax 정사각형 1:1: 한국어 등 전각 문자는 글자당 2자로 계산 (PMax 문서). 안전영역: 확인 불가
