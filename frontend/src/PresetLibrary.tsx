@@ -143,6 +143,16 @@ export default function PresetLibrary() {
     fetch('/api/presets/update-status').then((r) => r.json()).then(applyUpdate).catch(() => {})
   }, [applyUpdate])
 
+  // 처음 들어오면 첫 행이 눌린 상태(상세가 바로 보인다). 이미 고른 행이 있으면 건드리지 않는다
+  useEffect(() => {
+    if (!platforms) return
+    setFocus((cur) => {
+      if (cur) return cur
+      for (const pl of platforms) for (const a of pl.ad_types) if (a.presets[0]) return { p: a.presets[0], platform: pl.name }
+      return null
+    })
+  }, [platforms])
+
   // 대기 시간 카운트다운 (서버가 최소 간격을 강제하고, 화면은 버튼만 잠근다)
   useEffect(() => {
     if (left <= 0) return
