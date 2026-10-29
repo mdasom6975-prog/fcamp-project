@@ -4,19 +4,23 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app import storage
 from app.db import Base
 from app.main import app
-from app.models import ArchivedImage, Asset, Brand, BrandVersion, Design, GeneratedImage
+from app.models import (ArchivedImage, Asset, Brand, BrandVersion, Design, GeneratedImage, Placement, Platform,
+                        PresetVersion)
 from app.routers_assets import get_db
 
 
 @pytest.fixture
 def Local(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    @event.listens_for(engine, "connect")
+    def _fk(dbapi, _):            # 운영(Postgres)처럼 외래키를 강제한다: 삭제 순서가 틀리면 여기서 실패한다
+        dbapi.execute("PRAGMA foreign_keys=ON")
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
 
@@ -49,12 +53,20 @@ def test_delete_brand_cascades_and_keeps_others(Local):
     a_id, a_logo, a_design = _brand(c, "에이")
     b_id, b_logo, _ = _brand(c, "비")
     c.put(f"/api/brands/{a_id}", json={"name": "에이", "logo_asset_id": a_logo})      # 버전 2
+    prod = c.post("/api/assets", data={"kind": "product", "brand_id": str(a_id)},
+                  files={"file": ("p.png", _png(), "image/png")}).json()["id"]     # assets.brand_id 가 이 브랜드를 가리킨다
     with Local() as s:
+        plat = Platform(name="테스트")                                  # 생성 이미지가 가리킬 규격(FK 강제)
+        s.add(plat); s.flush()
+        pl = Placement(platform_id=plat.id, ad_type="테스트", name="피드", content_kind="완성형")
+        s.add(pl); s.flush()
+        pv = PresetVersion(placement_id=pl.id, production_width=100, production_height=100, status="확인됨")
+        s.add(pv); s.flush()
         key = "gen_test.png"
         storage.put(key, _png(), "image/png")
-        s.add(GeneratedImage(design_id=a_design, preset_version_id=1, kind="background", file_path=key, width=1, height=1))
+        s.add(GeneratedImage(design_id=a_design, preset_version_id=pv.id, kind="background", file_path=key, width=1, height=1))
         storage.put("arch_a.png", _png(), "image/png")
-        s.add(ArchivedImage(design_id=a_design, batch="b", preset_version_id=1, kind="background", file_path="arch_a.png",
+        s.add(ArchivedImage(design_id=a_design, batch="b", preset_version_id=pv.id, kind="background", file_path="arch_a.png",
                             width=1, height=1))
         logo_key = s.get(Asset, a_logo).file_path
         s.commit()
@@ -63,7 +75,7 @@ def test_delete_brand_cascades_and_keeps_others(Local):
     assert r.status_code == 200 and r.json()["designs"] == 1 and r.json()["versions"] == 2
 
     with Local() as s:
-        assert s.get(Brand, a_id) is None and s.get(Asset, a_logo) is None
+        assert s.get(Brand, a_id) is None and s.get(Asset, a_logo) is None and s.get(Asset, prod) is None
         assert not s.scalars(select(BrandVersion).where(BrandVersion.brand_id == a_id)).all()
         assert not s.scalars(select(Design).where(Design.brand_id == a_id)).all()
         assert not s.scalars(select(GeneratedImage)).all() and not s.scalars(select(ArchivedImage)).all()

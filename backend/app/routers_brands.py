@@ -206,13 +206,13 @@ def delete_brand(brand_id: int, db: Session = Depends(get_db)):
     for a in db.scalars(select(IconAsset).where(IconAsset.brand_version_id.in_(vids))).all() if vids else []:
         files.update(p for p in (a.png_path, a.source_path) if p)
         db.delete(a)
+    db.flush()                  # 자식 행을 먼저 DB 에 반영한다: 관계(relationship)가 없어 flush 가 삭제 순서를 정해 주지 않는다(Postgres FK)
     for d in designs:
         db.delete(d)
     brand.current_version_id = None
     db.flush()
     for v in versions:
         db.delete(v)
-    db.delete(brand)
     db.flush()
 
     # 다른 브랜드·시안이 같은 에셋을 가리키면 남긴다
@@ -227,6 +227,11 @@ def delete_brand(brand_id: int, db: Session = Depends(get_db)):
         if a:
             files.add(a.file_path)
             db.delete(a)
+    db.flush()
+    # 남긴 에셋이 이 브랜드를 가리키고 있으면(assets.brand_id FK) 브랜드를 지우기 전에 연결을 푼다(Postgres 는 FK 를 강제한다)
+    for a in db.scalars(select(Asset).where(Asset.brand_id == brand_id)).all():
+        a.brand_id = None
+    db.delete(brand)
     db.flush()
     keep = {p for (p,) in db.execute(select(GeneratedImage.file_path)).all()}
     keep |= {p for (p,) in db.execute(select(ArchivedImage.file_path)).all()}
