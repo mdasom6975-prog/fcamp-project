@@ -312,3 +312,33 @@ class Judgment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     design_id: Mapped[int] = mapped_column(Integer, index=True)
     result: Mapped[dict] = mapped_column(JSON)
+
+
+class KnowledgeDoc(Base):
+    """RAG 로 찾아 쓸 문서 하나(법령 조문 묶음·그룹 페이지·브랜드 소개·제품 정보). knowledge.py 가 조각으로 나눠 저장한다.
+    layer: 규제 | 그룹 | 브랜드 | 제품 | 캠페인. 규제는 group_id·brand_id 를 비워 어느 브랜드에나 적용한다."""
+    __tablename__ = "knowledge_docs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    layer: Mapped[str] = mapped_column(String(10), index=True)
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    brand_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    source_id: Mapped[str] = mapped_column(String(100), index=True)   # sources.json 의 id. 같은 id 로 다시 올리면 이전 문서는 보관
+    title: Mapped[str] = mapped_column(String(200))
+    source_url: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    fetched_at: Mapped[str] = mapped_column(String(10), default="", server_default="")
+    status: Mapped[str] = mapped_column(String(10), default="사용")   # 사용 | 보관
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class KnowledgeChunk(Base):
+    """문서의 조각 하나와 그 임베딩. 임베딩 모델이 바뀌면 같은 모델끼리만 비교한다(embed_model)."""
+    __tablename__ = "knowledge_chunks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    doc_id: Mapped[int] = mapped_column(ForeignKey("knowledge_docs.id"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    section: Mapped[str] = mapped_column(String(200), default="", server_default="")   # 예: 화장품법 제13조 제1항
+    product_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    functional: Mapped[list] = mapped_column(JSON, default=list)      # 제품 청크: 심사·보고된 기능성(미백·주름 개선 …)
+    text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSON, default=list)
+    embed_model: Mapped[str] = mapped_column(String(60), default="", server_default="")

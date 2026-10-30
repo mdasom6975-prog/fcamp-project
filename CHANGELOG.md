@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### RAG 지식 저장소와 검색 (RAG 1-a)
+- `knowledge_docs`·`knowledge_chunks` 테이블과 `backend/app/knowledge.py`: 법령은 조·항(길면 호) 단위, 일반 문서는 문단 단위로 자르고 OpenAI `text-embedding-3-small` 로 임베딩(JSON 저장, 코사인 유사도). 검색은 층별(규제 3 · 제품 2 · 브랜드 2 · 그룹 1)로 따로 뽑고, 브랜드·제품은 brand_id, 그룹은 group_id 로 먼저 걸러 다른 브랜드가 섞이지 않게 한다. 브리프 상품명과 같은 제품 조각은 맨 앞. 같은 출처를 다시 올리면 이전 문서는 '보관'
+- 수집: `brands/amorepacific/sources.json`(법령 조문 5 · 그룹 페이지 6 · 브랜드 소개 4 · 제품 11), `tools/fetch_sources.py`(정적 페이지 수집), 스크립트로 그려지는 제품 페이지는 브라우저로 읽어 확인된 사실만 요약. 원문(`brands/*/raw/`)은 git 제외. 시행규칙 별표 5 는 이미지 뷰어라 아직 미수집
+- 등록: `tools/register_knowledge.py`(`--dry-run` 으로 자르기만 확인). 임베딩 호출은 호출 기록·비용(`pricing` 의 embeddings 요율)에 남는다
+- 평가: `eval/rag_cases.csv`(브랜드 4 × 5건)와 `eval/rag_search.py` — 첫 측정 정답 포함률 91%(30/33), 다른 브랜드 섞임 0건. 놓친 3건 중 2건은 화장품법 제13조(의약품 오인 금지)로, 브리프와 법령 문장의 유사도가 낮아 생기는 한계
+
 ### 브랜드 그룹 (RAG 0단계)
 - 브랜드를 그룹 아래에 묶는다(`brand_groups`, `brands.group_id`). `GET/POST /api/brand-groups`(같은 이름이면 기존 그룹), 브랜드 목록·상세에 `group_id`·`group_name`. 수정(PUT)에서 `group_id` 를 보내지 않으면 기존 소속 유지. 기존 DB 는 기동 시 컬럼을 추가한다(SQLite·Postgres 모두, `main._added_columns`)
 - 브랜드 화면: 기본 정보에 '소속 그룹' 선택(그룹이 있을 때만), 브랜드 목록을 그룹별 줄로 묶어 표시

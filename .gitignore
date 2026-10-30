@@ -6,3 +6,6 @@ __pycache__/
 
 .vercel
 .env
+
+# RAG 수집 원문(저작권 있는 웹 페이지). 저장소에는 수집 목록(sources.json)만 둔다
+brands/*/raw/
