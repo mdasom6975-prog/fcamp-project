@@ -37,4 +37,5 @@ def rules(bv, brief: dict | None) -> dict:
     eff = effective(bv, brief)
     from . import legal
     return {"voice": bv.voice, "required_phrases": eff["required_phrases"],
-            "forbidden_phrases": eff["forbidden_phrases"], "levels": bv.levels, "source_text": legal.source_text(brief)}
+            "forbidden_phrases": eff["forbidden_phrases"], "levels": bv.levels, "source_text": legal.source_text(brief),
+            "functional": (brief or {}).get("functional")}

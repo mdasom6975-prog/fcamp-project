@@ -172,3 +172,82 @@ def test_rag_cases_reference_known_sources():
     for c in cases:
         for want in c["expect"].split("|"):
             assert {a.partition("#")[0] for a in want.split("/")} <= ids, f"{c['id']}: 모르는 출처 {want}"
+
+
+# ---- 카피 생성에 붙이기 (1-b) ----
+
+def _seed_copy_knowledge(s):
+    """규제(화장품) 2문서 · 업종 없는 정의 조문 1 · 브랜드 1 의 제품 2개 · 그룹 자료 1."""
+    _add(s, layer="규제", source_id="law13", title="제13조", industry="화장품",
+         chunks=[("화장품법 제13조 제1항", "[화장품법 제13조] 의약품으로 잘못 인식할 우려가 있는 광고 금지")])
+    _add(s, layer="규제", source_id="annex5", title="별표 5", industry="화장품",
+         chunks=[("별표 5 제2호 가목", "[별표 5] 가. 의약품 오인 금지"), ("별표 5 제2호 나목", "[별표 5] 나. 기능성 오인 금지")])
+    _add(s, layer="규제", source_id="law2", title="제2조", chunks=[("화장품법 제2조", "[화장품법 제2조] 정의")])
+    _add(s, layer="제품", source_id="p_cream", title="수분 크림", chunks=[("수분 크림", "[수분 크림] 세라마이드 보습 크림")],
+         brand_id=1, product_name="수분 크림", functional=[])
+    _add(s, layer="제품", source_id="p_sun", title="선세럼", chunks=[("선세럼", "[선세럼] 자외선 차단 세럼")],
+         brand_id=1, product_name="선세럼", functional=["자외선 차단"])
+    _add(s, layer="그룹", source_id="grp", title="그룹", chunks=[("그룹 1", "[그룹] 녹차 보습 연구")], group_id=7)
+
+
+def test_for_copy_puts_all_industry_law_and_searches_guide(session):
+    from app import knowledge
+    _seed_copy_knowledge(session)
+    calls = []
+    emb = lambda texts: calls.append(texts) or fake_embed(texts)
+    brief = {"product_name": "수분 크림", "description": "세라마이드 보습 크림", "functional": ["자외선 차단"]}
+    k = knowledge.for_copy(session, 1, 7, brief, embedder=emb)
+    assert k["industries"] == ["화장품"]
+    assert [r["section"] for r in k["law"]] == ["화장품법 제13조 제1항", "별표 5 제2호 가목", "별표 5 제2호 나목"], \
+        "업종 표시가 있는 규제는 검색 없이 전부, 순서대로. 업종 표시가 없는 정의 조문은 넣지 않는다"
+    assert [r["source_id"] for r in k["guide"]][:1] == ["p_cream"] and {r["layer"] for r in k["guide"]} == {"제품", "그룹"}
+    assert len(calls) == 1, "검색 질의 임베딩 1회뿐(규제는 검색하지 않는다)"
+    assert "다릅니다" in k["functional_mismatch"], "제품 자료는 기능성 없음인데 자외선 차단을 입력"
+    # 기록 → 재구성(임베딩 호출 없음)
+    again = knowledge.from_refs(session, knowledge.refs(k))
+    assert [r["chunk_id"] for r in again["law"] + again["guide"]] == [r["chunk_id"] for r in k["law"] + k["guide"]]
+    assert len(calls) == 1
+
+
+def test_for_copy_without_knowledge_makes_no_embedding_call(session):
+    from app import knowledge
+    _seed_copy_knowledge(session)
+    def boom(texts):
+        raise AssertionError("지식 없는 브랜드는 임베딩을 호출하지 않는다")
+    k = knowledge.for_copy(session, 99, None, {"product_name": "캡슐 토이"}, embedder=boom)
+    assert k["law"] == [] and k["guide"] == [] and k["error"] is None and k["functional_mismatch"] is None
+
+
+def test_for_copy_survives_embedding_failure(session):
+    from app import knowledge
+    _seed_copy_knowledge(session)
+    def fail(texts):
+        raise RuntimeError("network")
+    k = knowledge.for_copy(session, 1, 7, {"product_name": "수분 크림", "description": "크림"}, embedder=fail)
+    assert k["error"] == "RuntimeError" and k["guide"] == [] and len(k["law"]) == 3, "검색이 실패해도 규제 원문은 들어간다"
+
+
+def test_functional_violations():
+    from app import legal
+    assert legal.functional_violations("주름 개선 크림", None) == [], "입력하지 않은 캠페인은 검사하지 않는다"
+    assert legal.functional_violations("주름 개선 크림", ["주름 개선"]) == []
+    v = legal.functional_violations("SPF50 으로 주름까지", ["미백"])
+    assert {x["phrase"] for x in v} == {"SPF", "주름"} and all(x["severity"] == "필수" for x in v)
+    assert legal.functional_violations("촉촉한 보습", []) == []
+
+
+def test_brief_functional_validation():
+    from pydantic import ValidationError
+
+    from app.routers_designs import BriefIn
+    assert BriefIn(product_name="p", functional=["미백", "미백"]).functional == ["미백"]
+    assert BriefIn(product_name="p").functional is None
+    with pytest.raises(ValidationError):
+        BriefIn(product_name="p", functional=["피부 재생"])
+
+
+def test_copy_check_flags_functional_outside_brief():
+    from app import copywriter
+    rules = {"forbidden_phrases": [], "required_phrases": [], "levels": {}, "source_text": "", "functional": []}
+    v = copywriter.check({"headline": "미백 크림", "body": "본문", "cta": "보기"}, copywriter.limits_for([]), rules)
+    assert any(x["type"] == "functional" and x["phrase"] == "미백" for x in v)

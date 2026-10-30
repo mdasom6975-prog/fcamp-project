@@ -1,6 +1,6 @@
 {
   "group": "아모레퍼시픽",
-  "note": "RAG 수집 목록. 원문(raw/)은 저장소에 올리지 않는다(.gitignore). url 이 있으면 tools/fetch_sources.py 가 받고, kind=manual 은 사람이 raw/<id>.txt 를 만든다(스크립트로 그려지는 페이지).",
+  "note": "RAG 수집 목록. 원문(raw/)은 저장소에 올리지 않는다(.gitignore). url 이 있으면 tools/fetch_sources.py 가 받고, kind=manual 은 사람이 raw/<id>.txt 를 만든다(스크립트로 그려지는 페이지). 규제 문서의 industry 는 카피 생성 때 그 업종이 감지되면 검색 없이 전부 넣을 문서다(정의·위임 조문처럼 지시가 없는 조문은 비운다).",
   "sources": [
     {
       "id": "law_cosmetics_2",
@@ -16,7 +16,8 @@
       "title": "화장품법 제13조(부당한 표시·광고 행위 등의 금지)",
       "kind": "law",
       "law": "화장품법",
-      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0013&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR"
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0013&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
     },
     {
       "id": "law_cosmetics_rule_2",
@@ -24,7 +25,8 @@
       "title": "화장품법 시행규칙 제2조(기능성화장품의 범위)",
       "kind": "law",
       "law": "화장품법 시행규칙",
-      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0002&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR"
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0002&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
     },
     {
       "id": "law_cosmetics_rule_22",
@@ -41,7 +43,8 @@
       "kind": "manual",
       "url": "https://www.law.go.kr/법령별표서식/(화장품법시행규칙,5)",
       "how": "별표 본문이 이미지 뷰어라 자동 추출 불가. 국가법령정보센터에서 PDF 를 받아 텍스트를 뽑고(pypdf), 빠진 띄어쓰기만 바로잡아 목(가.·나.…)마다 한 문단으로 raw/law_cosmetics_rule_annex5.txt 에 저장",
-      "annex": "화장품법 시행규칙 별표 5"
+      "annex": "화장품법 시행규칙 별표 5",
+      "industry": "화장품"
     },
     {
       "id": "ap_ingredients",

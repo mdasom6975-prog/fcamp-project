@@ -1,5 +1,6 @@
 """카피 생성 (6-2). 지면별 문구 제한을 생성 조건으로 주고, 생성 후 코드로 다시 검사한다."""
 import os
+import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -111,10 +112,36 @@ def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
             v.append({"type": "required_missing", "field": "필수 표현", "detail": f"'{ph}' 누락",
                       "severity": lv.get("required_phrases", "필수")})
     v += legal.violations(joined, brand.get("source_text") or "")       # 법적·제도적 금지 표현(브랜드 규칙과 별개로 항상 검사)
+    v += legal.functional_violations(joined, brand.get("functional"))    # 입력한 기능성 밖의 기능성 표현(입력한 캠페인만)
     return v
 
 
-def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict) -> tuple[str, str]:
+def _strip_title(text: str) -> str:
+    """조각 앞의 '[문서 제목] ' 을 뗀다(프롬프트에서는 출처 표시를 따로 붙인다)."""
+    return re.sub(r"^\[[^\[\]]*\]\s*", "", text)
+
+
+def knowledge_vars(knowledge: dict | None, brief: dict) -> dict[str, str]:
+    """카피 User 의 {{functional}} · {{law}} · {{guide}} 값. 문장은 prompts/copy/_functional*.md · _law.md · _guide.md 에 있고
+    여기서는 줄 목록만 만든다. 해당 내용이 없으면 빈 문자열(지식이 없는 브랜드는 프롬프트가 그대로다)."""
+    k = knowledge or {}
+    fn = brief.get("functional")
+    functional = ("" if fn is None else "\n" + (prompts.render("copy/_functional", functional=", ".join(fn)) if fn
+                                                 else prompts.render("copy/_functional_none")))
+    law = ""
+    if k.get("law"):
+        lines = "\n".join(f"- ({r['section']}) {_strip_title(r['text'])}" for r in k["law"])
+        law = "\n" + prompts.render("copy/_law", industries=", ".join(k.get("industries") or []), items=lines)
+    guide = ""
+    if k.get("guide"):
+        lines = "\n".join(f"- ({r['layer']} · {r['section']}) {_strip_title(r['text'])}" for r in k["guide"])
+        guide = "\n" + prompts.render("copy/_guide", items=lines)
+    return {"functional": functional, "law": law, "guide": guide}
+
+
+def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
+            knowledge: dict | None = None) -> tuple[str, str]:
+    """knowledge: knowledge.for_copy 결과(규제 원문·브랜드 지식). 없으면 지금처럼 브랜드 규칙과 브리프만으로 만든다."""
     def rule(slot, label):
         l = limits.get(slot)
         if not l:
@@ -160,6 +187,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         limit_cta=rule("cta", "cta(행동 유도)"),
         assets=assets,
         legal=legal.industry_block(legal.detect(" ".join(str(brief.get(k) or "") for k in ("product_name", "description", "key_message")))),
+        **knowledge_vars(knowledge, brief),
     )
     return system, user
 
@@ -191,10 +219,10 @@ def parse_assets(data: dict, spec: list[dict]) -> dict:
 
 
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
-             icons_out: list | None = None, assets_out: dict | None = None) -> list[dict]:
+             icons_out: list | None = None, assets_out: dict | None = None, knowledge: dict | None = None) -> list[dict]:
     """카피 변형을 만든다. icons_out 리스트를 주면 같은 응답의 아이콘 기능명 후보를, assets_out dict 를 주면
     추가 문구 자산(limits["assets"] 요구)을 거기에 채운다(추가 호출 없음)."""
-    system, user = _prompt(brand_name, brand, brief, placement, limits)
+    system, user = _prompt(brand_name, brand, brief, placement, limits, knowledge)
     from . import llm       # 공급자(Claude/OpenAI) 전환은 llm.py 가 맡는다. 순환 import 를 피해 함수 안에서 가져온다
     data = llm.chat_json(system, user, "copy", llm.copy_schema([a["field"] for a in (limits.get("assets") or [])]))
     if icons_out is not None:
@@ -207,7 +235,8 @@ def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits:
     return out
 
 
-def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[dict], int, list[dict], dict]:
+def generate_checked(brand_name, brand, brief, placement, limits,
+                     knowledge: dict | None = None) -> tuple[list[dict], int, list[dict], dict]:
     """생성 → 코드 검사. 반환: (변형, 시도 수, 아이콘 기능명 후보, 추가 문구 자산). 기본은 1회 호출.
     COPY_AUTO_RETRY=1 이면 통과한 변형이 하나도 없을 때만 1회 더 생성해 위반이 적은 쪽을 채택한다(사용자는 변형 하나를
     고르므로 깨끗한 변형이 하나면 충분하다). 아이콘 후보는 마지막 응답의 것을 쓴다."""
@@ -216,7 +245,8 @@ def generate_checked(brand_name, brand, brief, placement, limits) -> tuple[list[
         attempts += 1
         got: list = []
         got_assets: dict = {}
-        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got, assets_out=got_assets)
+        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got, assets_out=got_assets,
+                            knowledge=knowledge)
         icons = got or icons
         assets = got_assets or assets
         for v in variants:

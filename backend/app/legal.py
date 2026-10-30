@@ -91,3 +91,38 @@ def violations(text: str, source: str = "") -> list[dict]:
              "suggest": h["suggest"], "grounded": h["grounded"],
              "detail": f"'{h['phrase']}' — {h['reason']}" + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
              "severity": "필수" if h["severity"] == "block" else "권장"} for h in scan(text, source)]
+
+
+# ---- 기능성화장품 표현 검사 (화장품법 시행규칙 제2조의 기능성 범위) ----
+# 기능성 이름 → 카피에 나오면 그 기능성을 주장한 것으로 보는 표현. 브리프에 기능성을 입력한 캠페인만 검사한다
+# (입력하지 않은 캠페인은 기능성 여부를 모르므로 검사하지 않는다). 표현은 보수적으로, 기능성 주장이 분명한 말만 둔다.
+FUNCTIONAL_CLAIMS: dict[str, tuple[str, ...]] = {
+    "미백": ("미백", "화이트닝"),
+    "주름 개선": ("주름",),
+    "자외선 차단": ("자외선 차단", "자외선차단", "SPF", "PA+"),
+    "태닝": ("태닝",),
+    "모발 색상 변화": ("염색", "새치"),
+    "체모 제거": ("제모",),
+    "탈모 증상 완화": ("탈모",),
+    "여드름성 피부 완화": ("여드름",),
+    "피부장벽 기능 회복(가려움 개선)": ("가려움",),
+    "튼살 붉은 선 완화": ("튼살",),
+}
+
+
+def functional_violations(text: str, functional: list[str] | None) -> list[dict]:
+    """입력한 기능성(functional) 밖의 기능성 표현. functional 이 None 이면 검사하지 않는다(빈 목록 = 기능성 아님)."""
+    if functional is None:
+        return []
+    t = _SPACE.sub("", text or "").lower()
+    out = []
+    for kind, words in FUNCTIONAL_CLAIMS.items():
+        if kind in functional:
+            continue
+        hit = next((w for w in words if _SPACE.sub("", w).lower() in t), None)
+        if hit:
+            out.append({"type": "functional", "field": "기능성 표현", "phrase": hit,
+                        "law": "화장품법 제13조 제1항 제2호, 시행규칙 별표 5 제2호 나목",
+                        "detail": f"'{hit}' — 입력한 기능성({', '.join(functional) or '기능성 아님'})에 '{kind}' 이 없어 기능성으로 오인될 수 있습니다",
+                        "severity": "필수"})
+    return out

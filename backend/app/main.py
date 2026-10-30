@@ -61,6 +61,10 @@ def _added_columns() -> None:
     if "group_id" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
         with engine.begin() as conn:      # 브랜드 그룹(아모레퍼시픽 → 설화수 등)
             conn.execute(text("ALTER TABLE brands ADD COLUMN group_id INTEGER"))
+    insp = inspect(engine)
+    if insp.has_table("knowledge_docs") and "industry" not in {c["name"] for c in insp.get_columns("knowledge_docs")}:
+        with engine.begin() as conn:      # 규제 문서의 업종(업종 감지 시 검색 없이 전부 넣는다)
+            conn.execute(text("ALTER TABLE knowledge_docs ADD COLUMN industry VARCHAR(20)"))
 
 
 INIT_KEY = "schema_init"      # KV 키: 초기화를 마친 배포(VERCEL_GIT_COMMIT_SHA)를 적어 둔다

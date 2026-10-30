@@ -30,12 +30,15 @@ type Agg = { count: number; failed: number; ms_total: number; ms_avg: number; to
 type Row = { ts: string; api: string; kind: string; provider: string; model: string; ok: boolean; ms: number | null; size?: string; quality?: string; tokens_in?: number; tokens_out?: number; error?: string; cost_usd: number | null; cost_krw: number | null; estimated: boolean; prompt_id?: string; served_by?: string }
 type Judgment = { ts: string; background_id: number; file: string; template: string | null; style: string; model: string; scores: { item: string; score: number; reason: string }[]; overall: number; summary: string; cost_usd: number | null; tokens_in: number | null; tokens_out: number | null }
 type Mapping = { key: string; item: string; value: string; stages: Record<'copy' | 'background' | 'icon' | 'compose' | 'review', string | null> }
+type KChunk = { chunk_id: number; source_id: string; doc_title: string; layer: string; section: string; text: string; score: number | null; product_name: string | null; functional: string[] }
+type Knowledge = { industries: string[]; law: KChunk[]; guide: KChunk[]; error: string | null; functional_mismatch: string | null; functional: string[] | null; embed_model: string | null }
 type Analysis = {
   design: { id: number; kind: string; status: string; created_at: string; brief: Record<string, unknown>; presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[]; settings: { model: string; bg_mode: string }; style: string; style_reason: string }
   brand: { id: number; name: string; description: string; version_no: number; colors: { role: string; hex: string }[]; fonts: { role: string; name?: string | null }[]; icon_style: { corner?: string; material?: string; stroke_width?: number; fill?: string }; image_tone: { description?: string }; voice: { description?: string; headline_max_chars?: number | null; polite?: boolean }; levels: Record<string, string>; logo_position: string | null; logo_margin: { percent?: number } | null; effective: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } }
   mapping: Mapping[]
   results: { backgrounds: Bg[]; composites: Composite[]; icons: Icon[]; copy: { selected: { variant_no: number; headline: string; body: string; cta: string } | null; variants: { variant_no: number; headline: string; body: string; cta: string; selected: boolean }[]; text_assets: Record<string, string[]> } }
   prompts: Entry[]
+  knowledge: Knowledge | null
   variables: Record<string, string>
   cost: { summary: { total: number; ok: number; failed: number; cost_usd: number; cost_krw: number | null; estimated: boolean; unpriced: number; usd_krw: number; tokens_in: number; tokens_out: number; ms_total: number }; stages: Record<string, Agg>; stage_label: Record<string, string>; rows: Row[] }
   judgments: Judgment[]; judge_items: string[]; judge_estimate: { usd: number | null; krw: number | null; model: string }
@@ -414,6 +417,9 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
             <p className="muted an-note">'—' 는 그 단계에 들어가지 않는다는 뜻입니다. 예: 폰트는 배경 프롬프트에 없고 합성 코드에서만 쓰입니다. 허용 색상은 배경 프롬프트에 포인트 색·큰 면의 색으로 들어가고, 합성 단계에서 글자·버튼 색으로 다시 쓰입니다.</p>
           </section>
 
+          {/* 참고한 자료(RAG) */}
+          {data.knowledge && <KnowledgeCard k={data.knowledge} />}
+
           {/* ② 프롬프트 */}
           <section className="card">
             <header><h3><span className="step-no">②</span> 모델에 보낸 프롬프트</h3><span className="muted">{data.prompts.length}건 · 노란 표시 = 입력에서 온 값</span></header>
@@ -501,5 +507,34 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
         </>
       )}
     </main>
+  )
+}
+
+
+/* 최근 카피 생성에 넣은 규제 원문(업종 감지 시 전부)과 브리프로 검색한 브랜드 지식(RAG). 점수는 질의와의 코사인 유사도 */
+function KnowledgeCard({ k }: { k: Knowledge }) {
+  const fn = k.functional == null ? '입력 안 함' : k.functional.length ? k.functional.join(', ') : '기능성 아님'
+  return (
+    <section className="card">
+      <header><h3>카피에 참고한 자료 (RAG)</h3>
+        <span className="muted">규제 {k.law.length}조각 · 브랜드 지식 {k.guide.length}조각{k.embed_model ? ` · 임베딩 ${k.embed_model}` : ''}</span></header>
+      {k.functional_mismatch && <div className="notice err">{k.functional_mismatch}</div>}
+      {k.error && <div className="notice err">브랜드 지식 검색에 실패해 지식 없이 만들었습니다 ({k.error})</div>}
+      <p className="muted an-note">기능성 입력: {fn}. 규제는 검색하지 않고, 품목에서 감지한 업종({k.industries.join(', ') || '없음'})의 조문을 전부 넣습니다.
+        브랜드 지식은 상품명·설명·핵심 메시지·타깃으로 검색한 제품 2 · 브랜드 2 · 그룹 1 조각이며, 같은 브랜드·그룹 자료만 찾습니다.</p>
+      <table className="an-table">
+        <thead><tr><th>층</th><th>출처 · 절</th><th>유사도</th><th>내용</th></tr></thead>
+        <tbody>
+          {[...k.guide, ...k.law].map((r) => (
+            <tr key={r.chunk_id}>
+              <td>{r.layer}</td>
+              <td>{r.doc_title}<div className="muted">{r.section}{r.functional?.length ? ` · 기능성 ${r.functional.join(', ')}` : ''}</div></td>
+              <td>{r.score == null ? '—' : r.score.toFixed(3)}</td>
+              <td><details><summary>{r.text.replace(/^\[[^\[\]]*\]\s*/, '').slice(0, 60)}…</summary><pre className="prompt">{r.text}</pre></details></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   )
 }

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 카피 생성에 규제 원문·브랜드 지식 연결 (RAG 1-b)
+- 규제는 검색하지 않는다: 품목에서 업종이 감지되면(`legal.detect`) 그 업종으로 표시한 규제 문서(`knowledge_docs.industry`, 화장품: 제13조 · 시행규칙 제2조 · 별표 5)를 전부 카피 User 에 넣는다(`prompts/copy/_law.md`). 1-a 평가에서 브리프와 법령 문장의 유사도가 낮아 검색으로는 규제를 놓쳤기 때문
+- 브랜드 지식은 검색한다: 제품 2 · 브랜드 2 · 그룹 1 조각(`knowledge.for_copy`, `prompts/copy/_guide.md`). 지식이 없는 브랜드는 임베딩 호출 없이 지금과 같은 프롬프트. 검색이 실패해도 카피 생성은 계속(응답 `knowledge.error`)
+- 캠페인 입력에 '기능성(화장품)' 추가(입력 안 함 / 기능성 아님 / 미백·주름 개선·자외선 차단 등). 고르면 프롬프트에 범위를 주고(`_functional*.md`), 생성 후 범위 밖 기능성 표현을 '수정 필요'로 검사(`legal.functional_violations`). 상품명이 같은 제품 자료의 기능성과 다르면 안내
+- 카피마다 넣은 조각 id 를 캠페인 입력(`brief.knowledge`)에 남기고, 분석 탭에 '카피에 참고한 자료(RAG)' 카드(층·출처·유사도·내용). 프롬프트 재구성도 이 기록으로 지식을 다시 붙인다
+- `prompts/copy/user.md` 1.4. 기존 브랜드의 프롬프트 스냅샷은 그대로이고 `copy__knowledge` 스냅샷 추가
+- 기존 DB 는 기동 시 `knowledge_docs.industry` 컬럼을 추가한다. 규제 문서 3개는 `register_knowledge.py --only law_cosmetics_13,law_cosmetics_rule_2,law_cosmetics_rule_annex5` 로 다시 등록해야 업종 표시가 붙는다
+
 ### RAG 지식 저장소와 검색 (RAG 1-a)
 - `knowledge_docs`·`knowledge_chunks` 테이블과 `backend/app/knowledge.py`: 법령은 조·항(길면 호) 단위, 일반 문서는 문단 단위로 자르고 OpenAI `text-embedding-3-small` 로 임베딩(JSON 저장, 코사인 유사도). 검색은 층별(규제 3 · 제품 2 · 브랜드 2 · 그룹 1)로 따로 뽑고, 브랜드·제품은 brand_id, 그룹은 group_id 로 먼저 걸러 다른 브랜드가 섞이지 않게 한다. 브리프 상품명과 같은 제품 조각은 맨 앞. 같은 출처를 다시 올리면 이전 문서는 '보관'
 - 수집: `brands/amorepacific/sources.json`(법령 조문 5 · 그룹 페이지 6 · 브랜드 소개 4 · 제품 11), `tools/fetch_sources.py`(정적 페이지 수집), 스크립트로 그려지는 제품 페이지는 브라우저로 읽어 확인된 사실만 요약. 원문(`brands/*/raw/`)은 git 제외. 시행규칙 별표 5 는 이미지 뷰어라 PDF 에서 텍스트를 뽑아 넣고(원문과 글자 대조), 목 단위로 자른다(`knowledge.chunk_annex`, 절 이름 '별표 5 제2호 가목')

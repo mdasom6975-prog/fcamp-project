@@ -455,6 +455,8 @@ button.logo-box:active:not(:disabled) { transform: none; }
 .camp-input-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0 0; }
 .camp-input-grid dt { color: var(--muted, #6b7280); font-size: 13px; }
 .camp-input-grid dd { margin: 0; white-space: pre-wrap; }
+.fn-kinds { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 13px; }
+.fn-kinds label { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; }
 .camp-input-grid .prod-thumb { max-height: 96px; max-width: 160px; background: repeating-conic-gradient(#e5e7eb 0 25%, #fff 0 50%) 50% / 12px 12px; border-radius: 6px; }
 .camp-edit { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .camp-edit label { font-size: 12px; font-weight: 500; color: var(--text-2); }

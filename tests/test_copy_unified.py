@@ -45,7 +45,7 @@ def env(tmp_path, monkeypatch):
     Local = sessionmaker(bind=engine, autoflush=False)
     calls: list[dict] = []
 
-    def fake_generate_checked(brand_name, brand, brief, placement, limits):
+    def fake_generate_checked(brand_name, brand, brief, placement, limits, knowledge=None):
         calls.append({"placement": placement, "limits": limits})
         vs = [{"headline": "짧은 제목", "body": "본문 하나", "cta": "보기"},
               {"headline": "이 제목은 네이티브 타이틀 제한을 넘기도록 일부러 길게 씁니다", "body": "본문 둘", "cta": "보기"},
@@ -131,7 +131,7 @@ def test_copy_call_also_stores_icon_candidates(env, monkeypatch):
     from app import copywriter
     cands = [{"name": f"기능{i}", "concept": f"오브젝트 {i}"} for i in range(1, 16)]
 
-    def fake3(brand_name, brand, brief, placement, limits):
+    def fake3(brand_name, brand, brief, placement, limits, knowledge=None):
         vs = [{"headline": "제목", "body": "본문", "cta": "보기", "violations": []}] * 3
         return vs, 1, cands
     monkeypatch.setattr(copywriter, "generate_checked", fake3)
@@ -149,7 +149,7 @@ def test_parse_icons_and_generate_checked_returns_candidates(monkeypatch):
     got = copywriter.parse_icons(data)
     assert got[:2] == [{"name": "정기배송", "concept": "상자"}, {"name": "빠른도착", "concept": ""}] and len(got) == 15
 
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None):
+    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
         if icons_out is not None:
             icons_out[:] = [{"name": "기능", "concept": "c"}]
         if assets_out is not None:
@@ -167,7 +167,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
     limits = copywriter.limits_for([{"field": "제목", "max_chars": 5, "count_method": "글자 수", "level": "필수"}])
     calls: list[int] = []
 
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None):
+    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
         calls.append(1)
         return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}, {"headline": "짧다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", fake_generate)
@@ -175,7 +175,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
     variants, attempts, *_ = copywriter.generate_checked("b", {}, {}, {}, limits)
     assert attempts == 1 and len(calls) == 1 and [bool(v["violations"]) for v in variants] == [True, False]
 
-    def all_bad(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None):
+    def all_bad(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
         calls.append(1)
         return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", all_bad)
@@ -221,7 +221,7 @@ def test_copy_call_requests_and_stores_text_assets(env, monkeypatch):
         pv.conditions = [{"name": "문구 수량", "value": "광고 제목 3~15개, 설명 2~5개", "level": "강제", "status": "확인됨"}]
         db.commit()
     seen: list[dict] = []
-    def fake4(brand_name, brand, brief, placement, limits):
+    def fake4(brand_name, brand, brief, placement, limits, knowledge=None):
         seen.append(limits)
         vs = [{"headline": "제목", "body": "본문", "cta": "보기", "violations": []}] * 3
         return vs, 1, [], {"광고 제목": ["하나", "둘", "셋", "넷", "다섯"], "설명": ["설명 하나", "설명 둘"]}
@@ -261,7 +261,7 @@ def test_text_assets_only_endpoint_keeps_variants(env, monkeypatch):
     c.post(f"/api/designs/{did}/copy")
     c.post(f"/api/designs/{did}/copy/select-variant", json={"variant_no": 2})
     seen: list[dict] = []
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None):
+    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
         seen.append(limits)
         if assets_out is not None:
             assets_out.update({"광고 제목": ["하나", "둘", "셋"]})
@@ -298,3 +298,13 @@ def test_fit_copy_to_preset_rewrites_only_violating_fields(env, monkeypatch):
         rows = {v.preset_version_id: v for v in db.query(models.CopyVariant).filter_by(design_id=did, selected=True).all()}
         assert rows[nat].headline == "짧게 고친 제목" and rows[nat].violations == []
         assert rows[ig].headline != "짧게 고친 제목", "다른 지면의 카피는 그대로"
+
+
+def test_copy_records_knowledge_refs(env):
+    """카피 생성은 넣은 지식(규제·검색 조각)을 캠페인 입력에 남기고 응답에 요약을 준다. 지식이 없는 브랜드는 빈 기록."""
+    c, ids = env["client"], env["ids"]
+    out = c.post(f"/api/designs/{ids['design']}/copy").json()
+    assert out["knowledge"] == {"law": 0, "guide": 0, "industries": out["knowledge"]["industries"], "error": None,
+                                "functional_mismatch": None}
+    brief = c.get(f"/api/designs/{ids['design']}").json()["brief"]
+    assert brief["knowledge"]["law_chunk_ids"] == [] and brief["knowledge"]["guide"] == []

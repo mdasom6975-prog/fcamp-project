@@ -28,6 +28,19 @@ class BriefIn(BaseModel):
     # 캠페인 필수·금지 표현. 비어 있으면 브랜드 규칙 값을 쓴다 (phrases.effective)
     required_phrases: list[str] = Field(default=[], max_length=50)
     forbidden_phrases: list[str] = Field(default=[], max_length=50)
+    # 화장품 기능성(식약처 심사·보고 범위). None = 입력 안 함(검사 없음), [] = 기능성 아님, 목록 = 그 기능성만 표현 가능
+    functional: list[str] | None = None
+
+    @field_validator("functional")
+    @classmethod
+    def _functional(cls, v: list[str] | None) -> list[str] | None:
+        from .legal import FUNCTIONAL_CLAIMS
+        if v is None:
+            return None
+        unknown = [x for x in v if x not in FUNCTIONAL_CLAIMS]
+        if unknown:
+            raise ValueError(f"기능성은 {list(FUNCTIONAL_CLAIMS)} 중에서 고릅니다: {unknown}")
+        return list(dict.fromkeys(v))
 
     @field_validator("required_phrases", "forbidden_phrases")
     @classmethod

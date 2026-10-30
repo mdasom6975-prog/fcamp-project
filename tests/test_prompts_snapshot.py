@@ -67,6 +67,23 @@ def test_copy_prompt_minimal_brief_and_voice():
     _assert_snapshot("copy__minimal", f"[SYSTEM]\n{system}\n\n[USER]\n{user}\n")
 
 
+def test_copy_prompt_with_knowledge_and_functional():
+    """RAG(1-b): 기능성 입력, 감지 업종의 법령 원문, 검색한 브랜드 지식 문단. 조각 앞의 '[문서 제목]' 은 떼고 출처를 붙인다."""
+    from app import copywriter
+    brief = {"product_name": "수분 크림", "description": "세라마이드 보습 크림", "key_message": "촉촉한 피부", "target": "20대",
+             "functional": ["자외선 차단"]}
+    knowledge = {
+        "industries": ["화장품"],
+        "law": [{"section": "화장품법 제13조 제1항", "text": "[화장품법 제13조(부당한 표시ㆍ광고 행위 등의 금지)] ① 의약품으로 잘못 인식할 우려가 있는 표시 또는 광고"}],
+        "guide": [{"layer": "제품", "section": "수분 크림", "text": "[수분 크림 제품 정보] 세라마이드 보습 크림. 기능성: 자외선 차단."},
+                  {"layer": "그룹", "section": "그룹 연구 1", "text": "[그룹 연구] 녹차 연구 이야기"}],
+    }
+    _, user = copywriter._prompt("쿠챠", BRAND, brief, _placement("Instagram 피드"), copywriter.limits_for([]), knowledge)
+    _assert_snapshot("copy__knowledge", f"[USER]\n{user}\n")
+    _, none_user = copywriter._prompt("쿠챠", BRAND, {**brief, "functional": []}, _placement("Instagram 피드"), copywriter.limits_for([]))
+    assert "이 제품은 기능성 화장품이 아니다" in none_user and "[브랜드 지식" not in none_user
+
+
 # ---- 아이콘 (icons): _ask 를 가로채 system/user 만 기록한다 ----
 @pytest.fixture
 def capture_ask(monkeypatch):

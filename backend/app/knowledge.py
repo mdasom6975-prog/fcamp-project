@@ -4,13 +4,15 @@
 - 다른 브랜드의 조각은 벡터 비교 전에 필터로 뺀다(브랜드 섞임은 유사도가 아니라 필터로 막는다).
 - 층마다 따로 상위 k 개를 뽑는다. 한 번에 뽑으면 브랜드 이야기가 규제 조항을 밀어낼 수 있다.
 - 임베딩은 JSON 실수 배열로 저장하고 파이썬으로 코사인 유사도를 계산한다(조각 수천 개까지 충분, 추가 의존성 없음).
+- 카피 생성(for_copy)에서 규제는 검색하지 않는다. 브리프와 법령 문장은 쓰는 말이 달라 유사도로는 놓치기 쉬우므로(1-a 평가),
+  품목에서 업종이 감지되면 그 업종으로 표시한 규제 문서를 전부 넣는다. 검색은 제품·브랜드·그룹 층에만 쓴다.
 """
 import math
 import os
 import re
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from . import calllog
@@ -148,7 +150,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks: list[tuple[str, str]],
                  group_id: int | None = None, brand_id: int | None = None, source_url: str = "",
                  fetched_at: str | None = None, product_name: str | None = None,
-                 functional: list[str] | None = None, embedder=embed) -> KnowledgeDoc:
+                 functional: list[str] | None = None, industry: str | None = None, embedder=embed) -> KnowledgeDoc:
     """조각을 임베딩해 문서 하나로 저장한다. 같은 source_id 의 '사용' 문서는 '보관' 으로 돌린다(재등록 = 새 버전).
     embedder 는 테스트에서 가짜 임베딩을 넣을 때 바꾼다."""
     if layer not in LAYERS:
@@ -157,7 +159,7 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
         raise ValueError(f"조각이 없습니다: {source_id}")
     for old in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.source_id == source_id, KnowledgeDoc.status == "사용")):
         old.status = "보관"
-    doc = KnowledgeDoc(layer=layer, source_id=source_id, title=title, group_id=group_id, brand_id=brand_id,
+    doc = KnowledgeDoc(layer=layer, source_id=source_id, title=title, group_id=group_id, brand_id=brand_id, industry=industry,
                        source_url=source_url, fetched_at=fetched_at or date.today().isoformat())
     db.add(doc)
     db.flush()
@@ -211,3 +213,90 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
                        "product_name": ch.product_name, "functional": ch.functional, "exact_product": exact}
                       for exact, s, ch, doc in scored[:k]]
     return out
+
+
+# ── 카피 생성에 붙이기 ────────────────────────────────────────────────────
+
+GUIDE_K = {k: v for k, v in LAYER_K.items() if k != "규제"}    # 카피에서 검색하는 층(규제는 업종으로 전부 넣는다)
+
+
+def _row(ch: KnowledgeChunk, doc: KnowledgeDoc, score: float | None = None) -> dict:
+    return {"chunk_id": ch.id, "doc_id": doc.id, "source_id": doc.source_id, "doc_title": doc.title, "layer": doc.layer,
+            "section": ch.section, "text": ch.text, "score": None if score is None else round(score, 4),
+            "product_name": ch.product_name, "functional": ch.functional, "exact_product": False}
+
+
+def law_rows(db: Session, industries: list[str]) -> list[dict]:
+    """감지된 업종으로 표시한 규제 문서의 조각 전부(문서·조각 순서대로). 검색·임베딩 호출 없음."""
+    if not industries:
+        return []
+    q = (select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+         .where(KnowledgeDoc.layer == "규제", KnowledgeDoc.status == "사용", KnowledgeDoc.industry.in_(industries))
+         .order_by(KnowledgeDoc.id, KnowledgeChunk.seq))
+    return [_row(ch, doc) for ch, doc in db.execute(q).all()]
+
+
+def has_guide(db: Session, brand_id: int | None, group_id: int | None) -> bool:
+    """이 브랜드(또는 그룹)에 검색할 지식이 있는가. 없으면 임베딩 호출 자체를 하지 않는다(기존 브랜드는 지금과 같게)."""
+    conds = [KnowledgeDoc.brand_id == brand_id] if brand_id is not None else []
+    if group_id is not None:
+        conds.append(KnowledgeDoc.group_id == group_id)
+    if not conds:
+        return False
+    return db.scalar(select(KnowledgeDoc.id).where(KnowledgeDoc.status == "사용", KnowledgeDoc.layer != "규제", or_(*conds))
+                     .limit(1)) is not None
+
+
+def functional_mismatch(guide: list[dict], functional: list[str] | None) -> str | None:
+    """브리프의 기능성 입력과 상품명이 같은 제품 자료의 기능성이 다르면 안내 문장. 입력이 없거나 같은 제품 자료가 없으면 None."""
+    if functional is None:
+        return None
+    prod = next((r for r in guide if r["layer"] == "제품" and r["exact_product"]), None)
+    if prod is None or set(prod["functional"] or []) == set(functional):
+        return None
+    known = ", ".join(prod["functional"] or []) or "기능성 표시 없음"
+    given = ", ".join(functional) or "기능성 아님"
+    return f"입력한 기능성({given})이 등록된 '{prod['product_name']}' 제품 자료({known})와 다릅니다. 제품의 기능성 심사·보고 내용을 확인하세요"
+
+
+def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dict, embedder=embed) -> dict:
+    """카피 프롬프트에 붙일 지식. 반환: {industries, law: [조각], guide: [조각], error, functional_mismatch}.
+    - law: 품목 글에서 감지한 업종의 규제 조각 전부(legal.detect 와 같은 키워드)
+    - guide: 제품 2 · 브랜드 2 · 그룹 1 검색 결과. 이 브랜드·그룹에 지식이 없으면 빈 목록(임베딩 호출 없음)
+    - 임베딩 호출이 실패하면 guide 없이 진행하고 error 에 오류 이름만 남긴다(카피 생성을 막지 않는다)"""
+    from . import legal
+    industries = legal.detect(legal.source_text(brief))
+    out = {"industries": industries, "law": law_rows(db, industries), "guide": [], "error": None, "functional_mismatch": None}
+    if has_guide(db, brand_id, group_id):
+        try:
+            res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=GUIDE_K,
+                         product_name=brief.get("product_name"), embedder=embedder)
+            out["guide"] = [r for layer in ("제품", "브랜드", "그룹") for r in res.get(layer, [])]
+        except Exception as e:      # 키·네트워크 오류 등. 메시지에 민감 정보가 있을 수 있어 이름만 남긴다
+            out["error"] = type(e).__name__
+    out["functional_mismatch"] = functional_mismatch(out["guide"], brief.get("functional"))
+    return out
+
+
+def refs(k: dict) -> dict:
+    """캠페인 입력(brief)에 남길 기록: 실제로 넣은 조각 id 와 요약. 분석 화면이 이것으로 '참고한 자료' 를 보여 주고 프롬프트를 재구성한다."""
+    return {"law_chunk_ids": [r["chunk_id"] for r in k["law"]], "guide": [
+        {x: r[x] for x in ("chunk_id", "source_id", "layer", "section", "score")} for r in k["guide"]],
+            "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
+            "embed_model": EMBED_MODEL}
+
+
+def from_refs(db: Session, saved: dict | None) -> dict | None:
+    """refs() 로 남긴 기록 → for_copy 와 같은 모양(임베딩 호출 없음). 지워진 조각은 빠진다. 기록이 없으면 None."""
+    if not saved:
+        return None
+    ids = saved.get("law_chunk_ids", []) + [g["chunk_id"] for g in saved.get("guide", [])]
+    rows = {ch.id: _row(ch, doc) for ch, doc in db.execute(
+        select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+        .where(KnowledgeChunk.id.in_(ids))).all()} if ids else {}
+    guide = []
+    for g in saved.get("guide", []):
+        if g["chunk_id"] in rows:
+            guide.append({**rows[g["chunk_id"]], "score": g.get("score")})
+    return {"industries": saved.get("industries", []), "law": [rows[i] for i in saved.get("law_chunk_ids", []) if i in rows],
+            "guide": guide, "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch")}

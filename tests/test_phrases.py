@@ -36,7 +36,7 @@ def env(tmp_path, monkeypatch):
     Local = sessionmaker(bind=engine, autoflush=False)
     seen: list[dict] = []
 
-    def fake_generate_checked(brand_name, brand, brief, placement, limits):
+    def fake_generate_checked(brand_name, brand, brief, placement, limits, knowledge=None):
         seen.append(brand)
         v = {"headline": "프레시한 리빙", "body": "본문", "cta": "보기"}
         v["violations"] = copywriter.check(v, limits, brand)

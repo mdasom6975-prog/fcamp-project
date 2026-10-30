@@ -323,6 +323,7 @@ class KnowledgeDoc(Base):
     group_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     brand_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     source_id: Mapped[str] = mapped_column(String(100), index=True)   # sources.json 의 id. 같은 id 로 다시 올리면 이전 문서는 보관
+    industry: Mapped[str | None] = mapped_column(String(20), nullable=True)   # 규제 문서: 이 업종(legal.INDUSTRY_KEYWORDS 이름)이 감지되면 검색 없이 전부 넣는다
     title: Mapped[str] = mapped_column(String(200))
     source_url: Mapped[str] = mapped_column(String(500), default="", server_default="")
     fetched_at: Mapped[str] = mapped_column(String(10), default="", server_default="")

@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from . import calllog, copyfields, copywriter, icons, imagegen, llm, phrases, prompts, storage
+from . import calllog, copyfields, copywriter, icons, imagegen, knowledge, llm, phrases, prompts, storage
 from . import db as db_module
 from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
@@ -166,7 +166,20 @@ def _copy_prompt(db: Session, d: Design, bv: BrandVersion, brand: Brand) -> tupl
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
-    return copywriter._prompt(brand.name, phrases.rules(bv, d.brief), d.brief or {}, placement, merged)
+    # 지식(규제 원문·검색 결과)은 생성 때 남긴 조각 id 로 다시 붙인다(임베딩 호출 없음)
+    return copywriter._prompt(brand.name, phrases.rules(bv, d.brief), d.brief or {}, placement, merged,
+                              knowledge.from_refs(db, (d.brief or {}).get("knowledge")))
+
+
+def _knowledge_out(db: Session, brief: dict) -> dict | None:
+    """최근 카피 생성에 넣은 규제 원문·브랜드 지식(참고한 자료). 기록이 없으면 None."""
+    k = knowledge.from_refs(db, brief.get("knowledge"))
+    if k is None:
+        return None
+    pick = lambda r: {x: r[x] for x in ("chunk_id", "source_id", "doc_title", "layer", "section", "text", "score", "product_name", "functional")}
+    return {"industries": k["industries"], "law": [pick(r) for r in k["law"]], "guide": [pick(r) for r in k["guide"]],
+            "error": k["error"], "functional_mismatch": k["functional_mismatch"],
+            "functional": brief.get("functional"), "embed_model": (brief.get("knowledge") or {}).get("embed_model")}
 
 
 def _icon_names_prompt(d: Design, bv: BrandVersion, brand: Brand) -> tuple[str, str]:
@@ -396,6 +409,7 @@ def build(db: Session, d: Design) -> dict:
                     "copy": {"selected": {"variant_no": sel.variant_no, "headline": sel.headline, "body": sel.body, "cta": sel.cta} if sel else None,
                              "variants": variants, "text_assets": brief.get("text_assets") or {}}},
         "prompts": prompt_entries(db, d, bv, brand, rows, backgrounds, icon_set),
+        "knowledge": _knowledge_out(db, brief),
         "variables": _brief_vars(brand.name, bv, brief),
         "cost": {"summary": calllog.summary(design_id=d.id), "stages": stages, "stage_label": STAGE_LABEL, "rows": rows[::-1]},
         "judgments": judgments(d.id), "judge_items": list(JUDGE_ITEMS),

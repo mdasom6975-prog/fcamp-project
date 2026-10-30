@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import calllog, copyfields, copywriter, legal, phrases
+from . import calllog, copyfields, copywriter, knowledge, legal, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
 from .routers_assets import get_db, get_design
 from .routers_review import invalidate_reviews
@@ -44,6 +44,18 @@ def _group(design: Design, db: Session) -> list[dict]:
     return out
 
 
+def _knowledge(d: Design, db: Session) -> dict:
+    """카피 프롬프트에 붙일 규제 원문·브랜드 지식(knowledge.for_copy). 브랜드의 그룹으로 그룹 공통 자료를 찾는다."""
+    brand = db.get(Brand, d.brand_id)
+    return knowledge.for_copy(db, d.brand_id, brand.group_id if brand else None, d.brief or {})
+
+
+def _knowledge_summary(k: dict) -> dict:
+    """응답용 요약: 넣은 조각 수, 검색 실패, 기능성 불일치 안내."""
+    return {"law": len(k["law"]), "guide": len(k["guide"]), "industries": k["industries"], "error": k["error"],
+            "functional_mismatch": k["functional_mismatch"]}
+
+
 def _design(design_id: int, db: Session) -> Design:
     d = get_design(db, design_id)
     if d.kind != "광고 이미지":
@@ -75,21 +87,21 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
+    k = _knowledge(d, db)
     try:
-        variants, attempts, *rest = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged)
+        variants, attempts, *rest = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged, knowledge=k)
     except Exception as e:  # 키 값 등 민감 정보는 메시지에 포함하지 않는다
-        return {"groups": _group(d, db), "failures": [f"카피 생성: {type(e).__name__}"]}
+        return {"groups": _group(d, db), "failures": [f"카피 생성: {type(e).__name__}"], "knowledge": _knowledge_summary(k)}
     icon_candidates = rest[0] if rest else []
     text_assets = rest[1] if len(rest) > 1 else {}
-    extra = {}
+    extra = {"knowledge": knowledge.refs(k)}     # 이번 카피에 넣은 규제·지식 조각(분석 화면 '참고한 자료')
     if icon_candidates:
         # 같은 호출에서 받은 아이콘 기능명 후보를 브리프에 두면 아이콘 세트 생성이 기능명 제안 호출 없이 이것을 쓴다
         extra["icon_candidates"] = icon_candidates
     if spec:
         # 추가 문구 자산(필드 → 문구 목록)은 검수('문구 수량')와 내보내기(text_assets.txt)가 쓴다. 카피를 다시 만들면 교체된다
         extra["text_assets"] = text_assets
-    if extra:
-        d.brief = {**(d.brief or {}), **extra}
+    d.brief = {**(d.brief or {}), **extra}
     for pv, (_, limits) in zip(presets, per):
         last = db.scalar(select(func.max(CopyVariant.batch_no)).where(
             CopyVariant.design_id == d.id, CopyVariant.preset_version_id == pv.id)) or 0
@@ -103,7 +115,8 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"groups": _group(d, db), "failures": [], "merged_limits": {k: v for k, v in merged.items() if k != "assets"},
             "icon_candidates": len(icon_candidates),
-            "text_assets": {k: len(v) for k, v in (text_assets or {}).items()}}
+            "text_assets": {name: len(v) for name, v in (text_assets or {}).items()},
+            "knowledge": _knowledge_summary(k)}
 
 
 @router.post("/designs/{design_id}/copy/assets")
@@ -124,7 +137,7 @@ def create_text_assets(design_id: int, db: Session = Depends(get_db)):
     placement = {"platform": "추가 문구 자산", "name": ", ".join(dict.fromkeys(names))}
     got: dict = {}
     try:
-        copywriter.generate(brand_name, rules, d.brief, placement, merged, assets_out=got)
+        copywriter.generate(brand_name, rules, d.brief, placement, merged, assets_out=got, knowledge=_knowledge(d, db))
     except Exception as e:
         raise HTTPException(502, f"추가 문구 생성에 실패했습니다 ({type(e).__name__})")
     if not any(got.values()):

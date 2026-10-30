@@ -20,7 +20,7 @@ type PresetLite = {
 type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
 type Design = {
   id: number; kind: string; status: string
-  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; layout?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; icon?: { purpose: string; width: number | null; height: number | null } }
+  brief: { product_name: string; description: string; key_message: string; target: string; product_image_asset_id?: number | null; image_style?: string; product_scale?: string; layout?: string; image_model?: string | null; bg_mode?: string | null; text_assets?: Record<string, string[]>; required_phrases?: string[]; forbidden_phrases?: string[]; functional?: string[] | null; icon?: { purpose: string; width: number | null; height: number | null } }
   // 실제 적용되는 필수·금지 표현 (캠페인 입력 우선, 비면 브랜드 규칙)
   effective_phrases?: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } | null
   presets: { id: number; platform: string; name: string; width: number | null; height: number | null; status: string; in_image?: InImage }[]
@@ -274,7 +274,9 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
     try {
       const j = await post(`/api/designs/${designId}/copy`, {})
       setGroups(j.groups)
+      const note = knowledgeNote(j)
       if (j.failures?.length) setErr(`일부 지면의 생성에 실패했습니다: ${j.failures.join(', ')}`)
+      else if (note) setErr(note)
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -1203,18 +1205,26 @@ type Brief = {
   product_name: string; description: string; key_message: string; target: string; product_image_asset_id: number | null; image_style: string
   product_scale: string; layout: string
   required_phrases: string[]; forbidden_phrases: string[]
+  functional: string[] | null      // 화장품 기능성. null = 입력 안 함(검사 없음), [] = 기능성 아님
 }
+// 화장품 기능성 범위(화장품법 시행규칙 제2조, 서버 legal.FUNCTIONAL_CLAIMS 와 같은 이름)
+const FUNCTIONAL_KINDS = ['미백', '주름 개선', '자외선 차단', '태닝', '모발 색상 변화', '체모 제거', '탈모 증상 완화',
+  '여드름성 피부 완화', '피부장벽 기능 회복(가려움 개선)', '튼살 붉은 선 완화']
+const functionalText = (fn: string[] | null | undefined) => (fn == null ? '입력 안 함' : fn.length ? fn.join(', ') : '기능성 아님')
+// 카피 생성 응답의 지식(RAG) 안내: 기능성 입력과 제품 자료가 다르거나, 지식 검색이 실패해 지식 없이 만든 경우
+const knowledgeNote = (j: { knowledge?: { functional_mismatch?: string | null; error?: string | null } }) =>
+  j.knowledge?.functional_mismatch ?? (j.knowledge?.error ? `브랜드 지식 검색에 실패해 지식 없이 만들었습니다 (${j.knowledge.error})` : null)
 // 제품 크기(서버 compose.PRODUCT_SCALES): 투명 누끼를 붙이는 구역을 받침 기준으로 줄인다
 const PRODUCT_SCALES = [
   { v: '크게', label: '크게 — 제품이 주인공 (화면의 약 43%)' },
   { v: '보통', label: '보통 — 제품과 배경을 함께 (약 24%)' },
   { v: '작게', label: '작게 — 배경이 주인공, 제품은 포인트 (약 12%)' },
 ]
-const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', layout: '기본', required_phrases: [], forbidden_phrases: [] }
+const EMPTY_BRIEF: Brief = { product_name: '', description: '', key_message: '', target: '', product_image_asset_id: null, image_style: '자동', product_scale: '크게', layout: '기본', required_phrases: [], forbidden_phrases: [], functional: null }
 // 저장된 캠페인 입력을 폼 값으로 (캠페인 열기·수정 취소)
 const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, description: d.brief.description ?? '', key_message: d.brief.key_message ?? '', target: d.brief.target ?? '', product_image_asset_id: d.brief.product_image_asset_id ?? null, image_style: d.brief.image_style ?? '자동',
   product_scale: d.brief.product_scale ?? '크게', layout: d.brief.layout ?? '기본',
-  required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [] })
+  required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [], functional: d.brief.functional ?? null })
 
 type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
 
@@ -1427,7 +1437,9 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
       await loadDesigns()
       const j = await post(`/api/designs/${active.id}/copy`, {})
       setHasCopy(true); setEditing(false); setCopyKey((k) => k + 1); goView('copy')
+      const note = knowledgeNote(j)
       if (j.failures?.length) setMsg({ ok: false, text: `일부 지면의 생성에 실패했습니다: ${j.failures.join(', ')}` })
+      else if (note) setMsg({ ok: false, text: note })
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message })
     } finally {
@@ -1656,6 +1668,17 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                 onChange={(v) => setBrief({ ...brief, forbidden_phrases: v })} />
             </div>
           </div>
+          <div className="msg-field">기능성 (화장품) <span className="opt">(선택)</span>
+            <span className="muted">식약처 심사·보고를 받은 기능성만 카피에 쓰게 합니다. 고르면 생성 후 범위 밖 기능성 표현(미백·주름·SPF 등)을 '수정 필요'로 검사합니다.</span>
+            <div className="fn-kinds">
+              <label><input type="radio" checked={brief.functional === null} onChange={() => setBrief({ ...brief, functional: null })} /> 입력 안 함</label>
+              <label><input type="radio" checked={brief.functional !== null && brief.functional.length === 0} onChange={() => setBrief({ ...brief, functional: [] })} /> 기능성 아님</label>
+              {FUNCTIONAL_KINDS.map((k) => (
+                <label key={k}><input type="checkbox" checked={!!brief.functional?.includes(k)}
+                  onChange={(e) => setBrief({ ...brief, functional: e.target.checked ? [...(brief.functional ?? []), k] : (brief.functional ?? []).filter((x) => x !== k) })} /> {k}</label>
+              ))}
+            </div>
+          </div>
           <div className="msg-field">제품 이미지 <span className="opt">(선택)</span>
             <div className="product-img">
               <div className="product-box">
@@ -1820,6 +1843,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
                   : <span className="muted">없음</span>}</dd>
                 <dt>필수 표현</dt><dd>{eff ? (eff.required_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.required_source})</span> : null}</dd>
                 <dt>금지 표현</dt><dd>{eff ? (eff.forbidden_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.forbidden_source})</span> : null}</dd>
+                <dt>기능성</dt><dd>{functionalText(d.brief.functional)}</dd>
                 <dt>규격</dt><dd>{d.presets.map((p) => `${p.platform} · ${p.name}`).join(' / ') || '없음'}</dd>
               </dl>
               {!locked && <p className="muted">검수 완료 전까지는 입력을 수정할 수 있습니다. 저장하면 기존 검수 결과는 무효화되어 다시 검수해야 합니다{reviewed ? ' (현재 검수 결과 있음)' : ''}. 입력을 바꿔도 이미 만든 카피·이미지는 자동으로 바뀌지 않으니, 필요하면 다시 생성하세요.</p>}
