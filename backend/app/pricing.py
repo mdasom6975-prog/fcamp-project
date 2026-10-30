@@ -40,6 +40,8 @@ DEFAULT = {
              "claude-opus-5-5": {"in": 4.00, "out": 20.00}, "claude-sonnet-5-5": {"in": 2.00, "out": 10.00},
              "claude-haiku-5-5": {"in": 0.10, "out": 0.50}, "claude-opus-5": {"in": 5.00, "out": 25.00},
              "*": {"in": 0.40, "out": 1.60}},
+    # 임베딩(RAG 문서·질의): 모델 → 100만 토큰당 USD
+    "embeddings": {"text-embedding-3-small": 0.02, "text-embedding-3-large": 0.13, "*": 0.02},
     # 무료 구간을 쓰는 공급자(장당 0)
     "free_providers": ["cloudflare"],
 }
@@ -103,6 +105,11 @@ def cost_of(row: dict) -> tuple[float | None, bool]:
         if tin is None and tout is None:
             return None, True       # 토큰을 기록하지 않은 예전 호출
         return (float(tin or 0) * rates["in"] + float(tout or 0) * rates["out"]) / 1_000_000, est
+    if api == "embeddings":
+        rate, est = _lookup(t.get("embeddings") or {}, model)
+        if rate is None or row.get("tokens_in") is None:
+            return None, True
+        return float(row["tokens_in"]) * rate / 1_000_000, est
     return None, True
 
 

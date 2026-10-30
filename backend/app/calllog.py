@@ -24,7 +24,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from . import db, pricing
 from .models import ApiCall, PromptLog
 
-KINDS = ("background", "variant", "product", "icon", "copy", "copy_fit", "icon_names", "icon_redraw", "pin", "judge")
+KINDS = ("background", "variant", "product", "icon", "copy", "copy_fit", "icon_names", "icon_redraw", "pin", "judge",
+         "knowledge")
 _design: ContextVar[int | None] = ContextVar("calllog_design", default=None)
 
 
