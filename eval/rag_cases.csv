@@ -3,19 +3,19 @@ R01,sulwhasoo,자음생크림 리치,인삼 과학으로 탄력과 주름을 케
 R02,sulwhasoo,윤조에센스 6세대,세안 후 첫 단계에 바르는 윤기 에센스,어떤 시간에도 단단한 윤빛 피부,30~40대 스킨케어 첫 단계를 고민하는 고객,prod_sulwhasoo_yunjo6,
 R03,sulwhasoo,퍼펙팅 쿠션,SPF 50+ 쿠션으로 윤기와 톤을 한 번에,타고난 듯 고급스러운 피부,30~50대 베이스 메이크업 고객,prod_sulwhasoo_perfecting_cushion|law_cosmetics_rule_2,자외선 차단·미백 기능성 조문
 R04,sulwhasoo,,한국의 미학과 전통의 지혜로 완성하는 홀리스틱 뷰티 브랜드 캠페인,시간의 흐름에 지지 않는 아름다움,럭셔리 스킨케어 고객,brand_sulwhasoo,제품 없는 브랜드 캠페인
-R05,sulwhasoo,자음생크림 리치,48시간 만에 콜라겐을 회복시키는 크림,콜라겐 회복 효능을 강조,40~50대 여성,prod_sulwhasoo_jaumsaeng_rich|law_cosmetics_13,효능 단정 표현 → 부당 광고 조문
+R05,sulwhasoo,자음생크림 리치,48시간 만에 콜라겐을 회복시키는 크림,콜라겐 회복 효능을 강조,40~50대 여성,prod_sulwhasoo_jaumsaeng_rich|law_cosmetics_13/law_cosmetics_rule_annex5#아목,효능 단정 표현 → 부당 광고 조문
 R06,laneige,워터 슬리핑 마스크,밤사이 수분을 채워 주는 슬리핑 마스크,자고 일어나면 촉촉한 피부,20~30대 건조 피부,prod_laneige_water_sleeping_mask,
-R07,laneige,래디언-C 크림,비타민 C 유도체로 칙칙한 피부 톤을 맑게,빛톤 피부,20~30대 톤 고민 고객,prod_laneige_radian_c_cream|law_cosmetics_13,기능성 아닌 제품을 미백 기능성처럼 보이게 하면 안 된다
+R07,laneige,래디언-C 크림,비타민 C 유도체로 칙칙한 피부 톤을 맑게,빛톤 피부,20~30대 톤 고민 고객,prod_laneige_radian_c_cream|law_cosmetics_13/law_cosmetics_rule_annex5#나목,기능성 아닌 제품을 미백 기능성처럼 보이게 하면 안 된다
 R08,laneige,크림 스킨 세라펩타이드 리파이너,크림을 녹인 고보습 토너,첫 단계부터 깊은 보습,20~30대,prod_laneige_cream_skin_refiner,
 R09,laneige,,호기심으로 이전에 없던 스킨케어를 만드는 브랜드 캠페인,OPEN TO WONDER,20대 새로운 제품을 좋아하는 고객,brand_laneige,제품 없는 브랜드 캠페인
-R10,laneige,래디언-C 크림,잡티를 지우는 미백 크림,2주 만에 미백 효과,20~30대 여성,law_cosmetics_rule_2|law_cosmetics_13,기능성 표시 없는 제품의 미백 주장
+R10,laneige,래디언-C 크림,잡티를 지우는 미백 크림,2주 만에 미백 효과,20~30대 여성,law_cosmetics_rule_2|law_cosmetics_13/law_cosmetics_rule_annex5#나목,기능성 표시 없는 제품의 미백 주장
 R11,innisfree,데일리 유브이 수분장벽 선세럼,매일 바르는 세럼 제형 자외선 차단제,가볍게 매일 지키는 피부,20~30대 데일리 선케어,prod_innisfree_uv_sun_serum|law_cosmetics_rule_2,
 R12,innisfree,그린티 히알루론산 크림,제주 녹차와 히알루론산으로 보습하는 크림,제주 녹차의 촉촉함,20대 수분 부족 피부,prod_innisfree_greentea_ha_cream|ap_rni_green_tea,그룹 공통에서 녹차 연구가 나와야 한다
 R13,innisfree,,제주 자연 원료로 만드는 자연주의 브랜드 캠페인,제주의 자연을 담다,자연주의 뷰티를 좋아하는 고객,brand_innisfree,제품 없는 브랜드 캠페인
-R14,innisfree,그린티 히알루론산 크림,100% 천연 성분으로 자극이 전혀 없는 크림,부작용 없는 순한 보습,민감 피부 20대,prod_innisfree_greentea_ha_cream|law_cosmetics_13,근거 없는 안전 주장
+R14,innisfree,그린티 히알루론산 크림,100% 천연 성분으로 자극이 전혀 없는 크림,부작용 없는 순한 보습,민감 피부 20대,prod_innisfree_greentea_ha_cream|law_cosmetics_13/law_cosmetics_rule_annex5#사목/law_cosmetics_rule_annex5#아목,근거 없는 안전 주장
 R15,innisfree,데일리 유브이 수분장벽 선세럼,피부 노화를 막아 주는 선세럼,자외선으로부터 젊은 피부,30대,prod_innisfree_uv_sun_serum|law_cosmetics_rule_2,
-R16,aestura,아토베리어365 크림,민감 피부를 위한 세라마이드 보습 크림,민감 피부 장벽 보습,건조하고 민감한 피부의 20~40대,prod_aestura_atobarrier365_cream|law_cosmetics_13,
-R17,aestura,아토베리어365 크림,아토피 피부를 개선하는 크림,아토피 걱정 없는 피부,아토피로 고민하는 고객,law_cosmetics_13|law_cosmetics_2,의약품 오인 — 화장품 정의(의약품 제외)와 부당 광고 조문
+R16,aestura,아토베리어365 크림,민감 피부를 위한 세라마이드 보습 크림,민감 피부 장벽 보습,건조하고 민감한 피부의 20~40대,prod_aestura_atobarrier365_cream|law_cosmetics_13/law_cosmetics_rule_annex5#가목,
+R17,aestura,아토베리어365 크림,아토피 피부를 개선하는 크림,아토피 걱정 없는 피부,아토피로 고민하는 고객,law_cosmetics_13/law_cosmetics_rule_annex5#가목|law_cosmetics_2,의약품 오인 — 화장품 정의(의약품 제외)와 부당 광고 조문
 R18,aestura,에이시카365,붉은기를 진정시키는 약산성 크림,민감 붉은기 진정,붉은기가 고민인 민감 피부,prod_aestura_acica365,
 R19,aestura,더마UV365,민감 피부를 위한 자외선 케어,민감 피부 데일리 선케어,민감 피부 30대,prod_aestura_dermauv365|law_cosmetics_rule_2,
 R20,aestura,,태평양제약 헤리티지와 피부과 전문의 협업 브랜드 캠페인,오래도록 건강한 아름다움,민감 피부 고객,brand_aestura,제품 없는 브랜드 캠페인

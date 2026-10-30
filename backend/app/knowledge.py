@@ -103,6 +103,24 @@ def chunk_paragraphs(text: str, title: str) -> list[tuple[str, str]]:
     return out
 
 
+_ANNEX_ITEM = re.compile(r"^(\d+)\.\s.*?\s([가-하])\.\s")
+
+
+def chunk_annex(text: str, name: str) -> list[tuple[str, str]]:
+    """법령 별표(목록형 규정) → [(절 이름, 조각)]. 빈 줄로 나눈 문단 하나가 한 목이고, 문단이 '2. 머리말 가. …' 이면
+    절 이름을 '별표 5 제2호 가목' 처럼 붙인다(번호만으로는 어느 규정인지 알 수 없다). 그 밖의 문단은 '별표 5 제N호'."""
+    out = []
+    for p in re.split(r"\n\s*\n", text):
+        p = re.sub(r"\s+", " ", p).strip()
+        if not p:
+            continue
+        m = _ANNEX_ITEM.match(p)
+        lead = re.match(r"^(\d+)\.\s", p)
+        sec = f"{name} 제{m.group(1)}호 {m.group(2)}목" if m else (f"{name} 제{lead.group(1)}호" if lead else name)
+        out.append((sec, f"[{name}] {p}"))
+    return out
+
+
 # ── 임베딩 ────────────────────────────────────────────────────────────────
 
 def embed(texts: list[str]) -> list[list[float]]:
