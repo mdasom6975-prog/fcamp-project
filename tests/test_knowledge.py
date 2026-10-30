@@ -54,6 +54,23 @@ def test_chunk_law_splits_long_article_by_items_keeping_lead():
     assert chunks[0][0] == "화장품법 제2조 (1)"
 
 
+def test_chunk_annex_names_items():
+    from app.knowledge import chunk_annex
+    text = ("별표 5 제목\n1. 광고 매체: 가. 신문 나. 방송\n\n2. 준수사항 가. 의약품으로 잘못 인식할 우려가 있는 광고를 하지 말 것\n\n"
+            "2. 준수사항 나. 기능성화장품으로 잘못 인식할 우려가 있는 광고를 하지 말 것")
+    secs = [sec for sec, _ in chunk_annex(text, "별표 5")]
+    assert secs == ["별표 5", "별표 5 제2호 가목", "별표 5 제2호 나목"]
+
+
+def test_grade_accepts_alternatives_and_sections():
+    spec = importlib.util.spec_from_file_location("rag_search", ROOT / "eval" / "rag_search.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    res = {"규제": [{"source_id": "annex5", "section": "별표 5 제2호 가목"}], "제품": [{"source_id": "p1", "section": "p1"}]}
+    assert m.grade("p1|law13/annex5#가목", res) == (2, 2, [])
+    assert m.grade("annex5#나목", res) == (0, 1, ["annex5#나목"])
+
+
 def test_chunk_paragraphs_merges_short_lines_and_drops_tail():
     from app.knowledge import chunk_paragraphs
     text = "진세노믹스\n\n인삼 사포닌을 연구해 온 과정을 설명하는 충분히 긴 문단입니다. 피부 연구의 역사를 담고 있습니다.\n\nX"
@@ -154,4 +171,4 @@ def test_rag_cases_reference_known_sources():
     assert len(cases) == 20
     for c in cases:
         for want in c["expect"].split("|"):
-            assert set(want.split("/")) <= ids, f"{c['id']}: 모르는 출처 {want}"
+            assert {a.partition("#")[0] for a in want.split("/")} <= ids, f"{c['id']}: 모르는 출처 {want}"

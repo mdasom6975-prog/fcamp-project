@@ -40,7 +40,8 @@
       "title": "화장품법 시행규칙 [별표 5] 화장품 표시·광고의 범위 및 준수사항",
       "kind": "manual",
       "url": "https://www.law.go.kr/법령별표서식/(화장품법시행규칙,5)",
-      "how": "별표 본문이 이미지 뷰어라 자동 추출 불가. 국가법령정보센터에서 PDF/HWP 를 받아 본문 텍스트를 raw/law_cosmetics_rule_annex5.txt 로 저장"
+      "how": "별표 본문이 이미지 뷰어라 자동 추출 불가. 국가법령정보센터에서 PDF 를 받아 텍스트를 뽑고(pypdf), 빠진 띄어쓰기만 바로잡아 목(가.·나.…)마다 한 문단으로 raw/law_cosmetics_rule_annex5.txt 에 저장",
+      "annex": "화장품법 시행규칙 별표 5"
     },
     {
       "id": "ap_ingredients",

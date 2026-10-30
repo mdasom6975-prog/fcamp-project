@@ -3,7 +3,7 @@
 실행: backend/.venv/bin/python eval/rag_search.py [--cases eval/rag_cases.csv] [--show R07]
 - 먼저 tools/register_knowledge.py 로 지식을 등록해 둔다(같은 DB: DATABASE_URL, 없으면 backend/data/app.db)
 - 각 건의 브리프로 층별 검색(knowledge.LAYER_K)을 하고, expect 의 출처 id 가 결과에 있는지 본다
-  · expect 는 '|' 로 나열, 'a/b' 는 둘 중 하나면 정답
+  · expect 는 '|' 로 나열, 'a/b' 는 둘 중 하나면 정답, '출처#글자' 는 절 이름까지 맞아야 정답(예: 별표의 특정 목)
 - 지표: 정답 포함률(Recall) — 기대한 출처 중 나온 비율, 다른 브랜드 섞임 — 브랜드·제품 조각이 다른 브랜드 것이면 1건
 - 결과: 화면 표 + eval/reports/rag_<날짜_시각>.json (질의마다 나온 조각과 점수)
 - 과금: 질의 임베딩 건수만큼(20건이면 수백 토큰)
@@ -22,11 +22,17 @@ def brand_name(slug: str) -> str:
     return json.loads((ROOT / "brands" / slug / "brand.json").read_text(encoding="utf-8"))["brand"]["name"]
 
 
+def _found(alt: str, rows: list[dict]) -> bool:
+    """'출처' 는 그 출처의 아무 조각, '출처#글자' 는 절 이름에 그 글자가 든 조각(예: annex5#가목)."""
+    src, _, sec = alt.partition("#")
+    return any(r["source_id"] == src and sec in r["section"] for r in rows)
+
+
 def grade(expect: str, results: dict[str, list[dict]]) -> tuple[int, int, list[str]]:
     """(맞힌 수, 기대 수, 놓친 것). 'a/b' 는 둘 중 하나가 나오면 맞힘."""
-    got = {r["source_id"] for rows in results.values() for r in rows}
+    rows = [r for rs in results.values() for r in rs]
     want = [w for w in expect.split("|") if w]
-    missed = [w for w in want if not set(w.split("/")) & got]
+    missed = [w for w in want if not any(_found(a, rows) for a in w.split("/"))]
     return len(want) - len(missed), len(want), missed
 
 
