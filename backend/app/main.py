@@ -55,6 +55,14 @@ def _legacy_sqlite_columns() -> None:
                 conn.execute(text(f"ALTER TABLE icon_assets ADD COLUMN {col} {ddl}"))
 
 
+def _added_columns() -> None:
+    """배포된 Postgres 에도 이미 있는 테이블에 새로 생긴 컬럼. SQLite·Postgres 모두 없을 때만 추가한다.
+    외래키 제약은 새로 만든 DB 에만 생기고(create_all), 여기서 추가한 컬럼은 정수 컬럼이다."""
+    if "group_id" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
+        with engine.begin() as conn:      # 브랜드 그룹(아모레퍼시픽 → 설화수 등)
+            conn.execute(text("ALTER TABLE brands ADD COLUMN group_id INTEGER"))
+
+
 INIT_KEY = "schema_init"      # KV 키: 초기화를 마친 배포(VERCEL_GIT_COMMIT_SHA)를 적어 둔다
 LOCK_ID = 7351001
 LOCK_WAIT_SEC = 90
@@ -110,6 +118,7 @@ def init_app() -> None:
                         Base.metadata.create_all(engine)
                         if engine.dialect.name == "sqlite":
                             _legacy_sqlite_columns()
+                        _added_columns()
                         with SessionLocal() as db:
                             seed(db)
                             sync_conditions(db)      # 시드의 조건·상태가 바뀌면 기존 지면에도 반영

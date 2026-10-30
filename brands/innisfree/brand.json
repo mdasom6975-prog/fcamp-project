@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "innisfree",
+  "group": {
+    "name": "아모레퍼시픽",
+    "description": "설화수·라네즈·이니스프리·에스트라 등 여러 뷰티 브랜드를 가진 화장품 그룹"
+  },
+  "brand": {
+    "name": "이니스프리",
+    "description": "제주의 자연 원료와 친환경 가치를 담은 아모레퍼시픽의 자연주의 뷰티 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 16,
+    "logo_position": "자동",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#3C9A4B"
+      },
+      {
+        "role": "보조색",
+        "hex": "#EEF6EA"
+      },
+      {
+        "role": "강조색",
+        "hex": "#F2A541"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#26332A"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FAFCF7"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "클레이"
+    },
+    "image_tone": {
+      "description": "제주의 초록 자연, 녹차밭·화산석·햇살. 자연광과 담백한 구도, 친근하고 건강한 분위기. 이미지 안의 글자·실제 제품 패키지 문구·타사 로고 금지. 비포/애프터 연출 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "친근함 · 담백함 · 자연스러운 존댓말. 친환경·자연 원료 이야기는 사실로 확인된 범위에서만.",
+      "headline_max_chars": 18,
+      "polite": true
+    },
+    "required_phrases": [
+      "이니스프리"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "의약품",
+      "피부 재생",
+      "부작용 없음",
+      "100% 효과",
+      "최고",
+      "1위",
+      "100% 천연",
+      "무자극",
+      "화학성분 제로"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "뷰티·화장품",
+    "source": "학습용 비공식 브랜드 데이터 (apgroup.com 공개 브랜드 소개를 바탕으로 추정)",
+    "checked_at": "2026-10-30",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공식 사이트·제품 이미지를 보고 추정한 근사값. 공식 브랜드 가이드가 아님",
+      "금지·필수 표현과 어조는 학습용으로 구성한 값이며 아모레퍼시픽의 공식 가이드가 아님",
+      "만든 시안은 실제 광고처럼 공개하지 않는다 (학습용 비공식 시안)",
+      "근거 없는 친환경·천연 주장이 걸리는 시연"
+    ]
+  }
+}

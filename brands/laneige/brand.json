@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "laneige",
+  "group": {
+    "name": "아모레퍼시픽",
+    "description": "설화수·라네즈·이니스프리·에스트라 등 여러 뷰티 브랜드를 가진 화장품 그룹"
+  },
+  "brand": {
+    "name": "라네즈",
+    "description": "물과 수분 과학을 바탕으로 맑고 촉촉한 피부를 제안하는 아모레퍼시픽의 스킨케어·메이크업 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 16,
+    "logo_position": "자동",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#4A7BD0"
+      },
+      {
+        "role": "보조색",
+        "hex": "#E8F1FB"
+      },
+      {
+        "role": "강조색",
+        "hex": "#7FC8F8"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1E2A3A"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F7FAFE"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 2,
+      "corner": "둥근",
+      "fill": "채움",
+      "material": "유리·반투명"
+    },
+    "image_tone": {
+      "description": "맑은 물방울과 투명한 푸른빛, 밝고 시원한 확산광. 촉촉하고 생기 있는 피부결, 깨끗한 배경. 이미지 안의 글자·실제 제품 패키지 문구·타사 로고 금지. 비포/애프터 연출 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "밝음 · 경쾌함 · 산뜻한 존댓말. 수분감을 감각적으로 표현하되 지속 시간·수치는 근거 없이 쓰지 않는다.",
+      "headline_max_chars": 18,
+      "polite": true
+    },
+    "required_phrases": [
+      "라네즈"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "의약품",
+      "피부 재생",
+      "부작용 없음",
+      "100% 효과",
+      "최고",
+      "1위",
+      "24시간 완벽",
+      "영원한"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "뷰티·화장품",
+    "source": "학습용 비공식 브랜드 데이터 (apgroup.com 공개 브랜드 소개를 바탕으로 추정)",
+    "checked_at": "2026-10-30",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공식 사이트·제품 이미지를 보고 추정한 근사값. 공식 브랜드 가이드가 아님",
+      "금지·필수 표현과 어조는 학습용으로 구성한 값이며 아모레퍼시픽의 공식 가이드가 아님",
+      "만든 시안은 실제 광고처럼 공개하지 않는다 (학습용 비공식 시안)"
+    ]
+  }
+}

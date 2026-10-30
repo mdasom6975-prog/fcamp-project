@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "aestura",
+  "group": {
+    "name": "아모레퍼시픽",
+    "description": "설화수·라네즈·이니스프리·에스트라 등 여러 뷰티 브랜드를 가진 화장품 그룹"
+  },
+  "brand": {
+    "name": "에스트라",
+    "description": "피부 과학을 바탕으로 민감하고 건조한 피부를 위한 제품을 만드는 아모레퍼시픽의 더마 코스메틱 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 16,
+    "logo_position": "좌상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#0B6E8C"
+      },
+      {
+        "role": "보조색",
+        "hex": "#E6F2F5"
+      },
+      {
+        "role": "강조색",
+        "hex": "#5BB8C9"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#1B2B33"
+      },
+      {
+        "role": "배경색",
+        "hex": "#F8FBFC"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 1.5,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "무광 플라스틱"
+    },
+    "image_tone": {
+      "description": "깨끗한 흰색과 차분한 청록, 연구실처럼 정돈된 미니멀 구도. 부드러운 확산광, 편안한 피부 표현. 병원·의료 장비·주사기 연출 금지. 이미지 안의 글자·실제 제품 패키지 문구·타사 로고 금지. 비포/애프터 연출 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "신뢰 · 차분함 · 전문적이되 쉬운 존댓말. 질환 이름이나 치료·개선을 암시하지 않는다.",
+      "headline_max_chars": 18,
+      "polite": true
+    },
+    "required_phrases": [
+      "에스트라"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "의약품",
+      "피부 재생",
+      "부작용 없음",
+      "100% 효과",
+      "최고",
+      "1위",
+      "아토피 개선",
+      "피부염",
+      "진료"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "뷰티·화장품",
+    "source": "학습용 비공식 브랜드 데이터 (apgroup.com 공개 브랜드 소개를 바탕으로 추정)",
+    "checked_at": "2026-10-30",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공식 사이트·제품 이미지를 보고 추정한 근사값. 공식 브랜드 가이드가 아님",
+      "금지·필수 표현과 어조는 학습용으로 구성한 값이며 아모레퍼시픽의 공식 가이드가 아님",
+      "만든 시안은 실제 광고처럼 공개하지 않는다 (학습용 비공식 시안)",
+      "의약품 오인 표현(아토피·치료) 위험이 가장 큰 브랜드 — 규제 RAG 효과 확인용"
+    ]
+  }
+}

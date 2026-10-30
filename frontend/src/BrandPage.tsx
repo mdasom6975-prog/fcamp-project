@@ -10,6 +10,7 @@ const DEFAULT_COLORS: Record<string, string> = { 보조색: '#828C94', 배경색
 const emptyForm = (roles: string[], levels: Record<string, Level>): BrandForm => ({
   name: '',
   description: '',
+  group_id: null,
   logo_asset_id: null,
   logo_square_asset_id: null,
   logo_margin_percent: null,
@@ -90,7 +91,8 @@ export function PhraseBox({ label, hint, tone, items, onChange }:
 export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: number) => void }) {
   const [defaults, setDefaults] = useState<{ levels: Record<string, Level>; color_roles: string[] } | null>(null)
   const [provided, setProvided] = useState<{ name: string; label: string }[]>([])
-  const [brands, setBrands] = useState<{ id: number; name: string }[]>([])
+  const [brands, setBrands] = useState<{ id: number; name: string; group_id: number | null; group_name: string | null }[]>([])
+  const [brandGroups, setBrandGroups] = useState<{ id: number; name: string }[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [versions, setVersions] = useState<{ id: number; version_no: number }[]>([])
   const [viewVersion, setViewVersion] = useState<number | null>(null)
@@ -110,7 +112,8 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const logoInput = useRef<HTMLInputElement>(null)
   const logoSqInput = useRef<HTMLInputElement>(null)
 
-  const loadBrands = useCallback(() => api.brands().then(setBrands), [])
+  const loadBrands = useCallback(() => Promise.all([api.brands(), api.brandGroups()])
+    .then(([b, g]) => { setBrands(b); setBrandGroups(g) }), [])
 
   useEffect(() => {
     Promise.all([api.defaults(), api.providedFonts()]).then(([d, f]) => {
@@ -140,6 +143,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     const loaded: BrandForm = {
       name: b.name,
       description: b.description ?? '',
+      group_id: b.group_id ?? null,
       logo_asset_id: v.logo_asset_id,
       logo_square_asset_id: v.logo_square_asset_id ?? null,
       logo_margin_percent: v.logo_margin?.percent ?? null,
@@ -258,12 +262,20 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
     <main className="bp">
       <div className="bp-brands">
         <span className="bp-brands-label">브랜드</span>
-        {brands.map((b) => (
+        {brands.filter((b) => b.group_id === null).map((b) => (
           <button key={b.id} className={`chip ${b.id === selected ? 'on' : ''}`} onClick={() => openBrand(b.id)}>{b.name}</button>
         ))}
         {brands.length === 0 && <span className="muted">등록된 브랜드가 없습니다</span>}
         <button className="primary bp-new" onClick={newBrand}>+ 새 브랜드</button>
       </div>
+      {brandGroups.filter((g) => brands.some((b) => b.group_id === g.id)).map((g) => (
+        <div key={g.id} className="bp-brands bp-group">
+          <span className="bp-brands-label">{g.name}</span>
+          {brands.filter((b) => b.group_id === g.id).map((b) => (
+            <button key={b.id} className={`chip ${b.id === selected ? 'on' : ''}`} onClick={() => openBrand(b.id)}>{b.name}</button>
+          ))}
+        </div>
+      ))}
 
       <div className="bp-tabs">
         <h1>{selected ? '브랜드 수정' : '브랜드 등록'}</h1>
@@ -289,6 +301,14 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
               <input value={form.description} maxLength={300} placeholder="예: 신선한 식재료를 새벽에 배송해 드리는 온라인 장보기 서비스"
                 onChange={(e) => set({ ...form, description: e.target.value })} />
             </label>
+            {brandGroups.length > 0 && (
+              <label>소속 그룹 <span className="opt">(선택)</span>
+                <select value={form.group_id ?? ''} onChange={(e) => set({ ...form, group_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">없음 (단독 브랜드)</option>
+                  {brandGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </label>
+            )}
           </div>
         </section>
 

@@ -3,10 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import smallbiz, storage
-from .models import (ApiCall, ArchivedImage, Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element, Export,
-                     GeneratedImage, IconAsset, Judgment, PinSheet, ReviewResult)
+from .models import (ApiCall, ArchivedImage, Asset, Brand, BrandGroup, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
+                     Export, GeneratedImage, IconAsset, Judgment, PinSheet, ReviewResult)
 from .routers_assets import PROVIDED_FONTS, get_db
-from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandIn
+from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandGroupIn, BrandIn
 
 router = APIRouter(prefix="/api")
 
@@ -44,6 +44,8 @@ def _check_refs(b: BrandIn, db: Session) -> None:
         a = db.get(Asset, rid)
         if not a or a.kind != "reference":
             raise HTTPException(400, f"기준 이미지가 아닙니다: {rid}")
+    if b.group_id is not None and not db.get(BrandGroup, b.group_id):
+        raise HTTPException(400, f"없는 그룹입니다: {b.group_id}")
 
 
 def _version_from(b: BrandIn, brand_id: int, version_no: int) -> BrandVersion:
@@ -93,14 +95,39 @@ def brand_defaults():
     return {"levels": DEFAULT_LEVELS, "color_roles": DEFAULT_COLOR_ROLES}
 
 
+@router.get("/brand-groups")
+def list_brand_groups(db: Session = Depends(get_db)):
+    return [{"id": g.id, "name": g.name, "description": g.description, "created_at": g.created_at.isoformat()}
+            for g in db.scalars(select(BrandGroup).order_by(BrandGroup.id)).all()]
+
+
+@router.post("/brand-groups")
+def create_brand_group(body: BrandGroupIn, db: Session = Depends(get_db)):
+    """같은 이름의 그룹이 있으면 새로 만들지 않고 그 그룹을 돌려준다(등록 도구를 여러 번 실행해도 안전)."""
+    name = body.name.strip()
+    g = db.scalar(select(BrandGroup).where(BrandGroup.name == name))
+    if not g:
+        g = BrandGroup(name=name, description=body.description.strip())
+        db.add(g)
+        db.commit()
+    return {"id": g.id, "name": g.name, "description": g.description, "created_at": g.created_at.isoformat()}
+
+
+def _group_name(db: Session, group_id: int | None) -> str | None:
+    g = db.get(BrandGroup, group_id) if group_id else None
+    return g.name if g else None
+
+
 @router.get("/brands")
 def list_brands(db: Session = Depends(get_db)):
     brands = [b for b in db.scalars(select(Brand).order_by(Brand.id)).all()
               if not b.name.startswith(smallbiz.BRAND_PREFIX)]     # 소상공인 스타일 프리셋의 숨은 브랜드는 목록에서 뺀다
+    groups = {g.id: g.name for g in db.scalars(select(BrandGroup)).all()}
     out = []
     for b in brands:
         v = db.get(BrandVersion, b.current_version_id) if b.current_version_id else None
         out.append({"id": b.id, "name": b.name, "description": b.description,
+                    "group_id": b.group_id, "group_name": groups.get(b.group_id),
                     "current_version_id": b.current_version_id,
                     "current_version_no": v.version_no if v else None,
                     "created_at": b.created_at.isoformat()})
@@ -110,7 +137,7 @@ def list_brands(db: Session = Depends(get_db)):
 @router.post("/brands")
 def create_brand(body: BrandIn, db: Session = Depends(get_db)):
     _check_refs(body, db)
-    brand = Brand(name=body.name.strip(), description=body.description.strip())
+    brand = Brand(name=body.name.strip(), description=body.description.strip(), group_id=body.group_id)
     db.add(brand)
     db.flush()
     v = _version_from(body, brand.id, 1)
@@ -118,7 +145,9 @@ def create_brand(body: BrandIn, db: Session = Depends(get_db)):
     db.flush()
     brand.current_version_id = v.id
     db.commit()
-    return {"id": brand.id, "name": brand.name, "description": brand.description, "version": _version_out(v), "warnings": _warnings(body)}
+    return {"id": brand.id, "name": brand.name, "description": brand.description,
+            "group_id": brand.group_id, "group_name": _group_name(db, brand.group_id),
+            "version": _version_out(v), "warnings": _warnings(body)}
 
 
 @router.get("/brands/{brand_id}")
@@ -132,6 +161,7 @@ def get_brand(brand_id: int, version_id: int | None = None, db: Session = Depend
     if not cur:
         raise HTTPException(404, "버전을 찾을 수 없습니다")
     return {"id": brand.id, "name": brand.name, "description": brand.description,
+            "group_id": brand.group_id, "group_name": _group_name(db, brand.group_id),
             "current_version_id": brand.current_version_id,
             "version": _version_out(cur),
             "versions": [{"id": v.id, "version_no": v.version_no,
@@ -149,12 +179,16 @@ def update_brand(brand_id: int, body: BrandIn, db: Session = Depends(get_db)):
                      .order_by(BrandVersion.version_no.desc()).limit(1)) or 0
     brand.name = body.name.strip()
     brand.description = body.description.strip()
+    if "group_id" in body.model_fields_set:     # 보내지 않은 호출(예전 화면·도구)은 소속을 바꾸지 않는다
+        brand.group_id = body.group_id
     v = _version_from(body, brand_id, last + 1)
     db.add(v)
     db.flush()
     brand.current_version_id = v.id
     db.commit()
-    return {"id": brand.id, "name": brand.name, "description": brand.description, "version": _version_out(v), "warnings": _warnings(body)}
+    return {"id": brand.id, "name": brand.name, "description": brand.description,
+            "group_id": brand.group_id, "group_name": _group_name(db, brand.group_id),
+            "version": _version_out(v), "warnings": _warnings(body)}
 
 
 def _asset_ids_of(v: BrandVersion) -> set[int]:

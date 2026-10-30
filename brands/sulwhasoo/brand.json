@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.0",
+  "brand_id": "sulwhasoo",
+  "group": {
+    "name": "아모레퍼시픽",
+    "description": "설화수·라네즈·이니스프리·에스트라 등 여러 뷰티 브랜드를 가진 화장품 그룹"
+  },
+  "brand": {
+    "name": "설화수",
+    "description": "전통의 지혜와 현대 기술로 한국의 미학을 풀어내는 아모레퍼시픽의 럭셔리 한방 스킨케어 브랜드",
+    "logo_asset_id": null,
+    "logo_margin_percent": 18,
+    "logo_position": "좌상단",
+    "colors": [
+      {
+        "role": "주조색",
+        "hex": "#8B6A3E"
+      },
+      {
+        "role": "보조색",
+        "hex": "#F3EDE4"
+      },
+      {
+        "role": "강조색",
+        "hex": "#B08D57"
+      },
+      {
+        "role": "텍스트색",
+        "hex": "#2B2420"
+      },
+      {
+        "role": "배경색",
+        "hex": "#FAF7F2"
+      }
+    ],
+    "fonts": [
+      {
+        "role": "제목",
+        "source": "provided",
+        "name": "Pretendard-Bold"
+      },
+      {
+        "role": "본문",
+        "source": "provided",
+        "name": "Pretendard-Regular"
+      }
+    ],
+    "icon_style": {
+      "stroke_width": 1.5,
+      "corner": "둥근",
+      "fill": "윤곽",
+      "material": "금속"
+    },
+    "image_tone": {
+      "description": "따뜻한 금색과 상아색, 한지·도자기·나무 같은 전통 재질과 정제된 여백. 부드러운 측광과 고요한 분위기. 인삼 등 원료는 절제된 정물로. 이미지 안의 글자·실제 제품 패키지 문구·타사 로고 금지. 비포/애프터 연출 금지.",
+      "reference_asset_ids": []
+    },
+    "voice": {
+      "description": "우아함 · 철학적 · 여운을 남기는 정중한 존댓말. 과장 없이 시간과 정성을 이야기한다.",
+      "headline_max_chars": 16,
+      "polite": true
+    },
+    "required_phrases": [
+      "설화수"
+    ],
+    "forbidden_phrases": [
+      "치료",
+      "완치",
+      "의약품",
+      "피부 재생",
+      "부작용 없음",
+      "100% 효과",
+      "최고",
+      "1위",
+      "즉각 효과",
+      "기적"
+    ],
+    "levels": {
+      "logo": "필수",
+      "colors": "필수",
+      "fonts": "권장",
+      "icon_style": "권장",
+      "image_tone": "필수",
+      "voice": "필수",
+      "required_phrases": "필수",
+      "forbidden_phrases": "필수"
+    }
+  },
+  "meta": {
+    "category": "뷰티·화장품",
+    "source": "학습용 비공식 브랜드 데이터 (apgroup.com 공개 브랜드 소개를 바탕으로 추정)",
+    "checked_at": "2026-10-30",
+    "logo": {
+      "file": "logo.png",
+      "square_file": "logo_square.png",
+      "note": "시연용 대체 워드마크(tools/make_logos.py). 공식 로고 아님"
+    },
+    "notes": [
+      "색상은 공식 사이트·제품 이미지를 보고 추정한 근사값. 공식 브랜드 가이드가 아님",
+      "금지·필수 표현과 어조는 학습용으로 구성한 값이며 아모레퍼시픽의 공식 가이드가 아님",
+      "만든 시안은 실제 광고처럼 공개하지 않는다 (학습용 비공식 시안)",
+      "주름 개선은 기능성 심사 제품에만 쓸 수 있어 금지어로 두지 않음 — 이후 브리프 '기능성' 필드로 검사(RAG 설계 3.3절)"
+    ]
+  }
+}

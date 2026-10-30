@@ -307,6 +307,7 @@ button.link:hover:not(:disabled) { background: none; text-decoration: underline;
 .bp { max-width: 1152px; margin: 0 auto; padding: 20px 16px 72px; }
 .bp-brands { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
 .bp-brands-label { font-size: 13px; font-weight: 600; color: var(--text-2); margin-right: 4px; }
+.bp-group { margin-top: -8px; }      /* 그룹 줄은 위 브랜드 줄에 붙여 한 묶음으로 보이게 */
 .chip { padding: 5px 14px; border-radius: 999px; font-size: 13px; background: var(--surface-2); border-color: transparent; }
 .chip.on { background: var(--text); border-color: var(--text); color: #fff; font-weight: 600; }
 .chip.on:hover:not(:disabled) { background: var(--text); border-color: var(--text); }

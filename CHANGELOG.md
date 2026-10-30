@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### 브랜드 그룹 (RAG 0단계)
+- 브랜드를 그룹 아래에 묶는다(`brand_groups`, `brands.group_id`). `GET/POST /api/brand-groups`(같은 이름이면 기존 그룹), 브랜드 목록·상세에 `group_id`·`group_name`. 수정(PUT)에서 `group_id` 를 보내지 않으면 기존 소속 유지. 기존 DB 는 기동 시 컬럼을 추가한다(SQLite·Postgres 모두, `main._added_columns`)
+- 브랜드 화면: 기본 정보에 '소속 그룹' 선택(그룹이 있을 때만), 브랜드 목록을 그룹별 줄로 묶어 표시
+- `brand.json` 의 `"group"` 으로 그룹 소속 등록(`tools/register_brand.py`·`tools/seed_demo.py`). 아모레퍼시픽 그룹 브랜드 4개(설화수·라네즈·이니스프리·에스트라) 추가 — 색·어조는 공개 자료를 보고 추정한 학습용 비공식 값, 로고는 대체 워드마크
+
 ### 서버리스 응답 속도: 썸네일 미리 생성·동시 요청 정리
 - 합성본(지면 합성·분리 자산·편집 저장)을 저장할 때 썸네일 360·720·1080 단계를 같이 만들어 올린다(`routers_images.prewarm_thumbs`). Vercel 에서는 첫 조회 때 원본을 내려받아 줄이느라 장당 0.6~1.5초가 걸리고 인스턴스 `/tmp` 캐시도 자주 비어 매번 반복되던 것
 - 같은 GET 이 같은 순간에 여러 컴포넌트에서 나가면 한 번만 보낸다(`api.getJson`, 응답이 오면 바로 해제). 캠페인을 열 때 `/copy`·`/images`·`/brands/{id}`·`/image-usage`·`/api-calls` 가 2~3번씩 동시에 나가 함수 인스턴스가 추가로 뜨면서 콜드 스타트(~3초)가 생기던 것

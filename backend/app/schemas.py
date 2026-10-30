@@ -88,9 +88,15 @@ class VoiceIn(BaseModel):
 LOGO_POSITIONS = ("좌상단", "우상단", "좌하단", "우하단", "자동")
 
 
+class BrandGroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=300)
+
+
 class BrandIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=300)
+    group_id: int | None = None      # 소속 그룹. 수정(PUT) 때 이 필드를 보내지 않으면 기존 소속을 유지한다
     logo_asset_id: int | None = None
     logo_square_asset_id: int | None = None      # 정사각 로고(1:1, 128px 이상). PMax 처럼 1:1 로고 자산을 요구하는 지면용
     logo_margin_percent: float | None = Field(default=None, ge=0, le=100)

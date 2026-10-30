@@ -7,6 +7,7 @@
 - 카피·이미지 생성(과금)은 하지 않는다. 캠페인은 '규격 선택 + 입력 저장' 상태로 만들어지므로 화면에서 '시안 생성하기'부터 누른다.
 - 브랜드: 로고(logo.png, 없으면 로고 없이)와 정사각 로고(logo_square.png)를 올린다. 쿠챠처럼 로고 파일이 없는 브랜드는 로고 없이 등록한다.
 - 캠페인 JSON 은 기본으로 두지 않는다(demo/ 폴더가 없으면 브랜드만 등록). 만들 때 brand 는 brands/ 아래 폴더 이름이다.
+- brand.json 에 "group" 이 있으면 그 그룹(같은 이름이면 기존 그룹)에 소속시켜 등록한다.
 """
 import argparse
 import json
@@ -29,6 +30,11 @@ def load_brands(only: set[str] | None = None, category: str | None = None) -> di
             continue
         out[d.name] = doc["brand"]
     return out
+
+
+def load_group(slug: str) -> dict | None:
+    """brand.json 의 소속 그룹 {"name", "description"} (없으면 None)."""
+    return json.loads((BRANDS_DIR / slug / "brand.json").read_text(encoding="utf-8")).get("group")
 
 
 def load_campaigns(only: set[str] | None = None, brands: set[str] | None = None) -> list[dict]:
@@ -66,6 +72,10 @@ def seed(client, brand_slugs: set[str] | None = None, campaign_slugs: set[str] |
             body["logo_asset_id"] = _upload_logo(client, logo)
         if (bdir / "logo_square.png").exists():
             body["logo_square_asset_id"] = _upload_logo(client, bdir / "logo_square.png")
+        if group := load_group(slug):
+            r = client.post("/api/brand-groups", json=group)
+            r.raise_for_status()
+            body["group_id"] = r.json()["id"]
         r = client.post("/api/brands", json=body)
         if r.status_code >= 400:
             log(f"[브랜드] {body['name']} 실패: {r.text}")

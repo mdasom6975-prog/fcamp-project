@@ -2,6 +2,7 @@
 
 실행: backend/.venv/bin/python tools/register_brand.py brands/kucha/brand.json [--logo 로고파일] [--base http://127.0.0.1:8000]
 같은 이름의 브랜드가 이미 있으면 새 버전(PUT)으로 갱신한다.
+brand.json 에 "group": {"name", "description"} 이 있으면 그 그룹을 (없으면 만들어) 브랜드의 소속으로 정한다.
 """
 import json
 import sys
@@ -24,6 +25,10 @@ def main() -> None:
             r = c.post("/api/assets", data={"kind": "logo"}, files={"file": (logo.name, logo.read_bytes())})
             r.raise_for_status()
             body["logo_asset_id"] = r.json()["id"]
+        if doc.get("group"):
+            r = c.post("/api/brand-groups", json=doc["group"])
+            r.raise_for_status()
+            body["group_id"] = r.json()["id"]
         existing = next((b for b in c.get("/api/brands").json() if b["name"] == body["name"]), None)
         if existing:
             r = c.put(f"/api/brands/{existing['id']}", json=body)

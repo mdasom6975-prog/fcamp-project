@@ -11,11 +11,21 @@ def _now() -> datetime:
     return datetime.now()
 
 
+class BrandGroup(Base):
+    """브랜드를 묶는 그룹(예: 아모레퍼시픽 → 설화수·라네즈). 그룹 공통 자료(RAG)의 기준이 된다."""
+    __tablename__ = "brand_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    description: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class Brand(Base):
     __tablename__ = "brands"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(String(300), default="", server_default="")  # 서비스 설명(선택)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("brand_groups.id"), nullable=True)   # 비면 단독 브랜드
     current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     versions: Mapped[list["BrandVersion"]] = relationship(back_populates="brand")

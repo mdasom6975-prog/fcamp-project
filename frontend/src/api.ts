@@ -11,6 +11,7 @@ export type FontRow = { role: string; source: 'provided' | 'upload'; name?: stri
 export type BrandForm = {
   name: string
   description: string
+  group_id: number | null                 // 소속 그룹(예: 아모레퍼시픽). 없으면 단독 브랜드
   logo_asset_id: number | null
   logo_square_asset_id: number | null     // 정사각 로고(1:1, 128px 이상) — PMax 등 1:1 로고 자산을 요구하는 지면용
   logo_margin_percent: number | null
@@ -50,7 +51,8 @@ export function getJson<T = any>(url: string): Promise<T | null> {
 export const api = {
   defaults: () => fetch('/api/brand-defaults').then((r) => j<{ levels: Record<string, Level>; color_roles: string[] }>(r)),
   providedFonts: () => fetch('/api/fonts/provided').then((r) => j<{ name: string; label: string }[]>(r)),
-  brands: () => fetch('/api/brands').then((r) => j<{ id: number; name: string }[]>(r)),
+  brands: () => fetch('/api/brands').then((r) => j<{ id: number; name: string; group_id: number | null; group_name: string | null }[]>(r)),
+  brandGroups: () => fetch('/api/brand-groups').then((r) => j<{ id: number; name: string }[]>(r)),
   brand: (id: number, versionId?: number) =>
     fetch(`/api/brands/${id}${versionId ? `?version_id=${versionId}` : ''}`).then((r) => j<any>(r)),
   create: (b: BrandForm) =>
