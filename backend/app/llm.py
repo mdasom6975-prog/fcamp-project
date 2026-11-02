@@ -154,7 +154,7 @@ ICONS_SVG_SCHEMA = _obj({"icons": _arr(ICON_SVG)})
 
 def copy_schema() -> dict:
     """카피 응답: variants(각도·근거·제목·본문·CTA)."""
-    return _obj({"variants": _arr(_obj({"angle": STR, "evidence": STR, "headline": STR, "body": STR, "cta": STR}))})
+    return _obj({"variants": _arr(_obj({"angle": STR, "evidence": STR, "headline": STR, "body": STR, "cta": STR, "long_body": STR}))})
 
 
 def extras_schema(asset_fields: list[str], want_icons: bool = True) -> dict:

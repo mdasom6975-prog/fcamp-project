@@ -40,7 +40,7 @@ async function post(url: string, body: unknown, method: 'POST' | 'PUT' = 'POST')
 }
 
 type Violation = { type: string; field: string; detail: string; severity: string; phrase?: string; law?: string; reason?: string; suggest?: string; grounded?: boolean }
-type Variant = { id: number; variant_no: number; headline: string; body: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
+type Variant = { id: number; variant_no: number; headline: string; body: string; long_body?: string; cta: string; violations: Violation[]; attempts: number; selected: boolean }
 // 배경 형태. 서버(imagegen.STYLES)와 같은 이름을 쓴다
 const IMAGE_STYLES = ['자동', '실사 인물', '실사 제품·공간', '플랫 일러스트', '3D 렌더', '그래픽 패턴']
 type ImgUsage = { date: string; provider?: string; used: number; limit: number; remaining: number; exhausted: boolean;
@@ -328,7 +328,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
       </div>}
       {err && <div className="notice err">{err}</div>}
       {pickNote && view === 'copy' && <div className="notice ok">{pickNote}</div>}
-      {view === 'copy' && <DevStats designId={designId} kinds={['copy', 'copy_fit']} label="카피 생성" refreshKey={`${busy}-${groups.length}-${count}-${fitting}`} />}
+      {view === 'copy' && <DevStats designId={designId} kinds={['copy', 'copy_fit', 'copy_extras']} label="카피 생성" refreshKey={`${busy}-${groups.length}-${count}-${fitting}`} />}
 
       {!has && view === 'copy' && <p className="muted gen-empty">카피 생성을 누르면 선택한 규격의 글자 수 제한에 맞춰 시안 문구를 만듭니다.</p>}
       {!has && view !== 'copy' && <p className="muted gen-empty">먼저 ③ 카피·시안에서 카피를 생성하고 시안을 고르면 {view === 'images' ? '이미지를' : '아이콘을'} 만들 수 있습니다.</p>}
@@ -337,12 +337,13 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
         <>
           {view === 'copy' && (<>
           <p className="muted gen-note">
-            카피는 선택한 규격 {withCopy.length}개의 글자 수 제한 중 가장 엄격한 값으로 한 번에 만들어, 고른 시안의 문장이 <strong>모든 지면에 동일하게</strong> 적용됩니다.
+            카피는 선택한 규격 {withCopy.length}개의 글자 수 제한 중 가장 엄격한 값으로 한 번에 만들어, 고른 시안의 문장이 <strong>모든 지면에 동일하게</strong> 적용됩니다. 본문을 길게 쓸 수 있는 지면(인스타그램 등)에는 긴 게시 문구가 따로 들어갑니다.
           </p>
           <div className="ad-grid">
             {preview.variants.map((v) => {
               const reqOk = !v.violations.some((x) => x.type === 'required_missing')
               const banOk = !v.violations.some((x) => x.type === 'forbidden')
+              const longBody = groups.flatMap((g) => g.variants).find((x) => x.variant_no === v.variant_no && x.long_body)?.long_body
               const others = [
                 ...v.violations.filter((x) => !['required_missing', 'forbidden', 'length', 'min_length', 'legal'].includes(x.type)),
                 ...lengthIssues(v.variant_no).map((x) => ({ ...x, field: `${x.placement} ${x.field}` })),
@@ -356,6 +357,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
                     {v.body && <div className="ad-body">{v.body}</div>}
                     {v.cta && <span className="ad-cta">{v.cta}</span>}
                   </div>
+                  {longBody && <p className="muted ad-long"><strong>긴 지면 게시 문구</strong> ({longBody.length}자) {longBody}</p>}
                   <ul className="ad-checks">
                     <li className={reqOk ? 'ok' : 'ng'}>{reqOk ? '✓ 필수 표현 포함' : '✕ 필수 표현 누락'}</li>
                     <li className={banOk ? 'ok' : 'ng'}>{banOk ? '✓ 금지 표현 없음' : '✕ 금지 표현 포함'}</li>
@@ -537,6 +539,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
                 </div>
                 <div><strong>제목</strong> {v.headline} <span className="muted">({v.headline.length}자)</span></div>
                 <div><strong>본문</strong> {v.body} <span className="muted">({v.body.length}자)</span></div>
+                {v.long_body && <div><strong>게시 문구</strong> {v.long_body} <span className="muted">({v.long_body.length}자 · 이미지 밖 긴 본문)</span></div>}
                 <div><strong>CTA</strong> {v.cta} <span className="muted">({v.cta.length}자)</span></div>
                 {fitNote && v.selected && <div className="notice ok">{fitNote}</div>}
                 {issues.map((x, i) => (

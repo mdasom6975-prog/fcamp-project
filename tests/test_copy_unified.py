@@ -170,7 +170,7 @@ def test_generate_keeps_angle_and_evidence(monkeypatch):
     monkeypatch.setattr(llm, "chat_json", lambda s, u, kind, schema: {"variants": [
         {"angle": "성분·기술", "evidence": "진세노믹스", "headline": "h", "body": "b", "cta": "c"}]})
     v = copywriter.generate("b", {}, {"product_name": "p"}, {"platform": "x", "name": "y"}, copywriter.limits_for([]))
-    assert v == [{"headline": "h", "body": "b", "cta": "c", "angle": "성분·기술", "evidence": "진세노믹스"}]
+    assert v == [{"headline": "h", "body": "b", "cta": "c", "angle": "성분·기술", "evidence": "진세노믹스", "long_body": ""}]
 
 
 def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monkeypatch):
@@ -316,3 +316,32 @@ def test_copy_records_knowledge_refs(env):
                                 "functional_mismatch": None, "product_note": None}
     brief = c.get(f"/api/designs/{ids['design']}").json()["brief"]
     assert brief["knowledge"]["law_chunk_ids"] == [] and brief["knowledge"]["guide"] == []
+
+
+def test_long_body_goes_only_to_roomy_placements(env, monkeypatch):
+    """본문 제한이 넉넉한 지면에만 긴 본문을 저장하고, 짧은 지면은 공통 본문을 쓴다. 제한을 넘으면 저장하지 않는다."""
+    from app import copywriter
+    c, ids = env["client"], env["ids"]
+    seen = []
+    def fake(brand_name, brand, brief, placement, limits, knowledge=None):
+        seen.append(limits.get("long"))
+        vs = [{"headline": "제목", "body": "본문", "cta": "보기", "long_body": "긴 본문 " * 12, "violations": []},
+              {"headline": "제목", "body": "본문", "cta": "보기", "long_body": "가" * 500, "violations": []}]
+        return vs, 1
+    monkeypatch.setattr(copywriter, "generate_checked", fake)
+    groups = {g["name"]: g for g in c.post(f"/api/designs/{ids['design']}/copy").json()["groups"]}
+    assert seen[0]["max"] == 125 and seen[0]["placements"] == ["Instagram 피드"], "공통 45자의 2배 이상인 지면만"
+    assert groups["Instagram 피드"]["variants"][0]["long_body"].startswith("긴 본문")
+    assert groups["Instagram 피드"]["variants"][1]["long_body"] == "", "제한을 넘으면 공통 본문으로 돌아간다"
+    assert all(v["long_body"] == "" for n, g in groups.items() if n != "Instagram 피드" for v in g["variants"])
+
+
+def test_long_limit_and_check():
+    from app import copywriter
+    ig, nat = copywriter.limits_for(IG), copywriter.limits_for(KAKAO)
+    per = [("IG", ig), ("네이티브", nat)]
+    assert copywriter.long_limit(per, copywriter.merge_limits(per)) == {"max": 125, "placements": ["IG"]}
+    assert copywriter.long_limit([("네이티브", nat)], copywriter.merge_limits([("네이티브", nat)])) is None
+    rules = {"forbidden_phrases": ["최저가"], "required_phrases": [], "levels": {}, "source_text": ""}
+    v = copywriter.check({"headline": "제목", "body": "본문", "cta": "보기", "long_body": "최저가 크림"}, copywriter.limits_for([]), rules)
+    assert any(x["type"] == "forbidden" and "긴 본문" in x["detail"] for x in v)

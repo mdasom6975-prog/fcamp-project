@@ -17,7 +17,7 @@ def _brand_rules(bv: BrandVersion, brief: dict | None = None) -> dict:
 
 def with_legal(r: CopyVariant, brief: dict | None) -> list[dict]:
     """저장된 위반 중 법적 표현은 버리고 지금의 표현 사전으로 다시 검사해 붙인다(사전이 바뀌거나 사전 도입 전 카피여도 최신 기준)."""
-    text = " ".join([r.headline or "", r.body or "", r.cta or ""])
+    text = " ".join([r.headline or "", r.body or "", r.cta or "", r.long_body or ""])
     return [v for v in (r.violations or []) if v.get("type") != "legal"] + legal.violations(text, legal.source_text(brief), (brief or {}).get("functional"))
 
 
@@ -38,7 +38,7 @@ def _group(design: Design, db: Session) -> list[dict]:
             "preset_id": pid, "platform": pv.placement.platform.name, "name": pv.placement.name,
             "content_kind": pv.placement.content_kind, "width": pv.production_width, "height": pv.production_height,
             "limits": limits, "batch_no": last,
-            "variants": [{"id": r.id, "variant_no": r.variant_no, "headline": r.headline, "body": r.body,
+            "variants": [{"id": r.id, "variant_no": r.variant_no, "headline": r.headline, "body": r.body, "long_body": r.long_body,
                           "cta": r.cta, "violations": with_legal(r, design.brief), "attempts": r.attempts, "selected": r.selected} for r in rows],
         })
     return out
@@ -87,6 +87,9 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
         raise HTTPException(400, "선택한 규격이 없습니다")
     per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
     merged = copywriter.merge_limits(per)
+    long = copywriter.long_limit(per, merged)   # 본문을 길게 쓸 수 있는 지면(인스타그램 등)의 게시 문구 요구
+    if long:
+        merged["long"] = long
     spec = copyfields.asset_spec(presets)      # PMax 등 '문구 수량' 조건 지면의 추가 문구 요구
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
@@ -120,6 +123,7 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
             db.add(CopyVariant(
                 design_id=d.id, preset_version_id=pv.id, batch_no=last + 1, variant_no=i,
                 headline=v["headline"], body=v["body"], cta=v["cta"],
+                long_body=v.get("long_body", "") if copywriter.fits_long(v.get("long_body", ""), limits, long) else "",
                 limits={k: limits[k] for k in ("headline", "body", "cta")},
                 violations=copywriter.check(v, limits, rules), attempts=attempts))
     invalidate_reviews(db, d.id)

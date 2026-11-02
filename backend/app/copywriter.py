@@ -85,6 +85,26 @@ def merge_limits(per_placement: list[tuple[str, dict]]) -> dict:
     return out
 
 
+LONG_RATIO = 2         # 본문 제한이 공통 제한의 이 배수 이상인 지면만 긴 본문을 쓴다
+
+
+def long_limit(per_placement: list[tuple[str, dict]], merged: dict) -> dict | None:
+    """공통 본문보다 훨씬 길게 쓸 수 있는 지면들의 긴 본문 제한 {max, placements}. 그런 지면이 없으면 None(공통 카피만)."""
+    base = (merged.get("body") or {}).get("max")
+    rows = [(name, _as_chars(l["body"], "max")) for name, l in per_placement if l.get("body")]
+    long = [(n, m) for n, m in rows if m is not None and base and m >= base * LONG_RATIO]
+    return {"max": min(m for _, m in long), "placements": [n for n, _ in long]} if long else None
+
+
+def fits_long(text: str, limits: dict, long: dict | None) -> bool:
+    """이 지면에 긴 본문을 쓸 수 있는가(긴 지면이고 제한을 지킴)."""
+    lim = limits.get("body")
+    if not (text and long and lim) or lim.get("max") is None or lim["max"] < long["max"]:
+        return False
+    n = count_len(text, lim.get("method"))
+    return n <= lim["max"] and (lim.get("min") is None or n >= lim["min"])
+
+
 def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
     """생성된 문구를 코드로 검사한다. (글자 수는 공백 포함 문자 수)"""
     v: list[dict] = []
@@ -111,6 +131,12 @@ def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
         if ph and ph not in joined:
             v.append({"type": "required_missing", "field": "필수 표현", "detail": f"'{ph}' 누락",
                       "severity": lv.get("required_phrases", "필수")})
+    long_body = copy.get("long_body") or ""
+    for ph in brand.get("forbidden_phrases", []):        # 긴 본문도 금지 표현·법적 표현은 똑같이 본다
+        if ph and ph in long_body and ph not in joined:
+            v.append({"type": "forbidden", "field": "금지 표현", "detail": f"긴 본문에 '{ph}' 포함",
+                      "severity": lv.get("forbidden_phrases", "필수")})
+    joined = f"{joined} {long_body}".strip()
     v += legal.violations(joined, brand.get("source_text") or "", brand.get("functional"))       # 법적·제도적 금지 표현(브랜드 규칙과 별개로 항상 검사)
     v += legal.functional_violations(joined, brand.get("functional"))    # 입력한 기능성 밖의 기능성 표현(입력한 캠페인만)
     return v
@@ -184,8 +210,17 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         limit_headline=rule("headline", "headline(제목)"),
         limit_body=rule("body", "body(본문)"),
         limit_cta=rule("cta", "cta(행동 유도)"),
+        long_body=_long_block(limits.get("long")),
     )
     return system, user
+
+
+def _long_block(long: dict | None) -> str:
+    """긴 본문 요구 문단. 긴 지면이 없으면 빈 문자열."""
+    if not long:
+        return ""
+    return "\n" + prompts.render("copy/_long_body", placements=", ".join(long["placements"]), max=int(long["max"] * 0.9),
+                                  min=int(long["max"] * 0.6))
 
 
 def _assets_block(spec: list[dict]) -> str:
@@ -254,7 +289,7 @@ def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits:
     data = llm.chat_json(system, user, "copy", llm.copy_schema())
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
-        out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta", "angle", "evidence")})
+        out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta", "angle", "evidence", "long_body")})
     return out
 
 

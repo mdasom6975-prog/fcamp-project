@@ -68,7 +68,7 @@ def gather(db: Session, d: Design, pv: PresetVersion, brand: dict) -> dict:
         font_ref = ({"source": f["source"], "name": f.get("name"), "asset_id": f.get("asset_id")} if f
                     else {"source": "provided", "name": "Pretendard-Bold"})
     texts = {"headline": (text_el["text"] if text_el else (sel.headline if sel else "")),
-             "body": sel.body if sel else "", "cta": sel.cta if sel else ""}
+             "body": (sel.long_body or sel.body) if sel else "", "cta": sel.cta if sel else ""}
     logo_aspect = None
     if brand["logo_asset_id"]:
         a = db.get(Asset, brand["logo_asset_id"])

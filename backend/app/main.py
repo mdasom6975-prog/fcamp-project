@@ -62,6 +62,9 @@ def _added_columns() -> None:
         with engine.begin() as conn:      # 브랜드 그룹(아모레퍼시픽 → 설화수 등)
             conn.execute(text("ALTER TABLE brands ADD COLUMN group_id INTEGER"))
     insp = inspect(engine)
+    if insp.has_table("copy_variants") and "long_body" not in {c["name"] for c in insp.get_columns("copy_variants")}:
+        with engine.begin() as conn:      # 긴 지면의 게시 문구
+            conn.execute(text("ALTER TABLE copy_variants ADD COLUMN long_body TEXT NOT NULL DEFAULT ''"))
     if insp.has_table("knowledge_docs") and "industry" not in {c["name"] for c in insp.get_columns("knowledge_docs")}:
         with engine.begin() as conn:      # 규제 문서의 업종(업종 감지 시 검색 없이 전부 넣는다)
             conn.execute(text("ALTER TABLE knowledge_docs ADD COLUMN industry VARCHAR(20)"))

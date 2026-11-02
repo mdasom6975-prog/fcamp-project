@@ -183,6 +183,7 @@ class CopyVariant(Base):
     headline: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text, default="")
     cta: Mapped[str] = mapped_column(Text, default="")
+    long_body: Mapped[str] = mapped_column(Text, default="", server_default="")   # 본문 제한이 넉넉한 지면(인스타그램 등)의 게시 문구. 이미지 안 문구는 body
     limits: Mapped[dict] = mapped_column(JSON, default=dict)         # 생성 시 적용한 제한
     violations: Mapped[list] = mapped_column(JSON, default=list)     # [{type, field, detail, severity}]
     attempts: Mapped[int] = mapped_column(Integer, default=1)        # 자동 재생성 포함 시도 횟수

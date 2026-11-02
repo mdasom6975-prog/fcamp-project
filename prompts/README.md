@@ -8,6 +8,7 @@
 |---|---|---|
 | `copy/system.md` · `copy/user.md` | 카피 생성 System(고정) / User(브랜드·브리프·지면 제한) | `copywriter._prompt` |
 | `copy/extras_system.md` · `extras_user.md` · `_extras_icons.md` | 카피 뒤 보조 호출(작은 모델): 아이콘 후보와 추가 문구 자산. 실패해도 카피는 남는다 | `copywriter.extras` |
+| `copy/_long_body.md` | 카피 User 의 긴 본문 요구 (partial): 본문 제한이 공통 제한의 2배 이상인 지면이 있을 때만 | `copywriter._long_block` |
 | `copy/_functional.md` · `_functional_none.md` | 카피 User 의 기능성 문단 (partial): 캠페인에 입력한 기능성(식약처 심사·보고 범위) / '기능성 아님'. 입력하지 않으면 붙지 않는다 | `copywriter.knowledge_vars` |
 | `copy/_law.md` | 카피 User 의 법령 원문 문단 (partial): 품목에서 감지한 업종으로 표시한 규제 조문·별표를 **검색 없이 전부** (`knowledge.law_rows`) | `copywriter.knowledge_vars` |
 | `copy/_guide.md` | 카피 User 의 브랜드 지식 문단 (partial): 브리프로 검색한 제품 2 · 브랜드 2 · 그룹 1 조각(RAG, `knowledge.for_copy`). 지식이 없는 브랜드는 붙지 않는다 | `copywriter.knowledge_vars` |
