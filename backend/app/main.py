@@ -27,6 +27,7 @@ from .routers_designs import router as designs_router
 from .routers_presets import router as presets_router
 from .routers_spec_update import router as spec_update_router
 from .routers_review import router as review_router
+from .routers_evolution import router as evolution_router
 from .routers_smallbiz import router as smallbiz_router
 from .seed import deactivate_excluded, seed, sync_conditions
 
@@ -214,6 +215,7 @@ class InitMiddleware:
 app.add_middleware(InitMiddleware)
 app.add_middleware(BasicAuthMiddleware)       # 나중에 추가한 쪽이 바깥이므로 인증 → 초기화 → 라우터 순서가 된다
 app.include_router(assets_router)
+app.include_router(evolution_router)
 app.include_router(brands_router)
 app.include_router(copy_router)
 app.include_router(images_router)

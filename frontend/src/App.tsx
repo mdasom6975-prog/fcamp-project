@@ -4,12 +4,13 @@ import PresetLibrary from './PresetLibrary'
 import DesignPage from './DesignPage'
 import AnalysisPage from './AnalysisPage'
 import SmallBizPage from './SmallBizPage'
+import EvolutionPage from './EvolutionPage'
 import Landing from './Landing'
 import BusyOverlay from './Busy'
 import './App.css'
 
 export default function App() {
-  // 주소 해시로 화면을 나눈다: 없음·#/ = 메인(선택), #/studio = 기존 앱, #/smallbiz = 소상공인
+  // 주소 해시로 화면을 나눈다: 없음·#/ = 메인(선택), #/studio = 기존 앱, #/smallbiz = 소상공인, #/evolution = RAG 진화 시연
   const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
     const on = () => setHash(window.location.hash)
@@ -18,6 +19,7 @@ export default function App() {
   }, [])
   const smallBiz = hash === '#/smallbiz'
   const studio = hash === '#/studio'
+  const evolution = hash === '#/evolution'
   const [tab, setTab] = useState<'brand' | 'preset' | 'design' | 'analysis'>('brand')
   // 시안 작업 브랜드 (새로고침해도 유지)
   const [workBrandId, setWorkBrandIdState] = useState<number | null>(() => {
@@ -27,6 +29,7 @@ export default function App() {
     setWorkBrandIdState(id)
     try { id === null ? localStorage.removeItem('workBrandId') : localStorage.setItem('workBrandId', String(id)) } catch { /* 저장 실패는 무시 */ }
   }, [])
+  if (evolution) return <><header className="topbar"><a className="brandmark" href="#/"><span className="logo-mark">B</span>RAG 진화 시연</a></header><EvolutionPage /></>
   if (!smallBiz && !studio) return <Landing />
   if (smallBiz) return <><BusyOverlay /><header className="topbar"><a className="brandmark" href="#/"><span className="logo-mark">B</span>소상공인 광고 이미지</a></header><SmallBizPage /></>
   return (
