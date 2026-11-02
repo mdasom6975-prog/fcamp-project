@@ -1671,7 +1671,7 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand 
                 onChange={(v) => setBrief({ ...brief, forbidden_phrases: v })} />
             </div>
           </div>
-          <div className="msg-field">기능성 (화장품) <span className="opt">(선택)</span>
+          {scope === 'group' && <div className="msg-field">기능성 (화장품) <span className="opt">(선택)</span>
             <span className="muted">식약처 심사·보고를 받은 기능성만 카피에 쓰게 합니다. 고르면 생성 후 범위 밖 기능성 표현(미백·주름·SPF 등)을 '수정 필요'로 검사합니다.</span>
             <div className="fn-kinds">
               <label><input type="radio" checked={brief.functional === null} onChange={() => setBrief({ ...brief, functional: null })} /> 입력 안 함</label>
@@ -1681,7 +1681,7 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand 
                   onChange={(e) => setBrief({ ...brief, functional: e.target.checked ? [...(brief.functional ?? []), k] : (brief.functional ?? []).filter((x) => x !== k) })} /> {k}</label>
               ))}
             </div>
-          </div>
+          </div>}
           <div className="msg-field">제품 이미지 <span className="opt">(선택)</span>
             <div className="product-img">
               <div className="product-box">
@@ -1846,7 +1846,7 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand 
                   : <span className="muted">없음</span>}</dd>
                 <dt>필수 표현</dt><dd>{eff ? (eff.required_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.required_source})</span> : null}</dd>
                 <dt>금지 표현</dt><dd>{eff ? (eff.forbidden_phrases.join(', ') || '없음') : '-'}{eff ? <span className="muted"> ({eff.forbidden_source})</span> : null}</dd>
-                <dt>기능성</dt><dd>{functionalText(d.brief.functional)}</dd>
+                {(scope === 'group' || d.brief.functional != null) && <><dt>기능성</dt><dd>{functionalText(d.brief.functional)}</dd></>}
                 <dt>규격</dt><dd>{d.presets.map((p) => `${p.platform} · ${p.name}`).join(' / ') || '없음'}</dd>
               </dl>
               {!locked && <p className="muted">검수 완료 전까지는 입력을 수정할 수 있습니다. 저장하면 기존 검수 결과는 무효화되어 다시 검수해야 합니다{reviewed ? ' (현재 검수 결과 있음)' : ''}. 입력을 바꿔도 이미 만든 카피·이미지는 자동으로 바뀌지 않으니, 필요하면 다시 생성하세요.</p>}
