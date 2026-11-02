@@ -48,6 +48,13 @@ export function getJson<T = any>(url: string): Promise<T | null> {
   return p
 }
 
+// 스튜디오가 다루는 브랜드 범위: #/group = 그룹 소속 브랜드, #/studio = 단독 브랜드
+export type BrandScope = 'group' | 'solo'
+export const inScope = <T extends { group_id?: number | null }>(list: T[], scope: BrandScope) =>
+  list.filter((b) => (b.group_id != null) === (scope === 'group'))
+
+export const groupNames = (list: { group_name: string | null }[]) => [...new Set(list.flatMap((b) => b.group_name ?? []))]
+
 export const api = {
   defaults: () => fetch('/api/brand-defaults').then((r) => j<{ levels: Record<string, Level>; color_roles: string[] }>(r)),
   providedFonts: () => fetch('/api/fonts/provided').then((r) => j<{ name: string; label: string }[]>(r)),

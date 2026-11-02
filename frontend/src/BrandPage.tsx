@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ITEM_LABELS, type BrandForm, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition } from './api'
+import { api, inScope, ITEM_LABELS, type BrandForm, type BrandScope, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition } from './api'
 import ColorPicker from './ColorPicker'
 
 const LEVELS: Level[] = ['필수', '권장']
@@ -88,7 +88,7 @@ export function PhraseBox({ label, hint, tone, items, onChange }:
   )
 }
 
-export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: number) => void }) {
+export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; onGoDesign?: (brandId: number) => void }) {
   const [defaults, setDefaults] = useState<{ levels: Record<string, Level>; color_roles: string[] } | null>(null)
   const [provided, setProvided] = useState<{ name: string; label: string }[]>([])
   const [brands, setBrands] = useState<{ id: number; name: string; group_id: number | null; group_name: string | null }[]>([])
@@ -113,7 +113,7 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const logoSqInput = useRef<HTMLInputElement>(null)
 
   const loadBrands = useCallback(() => Promise.all([api.brands(), api.brandGroups()])
-    .then(([b, g]) => { setBrands(b); setBrandGroups(g) }), [])
+    .then(([b, g]) => { setBrands(inScope(b, scope)); setBrandGroups(g) }), [scope])
 
   useEffect(() => {
     Promise.all([api.defaults(), api.providedFonts()]).then(([d, f]) => {
@@ -167,8 +167,9 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
   const save = async () => {
     setBusy(true); setMsg(null)
     try {
-      const body: BrandForm = form.icon_style.stroke_width >= 0.5 ? form
+      const styled: BrandForm = form.icon_style.stroke_width >= 0.5 ? form
         : { ...form, icon_style: { ...form.icon_style, stroke_width: 2 } }   // 비어 있으면 기본값 2px
+      const body: BrandForm = scope === 'group' && styled.group_id === null ? { ...styled, group_id: brandGroups[0]?.id ?? null } : styled   // 그룹 입구에서 만든 브랜드는 그룹에 속한다
       const res = selected ? await api.update(selected, body) : await api.create(body)
       const w: string[] = res.warnings || []
       setMsg({ ok: true, text: [`저장했습니다. 버전 ${res.version.version_no}`, ...w.map((x) => `⚠ ${x}`)] })
@@ -301,10 +302,9 @@ export default function BrandPage({ onGoDesign }: { onGoDesign?: (brandId: numbe
               <input value={form.description} maxLength={300} placeholder="예: 신선한 식재료를 새벽에 배송해 드리는 온라인 장보기 서비스"
                 onChange={(e) => set({ ...form, description: e.target.value })} />
             </label>
-            {brandGroups.length > 0 && (
-              <label>소속 그룹 <span className="opt">(선택)</span>
-                <select value={form.group_id ?? ''} onChange={(e) => set({ ...form, group_id: e.target.value ? Number(e.target.value) : null })}>
-                  <option value="">없음 (단독 브랜드)</option>
+            {scope === 'group' && brandGroups.length > 0 && (
+              <label>소속 그룹
+                <select value={form.group_id ?? brandGroups[0].id} onChange={(e) => set({ ...form, group_id: Number(e.target.value) })}>
                   {brandGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                 </select>
               </label>

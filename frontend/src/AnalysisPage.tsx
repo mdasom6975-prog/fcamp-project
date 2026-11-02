@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { busy } from './Busy'
 import { KIND_LABEL } from './DevStats'
+import { inScope, type BrandScope } from './api'
 
 /* 분석(학습·개발용) — 검수 화면과 별개로, 캠페인 하나에 대해 세 가지를 한 페이지에 본다.
    ① 브랜드 규칙·캠페인 입력이 어느 단계에서 반영되는지(표) + 생성 배경·아이콘의 주요 색과 브랜드 색의 거리(ΔE) + Claude 비전 채점(과금)
@@ -43,7 +44,7 @@ type Analysis = {
   cost: { summary: { total: number; ok: number; failed: number; cost_usd: number; cost_krw: number | null; estimated: boolean; unpriced: number; usd_krw: number; tokens_in: number; tokens_out: number; ms_total: number }; stages: Record<string, Agg>; stage_label: Record<string, string>; rows: Row[] }
   judgments: Judgment[]; judge_items: string[]; judge_estimate: { usd: number | null; krw: number | null; model: string }
 }
-type BrandLite = { id: number; name: string }
+type BrandLite = { id: number; name: string; group_id: number | null }
 type DesignLite = { id: number; kind: string; status: string; brief: { product_name?: string }; brand: { name: string; version_no: number }; created_at: string }
 
 const STAGE_LABEL: Record<Entry['stage'], string> = { copy: '시안 생성(카피)', background: '배경 이미지 생성', icon: '아이콘 생성', judge: '비전 채점' }
@@ -207,7 +208,7 @@ function ArchivedSection({ designId }: { designId: number }) {
   )
 }
 
-export default function AnalysisPage({ workBrandId }: { workBrandId: number | null }) {
+export default function AnalysisPage({ scope, workBrandId }: { scope: BrandScope; workBrandId: number | null }) {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [brandId, setBrandId] = useState<number | null>(workBrandId)
   const [designs, setDesigns] = useState<DesignLite[]>([])
@@ -219,7 +220,8 @@ export default function AnalysisPage({ workBrandId }: { workBrandId: number | nu
   const [judgeMsg, setJudgeMsg] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/brands').then((r) => r.json()).then((b: BrandLite[]) => {
+    fetch('/api/brands').then((r) => r.json()).then((all: BrandLite[]) => {
+      const b = inScope(all, scope)
       setBrands(b)
       if (brandId === null || !b.some((x) => x.id === brandId)) setBrandId(b[0]?.id ?? null)
     }).catch(() => setErr('브랜드 목록을 불러오지 못했습니다'))

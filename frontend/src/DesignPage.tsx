@@ -9,7 +9,7 @@ import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
 import { busy as overlay, type Order, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
-import { getJson } from './api'
+import { getJson, inScope, type BrandScope } from './api'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -1229,7 +1229,7 @@ const briefOf = (d: Design): Brief => ({ product_name: d.brief.product_name, des
   product_scale: d.brief.product_scale ?? '크게', layout: d.brief.layout ?? '기본',
   required_phrases: d.brief.required_phrases ?? [], forbidden_phrases: d.brief.forbidden_phrases ?? [], functional: d.brief.functional ?? null })
 
-type BrandLite = { id: number; name: string; description?: string; current_version_no: number | null }
+type BrandLite = { id: number; name: string; description?: string; group_id: number | null; current_version_no: number | null }
 
 // 레이아웃(서버 backend/app/layouts.json, GET /api/image-settings 의 layouts): 비율군별 문구 자리·정렬·제품 구역
 type LayoutTpl = { side: 'bottom' | 'top' | 'left' | 'right'; align: 'left' | 'center'; product_slot: number[]; text_column: number }
@@ -1274,8 +1274,8 @@ function LayoutPicker({ value, options, onChange }: { value: string; options: La
   )
 }
 
-export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
-  workBrandId: number | null; onWorkBrand: (id: number | null) => void; onGoBrand?: () => void
+export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand }: {
+  scope: BrandScope; workBrandId: number | null; onWorkBrand: (id: number | null) => void; onGoBrand?: () => void
 }) {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [platforms, setPlatforms] = useState<PlatformLite[]>([])
@@ -1319,7 +1319,7 @@ export default function DesignPage({ workBrandId, onWorkBrand, onGoBrand }: {
   }, [workId])
 
   const loadBrands = useCallback(() =>
-    getJson<BrandLite[]>('/api/brands').then((b) => { setBrands(b ?? []); return b ?? [] }), [])
+    getJson<BrandLite[]>('/api/brands').then((all) => { const b = inScope(all ?? [], scope); setBrands(b); return b }), [scope])
 
   useEffect(() => {
     loadBrands().then((b) => {
