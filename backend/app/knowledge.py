@@ -151,7 +151,7 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
                  group_id: int | None = None, brand_id: int | None = None, source_url: str = "",
                  fetched_at: str | None = None, product_name: str | None = None,
                  functional: list[str] | None = None, industry: str | None = None, aliases: list[str] | None = None,
-                 embedder=embed) -> KnowledgeDoc:
+                 visual: dict | None = None, embedder=embed) -> KnowledgeDoc:
     """조각을 임베딩해 문서 하나로 저장한다. 같은 source_id 의 '사용' 문서는 '보관' 으로 돌린다(재등록 = 새 버전).
     embedder 는 테스트에서 가짜 임베딩을 넣을 때 바꾼다."""
     if layer not in LAYERS:
@@ -160,7 +160,7 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
         raise ValueError(f"조각이 없습니다: {source_id}")
     for old in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.source_id == source_id, KnowledgeDoc.status == "사용")):
         old.status = "보관"
-    doc = KnowledgeDoc(layer=layer, source_id=source_id, title=title, group_id=group_id, brand_id=brand_id, industry=industry,
+    doc = KnowledgeDoc(layer=layer, source_id=source_id, title=title, group_id=group_id, brand_id=brand_id, industry=industry, visual=visual,
                        source_url=source_url, fetched_at=fetched_at or date.today().isoformat())
     db.add(doc)
     db.flush()
@@ -225,7 +225,8 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
         scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
         out[layer] = [{"chunk_id": ch.id, "doc_id": doc.id, "source_id": doc.source_id, "doc_title": doc.title,
                        "layer": layer, "section": ch.section, "text": ch.text, "score": round(s, 4),
-                       "product_name": ch.product_name, "functional": ch.functional, "exact_product": exact}
+                       "product_name": ch.product_name, "functional": ch.functional, "exact_product": exact,
+                       "motifs": (doc.visual or {}).get("motifs")}
                       for exact, s, ch, doc in scored[:k]]
     return out
 
@@ -244,7 +245,8 @@ def _test_result(ch: KnowledgeChunk) -> bool:
 def _row(ch: KnowledgeChunk, doc: KnowledgeDoc, score: float | None = None) -> dict:
     return {"chunk_id": ch.id, "doc_id": doc.id, "source_id": doc.source_id, "doc_title": doc.title, "layer": doc.layer,
             "section": ch.section, "text": ch.text, "score": None if score is None else round(score, 4),
-            "product_name": ch.product_name, "functional": ch.functional, "exact_product": False}
+            "product_name": ch.product_name, "functional": ch.functional, "exact_product": False,
+            "motifs": (doc.visual or {}).get("motifs")}
 
 
 def law_rows(db: Session, industries: list[str]) -> list[dict]:
@@ -280,6 +282,15 @@ def functional_mismatch(guide: list[dict], functional: list[str] | None) -> str 
     return f"입력한 기능성({given})이 등록된 '{prod['product_name']}' 제품 자료({known})와 다릅니다. 제품의 기능성 심사·보고 내용을 확인하세요"
 
 
+def brand_directions(db: Session, brand_id: int | None) -> list[str]:
+    """브랜드 소개 문서에 적어 둔 배경 연출 후보. 없으면 빈 목록(공통 연출을 쓴다). 검색·임베딩 호출 없음."""
+    if brand_id is None:
+        return []
+    docs = db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.brand_id == brand_id, KnowledgeDoc.layer == "브랜드",
+                                                 KnowledgeDoc.status == "사용")).all()
+    return next(((d.visual or {}).get("directions") for d in docs if (d.visual or {}).get("directions")), [])
+
+
 def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dict, embedder=embed) -> dict:
     """카피 프롬프트에 붙일 지식. 반환: {industries, law: [조각], guide: [조각], error, functional_mismatch}.
     - law: 품목 글에서 감지한 업종의 규제 조각 전부(legal.detect 와 같은 키워드)
@@ -288,7 +299,7 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     from . import legal
     industries = legal.detect(legal.source_text(brief))
     out = {"industries": industries, "law": law_rows(db, industries), "guide": [], "error": None, "functional_mismatch": None,
-           "product_note": None}
+           "product_note": None, "motifs": None, "directions": brand_directions(db, brand_id)}
     if has_guide(db, brand_id, group_id):
         try:
             res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=GUIDE_K,
@@ -296,6 +307,7 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
             products = res.get("제품", [])
             if any(r["exact_product"] for r in products):      # 제품을 특정했으면 비슷한 다른 제품 이야기를 섞지 않는다
                 products = [r for r in products if r["exact_product"]]
+                out["motifs"] = products[0]["motifs"]
             elif products:
                 out["product_note"] = (f"'{brief.get('product_name')}' 과 이름이 같은 제품 자료가 없어 비슷한 자료({products[0]['product_name']})를 "
                                        "참고했습니다. 같은 제품이면 sources.json 의 aliases 에 이 이름을 추가하세요")
@@ -311,7 +323,8 @@ def refs(k: dict) -> dict:
     return {"law_chunk_ids": [r["chunk_id"] for r in k["law"]], "guide": [
         {x: r[x] for x in ("chunk_id", "source_id", "layer", "section", "score")} for r in k["guide"]],
             "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
-            "product_note": k.get("product_note"), "embed_model": EMBED_MODEL}
+            "product_note": k.get("product_note"), "embed_model": EMBED_MODEL,
+            "motifs": k.get("motifs"), "directions": k.get("directions") or []}
 
 
 def from_refs(db: Session, saved: dict | None) -> dict | None:
@@ -328,4 +341,4 @@ def from_refs(db: Session, saved: dict | None) -> dict | None:
             guide.append({**rows[g["chunk_id"]], "score": g.get("score")})
     return {"industries": saved.get("industries", []), "law": [rows[i] for i in saved.get("law_chunk_ids", []) if i in rows],
             "guide": guide, "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch"),
-            "product_note": saved.get("product_note")}
+            "product_note": saved.get("product_note"), "motifs": saved.get("motifs"), "directions": saved.get("directions") or []}

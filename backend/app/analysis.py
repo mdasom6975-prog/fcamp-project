@@ -177,6 +177,7 @@ def _knowledge_out(db: Session, brief: dict) -> dict | None:
     return {"industries": k["industries"], "law": [pick(r) for r in k["law"]], "guide": [pick(r) for r in k["guide"]],
             "error": k["error"], "functional_mismatch": k["functional_mismatch"], "product_note": k.get("product_note"),
             "variants": (brief.get("knowledge") or {}).get("variants") or [],
+            "motifs": k.get("motifs"), "directions": k.get("directions") or [],
             "functional": brief.get("functional"), "embed_model": (brief.get("knowledge") or {}).get("embed_model")}
 
 

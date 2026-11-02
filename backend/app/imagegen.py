@@ -236,8 +236,13 @@ def tone_text(style: str, description: str | None) -> str:
 
 def pick_direction(style: str, brief: dict) -> str:
     """[연출] 후보(prompts/image/style/<형태>.md 의 meta directions, ' | ' 로 구분) 중 이 캠페인의 것 하나.
-    상품명·핵심 메시지·타깃의 해시로 정해 같은 캠페인은 다시 만들어도 같은 연출이고, 캠페인마다 고르게 갈린다. 후보가 없으면 빈 문자열."""
+    상품명·핵심 메시지·타깃의 해시로 정해 같은 캠페인은 다시 만들어도 같은 연출이고, 캠페인마다 고르게 갈린다. 후보가 없으면 빈 문자열.
+    사진 형태(실사)에서 브랜드 연출 후보(카피 생성 때 brief.knowledge 에 남긴 값)가 있으면 공통 후보 대신 그것을 쓴다
+    (공통 후보는 브랜드를 모르고 고르므로 설화수에 '청량한 여름 아침'이 나오곤 했다)."""
     options = [o.strip() for o in prompts.load(f"image/style/{STYLES[style]}").meta.get("directions", "").split("|") if o.strip()]
+    brand_options = (brief.get("knowledge") or {}).get("directions") or []
+    if options and brand_options and style.startswith("실사"):
+        options = brand_options
     if not options:
         return ""
     key = "|".join(str(brief.get(k) or "") for k in ("product_name", "key_message", "target"))
@@ -275,7 +280,9 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                            product_name="상품(나중에 합성, 그리지 않음)" if composite else brief.get("product_name"),
                            description="" if composite else brief.get("description") or "",
                            key_message=brief.get("key_message") or "지정 없음", target=target, target_label=pv["target_label"])
-    text = prompts.render("image/background", scene=scene, tone=tone_text(style, tone.get("description")),
+    motifs = (brief.get("knowledge") or {}).get("motifs")
+    visual = "\n" + prompts.render("image/_visual", motifs=motifs) if motifs else ""
+    text = prompts.render("image/background", scene=scene, visual=visual, tone=tone_text(style, tone.get("description")),
                           composition=composition, style=style_text, brand_colors=brand_color_line(colors), **pv)
     if composite:
         text = prompts.render("image/product_slot", base=text, people=people_vars(style)["people"],

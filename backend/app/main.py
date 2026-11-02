@@ -68,6 +68,9 @@ def _added_columns() -> None:
     if insp.has_table("knowledge_docs") and "industry" not in {c["name"] for c in insp.get_columns("knowledge_docs")}:
         with engine.begin() as conn:      # 규제 문서의 업종(업종 감지 시 검색 없이 전부 넣는다)
             conn.execute(text("ALTER TABLE knowledge_docs ADD COLUMN industry VARCHAR(20)"))
+    if insp.has_table("knowledge_docs") and "visual" not in {c["name"] for c in insp.get_columns("knowledge_docs")}:
+        with engine.begin() as conn:      # 배경 이미지용 시각 소재·연출 후보
+            conn.execute(text("ALTER TABLE knowledge_docs ADD COLUMN visual JSON"))
     if insp.has_table("knowledge_chunks") and "aliases" not in {c["name"] for c in insp.get_columns("knowledge_chunks")}:
         with engine.begin() as conn:      # 제품 별칭(브리프 상품명과 제품 자료를 정확히 잇는다)
             conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN aliases JSON"))

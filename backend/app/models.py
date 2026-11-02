@@ -326,6 +326,7 @@ class KnowledgeDoc(Base):
     source_id: Mapped[str] = mapped_column(String(100), index=True)   # sources.json 의 id. 같은 id 로 다시 올리면 이전 문서는 보관
     industry: Mapped[str | None] = mapped_column(String(20), nullable=True)   # 규제 문서: 이 업종(legal.INDUSTRY_KEYWORDS 이름)이 감지되면 검색 없이 전부 넣는다
     title: Mapped[str] = mapped_column(String(200))
+    visual: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # 배경 이미지용: 제품 {motifs: 시각 소재}, 브랜드 {directions: [연출 후보]}
     source_url: Mapped[str] = mapped_column(String(500), default="", server_default="")
     fetched_at: Mapped[str] = mapped_column(String(10), default="", server_default="")
     status: Mapped[str] = mapped_column(String(10), default="사용")   # 사용 | 보관

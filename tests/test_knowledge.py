@@ -284,3 +284,28 @@ def test_guide_skips_test_numbers_except_product_cards(session):
     _add(session, layer="그룹", source_id="story", title="이야기", chunks=[("이야기", "[이야기] 인삼 연구의 역사")], group_id=7)
     k = knowledge.for_copy(session, None, 7, {"product_name": "인삼"}, embedder=fake_embed)
     assert [r["source_id"] for r in k["guide"]] == ["story"]
+
+
+def test_visual_knowledge_reaches_background_prompt(session):
+    """정확히 맞는 제품의 시각 소재와 브랜드 연출 후보가 배경 프롬프트에 들어간다. 실사가 아닌 형태는 공통 연출을 쓴다."""
+    from app import imagegen, knowledge
+    _add(session, layer="브랜드", source_id="brand_a", title="A", chunks=[("A 1", "[A] 브랜드 소개")], brand_id=1,
+         visual={"directions": ["한지 위 낮은 좌탁, 부드러운 오전 빛"]})
+    _add(session, layer="제품", source_id="rich", title="리치", chunks=[("리치", "[리치] 크림")], brand_id=1,
+         product_name="리치", visual={"motifs": "인삼 뿌리, 한지 결"})
+    k = knowledge.for_copy(session, 1, None, {"product_name": "리치"}, embedder=fake_embed)
+    brief = {"product_name": "리치", "key_message": "메시지", "knowledge": knowledge.refs(k)}
+    text = imagegen.build_prompt("브랜드", {}, brief, "정사각", "실사 제품·공간")
+    assert "[제품의 소재]" in text and "인삼 뿌리, 한지 결" in text and "한지 위 낮은 좌탁" in text
+    assert "청량한 여름" not in text and "김 서린 창가" not in text
+    assert imagegen.pick_direction("플랫 일러스트", brief) != "한지 위 낮은 좌탁, 부드러운 오전 빛"
+    other = knowledge.for_copy(session, 1, None, {"product_name": "모르는 크림"}, embedder=fake_embed)
+    assert other["motifs"] is None and other["directions"], "다른 제품의 소재를 쓰지 않되 브랜드 연출은 쓴다"
+    plain = imagegen.build_prompt("브랜드", {}, {"product_name": "리치"}, "정사각", "실사 제품·공간")
+    assert "[제품의 소재]" not in plain
+
+
+def test_sources_visual_cover_all_products_and_brands():
+    doc = json.loads((ROOT / "brands" / "amorepacific" / "sources.json").read_text(encoding="utf-8"))
+    assert all(s.get("motifs") for s in doc["sources"] if s["layer"] == "제품")
+    assert all(len(s.get("directions", [])) >= 3 for s in doc["sources"] if s["layer"] == "브랜드")

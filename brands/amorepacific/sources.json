@@ -1,6 +1,6 @@
 {
   "group": "아모레퍼시픽",
-  "note": "RAG 수집 목록. 원문(raw/)은 저장소에 올리지 않는다(.gitignore). url 이 있으면 tools/fetch_sources.py 가 받고, kind=manual 은 사람이 raw/<id>.txt 를 만든다(스크립트로 그려지는 페이지). 규제 문서의 industry 는 카피 생성 때 그 업종이 감지되면 검색 없이 전부 넣을 문서다(정의·위임 조문처럼 지시가 없는 조문은 비운다).",
+  "note": "RAG 수집 목록. 원문(raw/)은 저장소에 올리지 않는다(.gitignore). url 이 있으면 tools/fetch_sources.py 가 받고, kind=manual 은 사람이 raw/<id>.txt 를 만든다(스크립트로 그려지는 페이지). 규제 문서의 industry 는 카피 생성 때 그 업종이 감지되면 검색 없이 전부 넣을 문서다(정의·위임 조문처럼 지시가 없는 조문은 비운다). motifs(제품 시각 소재)·directions(브랜드 연출 후보)는 배경 이미지 프롬프트에 쓴다. 공개된 브랜드·제품 소개에서 읽은 이미지를 사람이 정리한 값이다.",
   "sources": [
     {
       "id": "law_cosmetics_2",
@@ -94,7 +94,13 @@
       "brand": "sulwhasoo",
       "title": "설화수 브랜드 소개",
       "kind": "html",
-      "url": "https://www.apgroup.com/int/ko/brands/sulwhasoo.html"
+      "url": "https://www.apgroup.com/int/ko/brands/sulwhasoo.html",
+      "directions": [
+        "겹겹이 깔린 상아색 한지 위 낮은 나무 좌탁, 창호지로 걸러진 부드러운 오전 빛",
+        "옅은 금빛 노을이 드는 고요한 한옥 마루, 길게 눕는 부드러운 그림자",
+        "색을 겹겹이 쌓은 단색화 앞의 도자기 받침, 전시장의 은은한 측광",
+        "백자 그릇이 놓인 짙은 나무 선반, 따뜻하고 낮은 빛"
+      ]
     },
     {
       "id": "brand_laneige",
@@ -102,7 +108,13 @@
       "brand": "laneige",
       "title": "라네즈 브랜드 소개",
       "kind": "html",
-      "url": "https://www.apgroup.com/int/ko/brands/laneige.html"
+      "url": "https://www.apgroup.com/int/ko/brands/laneige.html",
+      "directions": [
+        "맑은 물방울이 맺힌 투명 유리 면, 아침의 시원한 푸른빛",
+        "잔잔히 일렁이는 푸른 물 위 유리 선반, 물결무늬 빛",
+        "달빛이 드는 밤의 침실 협탁, 차분한 푸른 그림자",
+        "반투명 면을 통과한 밝고 산뜻한 푸른빛"
+      ]
     },
     {
       "id": "brand_innisfree",
@@ -110,7 +122,12 @@
       "brand": "innisfree",
       "title": "이니스프리 브랜드 소개",
       "kind": "html",
-      "url": "https://www.apgroup.com/int/ko/brands/innisfree.html"
+      "url": "https://www.apgroup.com/int/ko/brands/innisfree.html",
+      "directions": [
+        "이슬 맺힌 제주 녹차밭 고랑의 돌 위, 안개 걷히는 아침빛",
+        "제주 현무암 위로 드리운 잎 그림자, 맑은 오후 햇살",
+        "이끼 낀 돌과 숲 사이로 드는 부드러운 초록빛"
+      ]
     },
     {
       "id": "brand_aestura",
@@ -118,7 +135,12 @@
       "brand": "aestura",
       "title": "에스트라 브랜드 소개",
       "kind": "html",
-      "url": "https://www.apgroup.com/int/ko/brands/aestura.html"
+      "url": "https://www.apgroup.com/int/ko/brands/aestura.html",
+      "directions": [
+        "흰 석고 면과 옅은 청록 유리가 놓인 정돈된 선반, 균일하고 부드러운 확산광",
+        "맑은 물이 담긴 유리와 매끄러운 흰 세라믹 면, 밝고 차분한 아침 빛",
+        "리넨 커튼으로 걸러진 빛이 드는 깨끗한 욕실 선반"
+      ]
     },
     {
       "id": "prod_sulwhasoo_jaumsaeng_rich",
@@ -136,7 +158,8 @@
         "자음생크림 60주년",
         "자음생크림 리치 60주년",
         "자음생크림 리치 (60주년)"
-      ]
+      ],
+      "motifs": "인삼 뿌리, 색을 층층이 겹친 단색화 면, 겹겹이 쌓인 한지 결"
     },
     {
       "id": "prod_sulwhasoo_yunjo6",
@@ -152,7 +175,8 @@
       "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
       "aliases": [
         "윤조에센스"
-      ]
+      ],
+      "motifs": "자연 숙성한 인삼, 윤이 도는 옻칠 표면, 겹쳐 비치는 따뜻한 빛"
     },
     {
       "id": "prod_sulwhasoo_perfecting_cushion",
@@ -167,7 +191,8 @@
         "자외선 차단"
       ],
       "url": "https://www.sulwhasoo.com/product/%ED%8D%BC%ED%8E%99%ED%8C%85-%EC%BF%A0%EC%85%98/43/category/59/display/1/",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "자개의 무지갯빛 결, 전통 한지의 질감"
     },
     {
       "id": "prod_laneige_water_sleeping_mask",
@@ -178,7 +203,8 @@
       "product_name": "워터 슬리핑 마스크",
       "functional": [],
       "url": "https://www.laneige.com/product/%EC%9B%8C%ED%84%B0-%EC%8A%AC%EB%A6%AC%ED%95%91-%EB%A7%88%EC%8A%A4%ED%81%AC/56/category/26/display/1/",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "잔잔한 밤의 물결, 맑은 수분 방울, 은은한 달빛"
     },
     {
       "id": "prod_laneige_radian_c_cream",
@@ -189,7 +215,8 @@
       "product_name": "래디언-C 크림",
       "functional": [],
       "url": "https://www.laneige.com/product/%EB%9E%98%EB%94%94%EC%96%B8-c-%ED%81%AC%EB%A6%BC/54/category/26/display/1/",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "맑게 번지는 빛, 빛을 굴절시키는 투명한 유리, 싱그러운 감귤 단면"
     },
     {
       "id": "prod_laneige_cream_skin_refiner",
@@ -204,7 +231,8 @@
       "aliases": [
         "크림 스킨 리파이너",
         "크림 스킨"
-      ]
+      ],
+      "motifs": "물에 녹아드는 크림 결, 우윳빛 물결"
     },
     {
       "id": "prod_innisfree_uv_sun_serum",
@@ -221,7 +249,8 @@
       "aliases": [
         "수분장벽 선세럼",
         "데일리 유브이 선세럼"
-      ]
+      ],
+      "motifs": "맑은 햇살, 물기 머금은 초록 잎"
     },
     {
       "id": "prod_innisfree_greentea_ha_cream",
@@ -232,7 +261,8 @@
       "product_name": "그린티 히알루론산 크림",
       "functional": [],
       "url": "https://www.innisfree.com/kr/ko/dp/product/106191",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "제주 녹차 잎, 잎 끝의 이슬"
     },
     {
       "id": "prod_aestura_atobarrier365_cream",
@@ -247,7 +277,8 @@
       "aliases": [
         "아토베리어 365 크림",
         "아토베리어 크림"
-      ]
+      ],
+      "motifs": "촘촘히 모인 작은 구슬, 매끈하게 펴진 크림 결"
     },
     {
       "id": "prod_aestura_acica365",
@@ -258,7 +289,8 @@
       "product_name": "에이시카365",
       "functional": [],
       "url": "https://www.aestura.com",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "잔잔한 맑은 물, 차분한 초록빛"
     },
     {
       "id": "prod_aestura_dermauv365",
@@ -269,7 +301,8 @@
       "product_name": "더마UV365",
       "functional": [],
       "url": "https://www.aestura.com",
-      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장"
+      "how": "공식 사이트 제품 페이지(스크립트로 그려짐)를 브라우저로 읽고 확인된 사실만 요약해 raw/<id>.txt 로 저장",
+      "motifs": "부드럽게 걸러진 햇살, 리넨의 그늘"
     }
   ]
 }

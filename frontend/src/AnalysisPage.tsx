@@ -31,7 +31,7 @@ type Row = { ts: string; api: string; kind: string; provider: string; model: str
 type Judgment = { ts: string; background_id: number; file: string; template: string | null; style: string; model: string; scores: { item: string; score: number; reason: string }[]; overall: number; summary: string; cost_usd: number | null; tokens_in: number | null; tokens_out: number | null }
 type Mapping = { key: string; item: string; value: string; stages: Record<'copy' | 'background' | 'icon' | 'compose' | 'review', string | null> }
 type KChunk = { chunk_id: number; source_id: string; doc_title: string; layer: string; section: string; text: string; score: number | null; product_name: string | null; functional: string[] }
-type Knowledge = { industries: string[]; law: KChunk[]; guide: KChunk[]; error: string | null; functional_mismatch: string | null; functional: string[] | null; embed_model: string | null; product_note: string | null; variants: { variant_no: number; angle: string; evidence: string }[] }
+type Knowledge = { industries: string[]; law: KChunk[]; guide: KChunk[]; error: string | null; functional_mismatch: string | null; functional: string[] | null; embed_model: string | null; product_note: string | null; motifs: string | null; directions: string[]; variants: { variant_no: number; angle: string; evidence: string }[] }
 type Analysis = {
   design: { id: number; kind: string; status: string; created_at: string; brief: Record<string, unknown>; presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[]; settings: { model: string; bg_mode: string }; style: string; style_reason: string }
   brand: { id: number; name: string; description: string; version_no: number; colors: { role: string; hex: string }[]; fonts: { role: string; name?: string | null }[]; icon_style: { corner?: string; material?: string; stroke_width?: number; fill?: string }; image_tone: { description?: string }; voice: { description?: string; headline_max_chars?: number | null; polite?: boolean }; levels: Record<string, string>; logo_position: string | null; logo_margin: { percent?: number } | null; effective: { required_phrases: string[]; forbidden_phrases: string[]; required_source: string; forbidden_source: string } }
@@ -523,6 +523,7 @@ function KnowledgeCard({ k }: { k: Knowledge }) {
       {k.error && <div className="notice err">브랜드 지식 검색에 실패해 지식 없이 만들었습니다 ({k.error})</div>}
       <p className="muted an-note">기능성 입력: {fn}. 규제는 검색하지 않고, 품목에서 감지한 업종({k.industries.join(', ') || '없음'})의 조문을 전부 넣습니다.
         브랜드 지식은 상품명·설명·핵심 메시지·타깃으로 검색한 제품 2 · 브랜드 2 · 그룹 1 조각이며, 같은 브랜드·그룹 자료만 찾습니다.</p>
+      {(k.motifs || k.directions.length > 0) && <p className="muted an-note">배경 이미지에 쓰는 지식 — 제품 소재: {k.motifs ?? '없음(상품명이 등록 제품과 다름)'} · 브랜드 연출 후보 {k.directions.length}개</p>}
       {k.variants.length > 0 && (
         <table className="an-table">
           <thead><tr><th>시안</th><th>각도</th><th>카피에 쓴 근거</th></tr></thead>
