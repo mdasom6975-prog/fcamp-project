@@ -38,8 +38,9 @@ def env(tmp_path, monkeypatch):
 
     def fake_generate_checked(brand_name, brand, brief, placement, limits, *a, **k):
         vs = [{"headline": f"제목{i}", "body": f"본문{i}", "cta": "보기", "violations": []} for i in (1, 2, 3)]
-        return vs, 1, [], []
+        return vs, 1
     monkeypatch.setattr(copywriter, "generate_checked", fake_generate_checked)
+    monkeypatch.setattr(copywriter, "extras", lambda *a, **k: ([], {}))
     monkeypatch.setattr("app.routers_smallbiz.llm.chat_json", lambda *a, **k: {"message": "오늘의 케이크"})
 
     def override():

@@ -339,6 +339,7 @@ class KnowledgeChunk(Base):
     seq: Mapped[int] = mapped_column(Integer)
     section: Mapped[str] = mapped_column(String(200), default="", server_default="")   # 예: 화장품법 제13조 제1항
     product_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    aliases: Mapped[list] = mapped_column(JSON, default=list)         # 제품 청크: 브리프에 쓸 만한 다른 이름(기획 세트명·줄임말)
     functional: Mapped[list] = mapped_column(JSON, default=list)      # 제품 청크: 심사·보고된 기능성(미백·주름 개선 …)
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list] = mapped_column(JSON, default=list)

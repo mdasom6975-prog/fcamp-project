@@ -1212,8 +1212,8 @@ const FUNCTIONAL_KINDS = ['미백', '주름 개선', '자외선 차단', '태닝
   '여드름성 피부 완화', '피부장벽 기능 회복(가려움 개선)', '튼살 붉은 선 완화']
 const functionalText = (fn: string[] | null | undefined) => (fn == null ? '입력 안 함' : fn.length ? fn.join(', ') : '기능성 아님')
 // 카피 생성 응답의 지식(RAG) 안내: 기능성 입력과 제품 자료가 다르거나, 지식 검색이 실패해 지식 없이 만든 경우
-const knowledgeNote = (j: { knowledge?: { functional_mismatch?: string | null; error?: string | null } }) =>
-  j.knowledge?.functional_mismatch ?? (j.knowledge?.error ? `브랜드 지식 검색에 실패해 지식 없이 만들었습니다 (${j.knowledge.error})` : null)
+const knowledgeNote = (j: { knowledge?: { functional_mismatch?: string | null; product_note?: string | null; error?: string | null } }) =>
+  j.knowledge?.functional_mismatch ?? j.knowledge?.product_note ?? (j.knowledge?.error ? `브랜드 지식 검색에 실패해 지식 없이 만들었습니다 (${j.knowledge.error})` : null)
 // 제품 크기(서버 compose.PRODUCT_SCALES): 투명 누끼를 붙이는 구역을 받침 기준으로 줄인다
 const PRODUCT_SCALES = [
   { v: '크게', label: '크게 — 제품이 주인공 (화면의 약 43%)' },

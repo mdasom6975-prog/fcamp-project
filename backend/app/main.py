@@ -65,6 +65,9 @@ def _added_columns() -> None:
     if insp.has_table("knowledge_docs") and "industry" not in {c["name"] for c in insp.get_columns("knowledge_docs")}:
         with engine.begin() as conn:      # 규제 문서의 업종(업종 감지 시 검색 없이 전부 넣는다)
             conn.execute(text("ALTER TABLE knowledge_docs ADD COLUMN industry VARCHAR(20)"))
+    if insp.has_table("knowledge_chunks") and "aliases" not in {c["name"] for c in insp.get_columns("knowledge_chunks")}:
+        with engine.begin() as conn:      # 제품 별칭(브리프 상품명과 제품 자료를 정확히 잇는다)
+            conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN aliases JSON"))
 
 
 INIT_KEY = "schema_init"      # KV 키: 초기화를 마친 배포(VERCEL_GIT_COMMIT_SHA)를 적어 둔다

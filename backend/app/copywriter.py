@@ -111,7 +111,7 @@ def check(copy: dict, limits: dict, brand: dict) -> list[dict]:
         if ph and ph not in joined:
             v.append({"type": "required_missing", "field": "필수 표현", "detail": f"'{ph}' 누락",
                       "severity": lv.get("required_phrases", "필수")})
-    v += legal.violations(joined, brand.get("source_text") or "")       # 법적·제도적 금지 표현(브랜드 규칙과 별개로 항상 검사)
+    v += legal.violations(joined, brand.get("source_text") or "", brand.get("functional"))       # 법적·제도적 금지 표현(브랜드 규칙과 별개로 항상 검사)
     v += legal.functional_violations(joined, brand.get("functional"))    # 입력한 기능성 밖의 기능성 표현(입력한 캠페인만)
     return v
 
@@ -139,6 +139,25 @@ def knowledge_vars(knowledge: dict | None, brief: dict) -> dict[str, str]:
     return {"functional": functional, "law": law, "guide": guide}
 
 
+def _shared_vars(brand_name: str, brand: dict, brief: dict, knowledge: dict | None) -> dict:
+    """copy/user 와 copy/extras_user 가 함께 쓰는 변수."""
+    voice = brand.get("voice", {})
+    return dict(
+        brand_name=brand_name,
+        voice=voice.get("description") or "지정 없음",
+        headline_len=str(voice["headline_max_chars"]) + "자 이내" if voice.get("headline_max_chars") else "지정 없음",
+        polite="존댓말로 작성" if voice.get("polite") else "지정 없음",
+        required=", ".join(brand.get("required_phrases", [])) or "없음",
+        forbidden=", ".join(brand.get("forbidden_phrases", [])) or "없음",
+        product_name=brief.get("product_name"),
+        description=brief.get("description") or "없음",
+        key_message=brief.get("key_message") or "없음",
+        target=brief.get("target") or "없음",
+        legal=legal.industry_block(legal.detect(" ".join(str(brief.get(k) or "") for k in ("product_name", "description", "key_message")))),
+        **knowledge_vars(knowledge, brief),
+    )
+
+
 def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
             knowledge: dict | None = None) -> tuple[str, str]:
     """knowledge: knowledge.for_copy 결과(규제 원문·브랜드 지식). 없으면 지금처럼 브랜드 규칙과 브리프만으로 만든다."""
@@ -155,41 +174,50 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
                if l.get("method") == "전각 2자 계산" else "공백 포함")
         return f"- {label}: {', '.join(rng) or '제한 없음'} ({how}, 매체 필드명 '{l['field']}')"
 
-    # 추가 문구 자산(PMax 등 '문구 수량' 조건): limits["assets"] 에 copyfields.asset_spec 결과가 오면 요구 줄을 만든다
-    assets = ""
-    spec = limits.get("assets") or []
-    if spec:
-        how = lambda m: ("한글 등 전각 문자는 글자당 2자로 계산(한글 한 글자=2), 영문·숫자·공백은 1자" if m == "전각 2자 계산" else "공백 포함")
-        rows = [f"- {a['field']}: 정확히 {a['count']}개, 각 {a['max_chars']}자 이하({how(a['method'])})" if a.get("max_chars")
-                else f"- {a['field']}: 정확히 {a['count']}개" for a in spec]
-        assets = ("\n[추가 문구 자산] 아래 지면은 문구를 여러 개 요구한다(" + ", ".join(sorted({p for a in spec for p in a["placements"]})) +
-                  "). JSON 의 \"assets\" 객체에 필드명을 키로, 문구 문자열 배열을 값으로 넣는다. 서로 다른 각도의 문장으로, 위 브랜드 규칙과 "
-                  "금지 표현을 똑같이 지키고 각 문구는 제한의 90% 이내로 쓴다.\n" + "\n".join(rows))
     # 문장은 prompts/copy/system.md · user.md 에 있다. 여기서는 분기(없음/지정 없음)와 제한 줄만 계산해 넘긴다.
-    voice = brand.get("voice", {})
-    system = prompts.render("copy/system", variants=VARIANTS, icon_count=ICON_CANDIDATES)
+    system = prompts.render("copy/system", variants=VARIANTS)
     user = prompts.render(
         "copy/user",
-        brand_name=brand_name,
-        voice=voice.get("description") or "지정 없음",
-        headline_len=str(voice["headline_max_chars"]) + "자 이내" if voice.get("headline_max_chars") else "지정 없음",
-        polite="존댓말로 작성" if voice.get("polite") else "지정 없음",
-        required=", ".join(brand.get("required_phrases", [])) or "없음",
-        forbidden=", ".join(brand.get("forbidden_phrases", [])) or "없음",
-        product_name=brief.get("product_name"),
-        description=brief.get("description") or "없음",
-        key_message=brief.get("key_message") or "없음",
-        target=brief.get("target") or "없음",
+        **_shared_vars(brand_name, brand, brief, knowledge),
         platform=placement["platform"],
         placement=placement["name"],
         limit_headline=rule("headline", "headline(제목)"),
         limit_body=rule("body", "body(본문)"),
         limit_cta=rule("cta", "cta(행동 유도)"),
-        assets=assets,
-        legal=legal.industry_block(legal.detect(" ".join(str(brief.get(k) or "") for k in ("product_name", "description", "key_message")))),
-        **knowledge_vars(knowledge, brief),
     )
     return system, user
+
+
+def _assets_block(spec: list[dict]) -> str:
+    """추가 문구 자산 요구 문단(PMax 등 '문구 수량' 조건, copyfields.asset_spec 결과). 요구가 없으면 빈 문자열."""
+    if not spec:
+        return ""
+    how = lambda m: ("한글 등 전각 문자는 글자당 2자로 계산(한글 한 글자=2), 영문·숫자·공백은 1자" if m == "전각 2자 계산" else "공백 포함")
+    rows = [f"- {a['field']}: 정확히 {a['count']}개, 각 {a['max_chars']}자 이하({how(a['method'])})" if a.get("max_chars")
+            else f"- {a['field']}: 정확히 {a['count']}개" for a in spec]
+    return ("\n[추가 문구 자산] 아래 지면은 문구를 여러 개 요구한다(" + ", ".join(sorted({p for a in spec for p in a["placements"]})) +
+            "). JSON 의 \"assets\" 객체에 필드명을 키로, 문구 문자열 배열을 값으로 넣는다. 서로 다른 각도의 문장으로, 위 브랜드 규칙과 "
+            "금지 표현을 똑같이 지키고 각 문구는 제한의 90% 이내로 쓴다.\n" + "\n".join(rows))
+
+
+def extras_prompt(brand_name: str, brand: dict, brief: dict, spec: list[dict], variants: list[dict],
+                  knowledge: dict | None = None, want_icons: bool = True) -> tuple[str, str]:
+    """카피 뒤의 보조 호출(아이콘 후보·추가 문구 자산) 프롬프트. variants 는 이번 카피(어조 참고)."""
+    icons_rule = prompts.render("copy/_extras_icons", icon_count=ICON_CANDIDATES) if want_icons else ""
+    system = prompts.render("copy/extras_system", icons_rule=icons_rule)
+    lines = "\n".join(f"- {v.get('headline', '')} / {v.get('body', '')}" for v in variants) or "- 없음"
+    shared = _shared_vars(brand_name, brand, brief, knowledge)
+    user = prompts.render("copy/extras_user", **shared, copy_lines=lines, assets=_assets_block(spec))
+    return system, user
+
+
+def extras(brand_name: str, brand: dict, brief: dict, spec: list[dict], variants: list[dict],
+           knowledge: dict | None = None, want_icons: bool = True) -> tuple[list[dict], dict]:
+    """아이콘 기능명 후보와 추가 문구 자산을 작은 모델로 따로 받는다. 반환: (아이콘 후보, 추가 문구 자산)."""
+    from . import llm
+    system, user = extras_prompt(brand_name, brand, brief, spec, variants, knowledge, want_icons)
+    data = llm.chat_json(system, user, "copy_extras", llm.extras_schema([a["field"] for a in spec], want_icons))
+    return parse_icons(data) if want_icons else [], parse_assets(data, spec) if spec else {}
 
 
 def parse_icons(data: dict) -> list[dict]:
@@ -219,36 +247,25 @@ def parse_assets(data: dict, spec: list[dict]) -> dict:
 
 
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
-             icons_out: list | None = None, assets_out: dict | None = None, knowledge: dict | None = None) -> list[dict]:
-    """카피 변형을 만든다. icons_out 리스트를 주면 같은 응답의 아이콘 기능명 후보를, assets_out dict 를 주면
-    추가 문구 자산(limits["assets"] 요구)을 거기에 채운다(추가 호출 없음)."""
+             knowledge: dict | None = None) -> list[dict]:
+    """카피 변형을 만든다. angle·evidence 는 어떤 각도로 어떤 사실을 썼는지의 기록(분석 화면)."""
     system, user = _prompt(brand_name, brand, brief, placement, limits, knowledge)
     from . import llm       # 공급자(Claude/OpenAI) 전환은 llm.py 가 맡는다. 순환 import 를 피해 함수 안에서 가져온다
-    data = llm.chat_json(system, user, "copy", llm.copy_schema([a["field"] for a in (limits.get("assets") or [])]))
-    if icons_out is not None:
-        icons_out[:] = parse_icons(data)
-    if assets_out is not None and limits.get("assets"):
-        assets_out.clear(); assets_out.update(parse_assets(data, limits["assets"]))
+    data = llm.chat_json(system, user, "copy", llm.copy_schema())
     out = []
     for item in (data.get("variants") or [])[:VARIANTS]:
-        out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta")})
+        out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta", "angle", "evidence")})
     return out
 
 
-def generate_checked(brand_name, brand, brief, placement, limits,
-                     knowledge: dict | None = None) -> tuple[list[dict], int, list[dict], dict]:
-    """생성 → 코드 검사. 반환: (변형, 시도 수, 아이콘 기능명 후보, 추가 문구 자산). 기본은 1회 호출.
+def generate_checked(brand_name, brand, brief, placement, limits, knowledge: dict | None = None) -> tuple[list[dict], int]:
+    """생성 → 코드 검사. 반환: (변형, 시도 수). 기본은 1회 호출.
     COPY_AUTO_RETRY=1 이면 통과한 변형이 하나도 없을 때만 1회 더 생성해 위반이 적은 쪽을 채택한다(사용자는 변형 하나를
-    고르므로 깨끗한 변형이 하나면 충분하다). 아이콘 후보는 마지막 응답의 것을 쓴다."""
-    best, best_bad, attempts, icons, assets = None, 10**9, 0, [], {}
+    고르므로 깨끗한 변형이 하나면 충분하다)."""
+    best, best_bad, attempts = None, 10**9, 0
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
-        got: list = []
-        got_assets: dict = {}
-        variants = generate(brand_name, brand, brief, placement, limits, icons_out=got, assets_out=got_assets,
-                            knowledge=knowledge)
-        icons = got or icons
-        assets = got_assets or assets
+        variants = generate(brand_name, brand, brief, placement, limits, knowledge=knowledge)
         for v in variants:
             v["violations"] = check(v, limits, brand)
         bad = sum(1 for v in variants if v["violations"])
@@ -256,4 +273,4 @@ def generate_checked(brand_name, brand, brief, placement, limits,
             best, best_bad = variants, bad
         if best is not None and any(not v["violations"] for v in best):
             break
-    return best or [], attempts, icons, assets
+    return best or [], attempts

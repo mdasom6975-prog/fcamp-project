@@ -23,7 +23,9 @@ class ChatRefused(RuntimeError):
 
 
 # 종류별 기본 모델: 짧은 구조화 생성은 Haiku(Sonnet 과 같은 시험 통과율, 비용 약 1/8 — CHANGELOG 참조). judge 등 나머지는 CLAUDE_MODEL
-KIND_DEFAULTS = {"copy": "claude-haiku-5-5", "copy_fit": "claude-haiku-5-5", "icon_names": "claude-haiku-5-5"}
+# copy 는 글의 품질이 결과물이라 Sonnet(시험 통과율은 같아도 근거를 살린 문장은 작은 모델로는 부족했다). 아이콘 후보·추가 문구는 copy_extras
+KIND_DEFAULTS = {"copy": "claude-sonnet-5-5", "copy_fit": "claude-haiku-5-5", "copy_extras": "claude-haiku-5-5",
+                 "icon_names": "claude-haiku-5-5"}
 
 
 def model_for(kind: str | None = None) -> str:
@@ -150,9 +152,14 @@ ICONS_3D_SCHEMA = _obj({"icons": _arr(ICON_3D)})
 ICONS_SVG_SCHEMA = _obj({"icons": _arr(ICON_SVG)})
 
 
-def copy_schema(asset_fields: list[str]) -> dict:
-    """카피 응답: variants(제목·본문·CTA) + icons(기능명 후보) + assets(요구된 필드만, 각 문자열 배열)."""
-    props = {"variants": _arr(_obj({"headline": STR, "body": STR, "cta": STR})), "icons": _arr(ICON_3D)}
+def copy_schema() -> dict:
+    """카피 응답: variants(각도·근거·제목·본문·CTA)."""
+    return _obj({"variants": _arr(_obj({"angle": STR, "evidence": STR, "headline": STR, "body": STR, "cta": STR}))})
+
+
+def extras_schema(asset_fields: list[str], want_icons: bool = True) -> dict:
+    """보조 호출 응답: icons(기능명 후보) + assets(요구된 필드만, 각 문자열 배열)."""
+    props: dict = {"icons": _arr(ICON_3D)} if want_icons else {}
     if asset_fields:
         props["assets"] = _obj({f: _arr(STR) for f in asset_fields})
     return _obj(props)

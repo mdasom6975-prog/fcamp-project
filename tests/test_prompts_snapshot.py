@@ -80,6 +80,8 @@ def test_copy_prompt_with_knowledge_and_functional():
     }
     _, user = copywriter._prompt("쿠챠", BRAND, brief, _placement("Instagram 피드"), copywriter.limits_for([]), knowledge)
     _assert_snapshot("copy__knowledge", f"[USER]\n{user}\n")
+    system, extras_user = copywriter.extras_prompt("쿠챠", BRAND, brief, [], [{"headline": "제목", "body": "본문"}], knowledge)
+    _assert_snapshot("copy_extras__knowledge", f"[SYSTEM]\n{system}\n\n[USER]\n{extras_user}\n")
     _, none_user = copywriter._prompt("쿠챠", BRAND, {**brief, "functional": []}, _placement("Instagram 피드"), copywriter.limits_for([]))
     assert "이 제품은 기능성 화장품이 아니다" in none_user and "[브랜드 지식" not in none_user
 

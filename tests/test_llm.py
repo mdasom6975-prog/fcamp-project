@@ -43,14 +43,14 @@ def claude(monkeypatch):
 
 def test_chat_json_uses_schema_fallbacks_and_records_tokens(claude):
     from app import calllog
-    data = llm.chat_json("sys", "user", "copy", llm.copy_schema(["광고 제목"]))
+    data = llm.chat_json("sys", "user", "copy", llm.extras_schema(["광고 제목"]))
     assert data["variants"][0]["headline"] == "h"
     kw = claude.calls[0]
     assert kw["model"] == "claude-opus-5-5" and kw["system"] == "sys" and kw["messages"] == [{"role": "user", "content": "user"}]
     assert kw["betas"] == ["server-side-fallback-2026-07-01"] and kw["fallbacks"] == "default"
     assert kw["output_config"]["effort"] == "low" and kw["output_config"]["format"]["type"] == "json_schema"
     schema = kw["output_config"]["format"]["schema"]
-    assert set(schema["required"]) == {"variants", "icons", "assets"} and schema["properties"]["assets"]["properties"]["광고 제목"]["type"] == "array"
+    assert set(schema["required"]) == {"icons", "assets"} and schema["properties"]["assets"]["properties"]["광고 제목"]["type"] == "array"
     assert "thinking" not in kw, "Opus 5.5 는 thinking 을 보내지 않는다(적응형 기본)"
     row = calllog._rows()[-1]
     assert row["provider"] == "anthropic" and row["model"] == "claude-opus-5-5" and row["tokens_in"] == 120 and row["tokens_out"] == 40
@@ -68,7 +68,7 @@ def test_chat_json_refusal_raises(monkeypatch):
     monkeypatch.setattr(llm, "CHAT_PROVIDER", "anthropic")
     monkeypatch.setattr(llm, "_anthropic_client", _FakeClient(stop_reason="refusal"))
     with pytest.raises(llm.ChatRefused):
-        llm.chat_json("s", "u", "copy", llm.copy_schema([]))
+        llm.chat_json("s", "u", "copy", llm.copy_schema())
 
 
 def test_chat_json_openai_path(monkeypatch):
@@ -113,9 +113,10 @@ def test_pricing_knows_claude_models():
 def test_model_for_kind_defaults_and_env_override(monkeypatch):
     monkeypatch.setattr(llm, "CHAT_PROVIDER", "anthropic")
     monkeypatch.setattr(llm, "CLAUDE_MODEL", "claude-sonnet-5-5")
-    for k in ("COPY", "COPY_FIT", "ICON_NAMES", "JUDGE"):
+    for k in ("COPY", "COPY_FIT", "COPY_EXTRAS", "ICON_NAMES", "JUDGE"):
         monkeypatch.delenv(f"CLAUDE_MODEL_{k}", raising=False)
-    assert all(llm.chat_model(k) == "claude-haiku-5-5" for k in ("copy", "copy_fit", "icon_names"))
+    assert all(llm.chat_model(k) == "claude-haiku-5-5" for k in ("copy_fit", "copy_extras", "icon_names"))
+    assert llm.chat_model("copy") == "claude-sonnet-5-5", "카피는 글의 품질이 결과물이라 Sonnet"
     assert llm.model_for("judge") == "claude-sonnet-5-5" and llm.model_for(None) == "claude-sonnet-5-5"     # 나머지는 기본값
-    monkeypatch.setenv("CLAUDE_MODEL_COPY", "claude-sonnet-5-5")
-    assert llm.model_for("copy") == "claude-sonnet-5-5" and llm.model_for("copy_fit") == "claude-haiku-5-5"
+    monkeypatch.setenv("CLAUDE_MODEL_COPY", "claude-opus-5-5")
+    assert llm.model_for("copy") == "claude-opus-5-5" and llm.model_for("copy_fit") == "claude-haiku-5-5"

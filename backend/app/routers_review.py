@@ -47,7 +47,7 @@ def _brand_dict(bv: BrandVersion, name: str = "", brief: dict | None = None) -> 
     return {"name": name, "levels": bv.levels or {}, "forbidden_phrases": eff["forbidden_phrases"],
             "required_phrases": eff["required_phrases"], "colors": bv.colors or [], "fonts": bv.fonts or [],
             "logo_asset_id": bv.logo_asset_id, "icon_style": bv.icon_style or {},
-            "source_text": legal.source_text(brief)}
+            "source_text": legal.source_text(brief), "functional": (brief or {}).get("functional")}
 
 
 def gather(db: Session, d: Design, pv: PresetVersion, brand: dict) -> dict:

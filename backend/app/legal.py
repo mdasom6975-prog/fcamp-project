@@ -64,18 +64,22 @@ def source_text(brief: dict | None) -> str:
     return " ".join(str(b.get(k) or "") for k in ("product_name", "description", "key_message"))
 
 
-def scan(text: str, source: str = "") -> list[dict]:
+def scan(text: str, source: str = "", functional: list[str] | None = None) -> list[dict]:
     """문구에서 표현 사전의 금지·주의 표현을 찾는다. 반환: [{phrase, severity(block|warn), reason, law, suggest, grounded}].
-    같은 표현이 입력(source)에 있으면 grounded=True 로 block 을 warn 으로 낮춘다. 업종 한정 항목은 그 업종으로 감지된 때만 본다."""
+    같은 표현이 입력(source)에 있으면 grounded=True 로 block 을 warn 으로 낮춘다. 업종 한정 항목은 그 업종으로 감지된 때만 본다.
+    functional 은 캠페인에 입력한 기능성: 그 기능성을 뜻하는 경고(warn) 표현은 근거가 입력된 것이므로 알리지 않는다."""
     norm = lambda s: _SPACE.sub("", s or "").lower()
     t, src = norm(text), norm(source)
     industries = set(detect(f"{source} {text}"))
+    declared = [norm(w) for k in (functional or []) for w in FUNCTIONAL_CLAIMS.get(k, ())]
     out, seen = [], set()
     for e in _entries():
         ind = e.get("industries")
         if ind and not industries & set(ind):
             continue
         ph = norm(e["phrase"])
+        if e["severity"] == "warn" and any(w in ph for w in declared):
+            continue
         if ph in t and ph not in seen:
             seen.add(ph)
             grounded = ph in src
@@ -85,12 +89,12 @@ def scan(text: str, source: str = "") -> list[dict]:
     return out
 
 
-def violations(text: str, source: str = "") -> list[dict]:
+def violations(text: str, source: str = "", functional: list[str] | None = None) -> list[dict]:
     """copywriter.check 가 쓰는 위반 항목 형태. block 은 '필수'(수정 필요), warn 은 '권장'(경고)으로 매긴다."""
     return [{"type": "legal", "field": "법적 표현", "phrase": h["phrase"], "law": h["law"], "reason": h["reason"],
              "suggest": h["suggest"], "grounded": h["grounded"],
              "detail": f"'{h['phrase']}' — {h['reason']}" + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
-             "severity": "필수" if h["severity"] == "block" else "권장"} for h in scan(text, source)]
+             "severity": "필수" if h["severity"] == "block" else "권장"} for h in scan(text, source, functional)]
 
 
 # ---- 기능성화장품 표현 검사 (화장품법 시행규칙 제2조의 기능성 범위) ----

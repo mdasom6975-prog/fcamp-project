@@ -150,7 +150,8 @@ def cosine(a: list[float], b: list[float]) -> float:
 def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks: list[tuple[str, str]],
                  group_id: int | None = None, brand_id: int | None = None, source_url: str = "",
                  fetched_at: str | None = None, product_name: str | None = None,
-                 functional: list[str] | None = None, industry: str | None = None, embedder=embed) -> KnowledgeDoc:
+                 functional: list[str] | None = None, industry: str | None = None, aliases: list[str] | None = None,
+                 embedder=embed) -> KnowledgeDoc:
     """조각을 임베딩해 문서 하나로 저장한다. 같은 source_id 의 '사용' 문서는 '보관' 으로 돌린다(재등록 = 새 버전).
     embedder 는 테스트에서 가짜 임베딩을 넣을 때 바꾼다."""
     if layer not in LAYERS:
@@ -166,7 +167,8 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
     vectors = embedder([text for _, text in chunks])
     for seq, ((section, text), vec) in enumerate(zip(chunks, vectors), 1):
         db.add(KnowledgeChunk(doc_id=doc.id, seq=seq, section=section, text=text, embedding=vec,
-                              embed_model=EMBED_MODEL, product_name=product_name, functional=functional or []))
+                              embed_model=EMBED_MODEL, product_name=product_name, functional=functional or [],
+                              aliases=aliases or []))
     db.commit()
     return doc
 
@@ -193,19 +195,32 @@ def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | N
     return list(db.execute(q).all())
 
 
+def _same_name(a: str | None, b: str | None) -> bool:
+    return bool(a and b) and re.sub(r"[\s™®]", "", a).lower() == re.sub(r"[\s™®]", "", b).lower()
+
+
+def _is_product(ch: KnowledgeChunk, name: str | None) -> bool:
+    """브리프 상품명이 이 제품 조각의 이름이나 별칭과 같은가(띄어쓰기·상표 기호 무시)."""
+    return any(_same_name(name, x) for x in [ch.product_name, *(ch.aliases or [])])
+
+
 def search(db: Session, query: str, *, brand_id: int | None, group_id: int | None,
-           layer_k: dict[str, int] | None = None, product_name: str | None = None, embedder=embed) -> dict[str, list[dict]]:
+           layer_k: dict[str, int] | None = None, product_name: str | None = None, embedder=embed,
+           skip=None) -> dict[str, list[dict]]:
     """질의로 층별 상위 조각을 찾는다. 반환: {층: [{chunk_id, doc_title, section, text, score, …}]}.
     규제는 모든 브랜드 공통, 그룹은 group_id, 브랜드·제품은 brand_id 로 거른다.
-    product_name 이 제품 조각의 제품명과 같으면 그 조각을 맨 앞에 둔다(이름이 정확히 맞으면 유사도보다 확실하다)."""
+    product_name 이 제품 조각의 제품명·별칭과 같으면 그 조각을 맨 앞에 둔다(이름이 정확히 맞으면 유사도보다 확실하다).
+    skip(조각) 이 참인 조각은 후보에서 뺀다."""
     layer_k = layer_k or LAYER_K
     qv = embedder([query])[0]
     out: dict[str, list[dict]] = {}
     for layer, k in layer_k.items():
         scored = []
         for ch, doc in _candidates(db, layer, brand_id, group_id):
+            if skip and skip(ch):
+                continue
             s = cosine(qv, ch.embedding)
-            exact = bool(product_name and ch.product_name and ch.product_name.replace(" ", "") == product_name.replace(" ", ""))
+            exact = _is_product(ch, product_name)
             scored.append((exact, s, ch, doc))
         scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
         out[layer] = [{"chunk_id": ch.id, "doc_id": doc.id, "source_id": doc.source_id, "doc_title": doc.title,
@@ -218,6 +233,12 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
 # ── 카피 생성에 붙이기 ────────────────────────────────────────────────────
 
 GUIDE_K = {k: v for k, v in LAYER_K.items() if k != "규제"}    # 카피에서 검색하는 층(규제는 업종으로 전부 넣는다)
+_TEST_NUMBER = re.compile(r"\d+(?:\.\d+)?\s*%")
+
+
+def _test_result(ch: KnowledgeChunk) -> bool:
+    """시험·임상 수치가 든 그룹·브랜드 조각. 광고에 근거 주석을 함께 못 넣어 쓸 수 없으니 재료로 고르지 않는다(제품 정보 카드는 예외)."""
+    return not ch.product_name and bool(_TEST_NUMBER.search(ch.text))
 
 
 def _row(ch: KnowledgeChunk, doc: KnowledgeDoc, score: float | None = None) -> dict:
@@ -266,12 +287,19 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     - 임베딩 호출이 실패하면 guide 없이 진행하고 error 에 오류 이름만 남긴다(카피 생성을 막지 않는다)"""
     from . import legal
     industries = legal.detect(legal.source_text(brief))
-    out = {"industries": industries, "law": law_rows(db, industries), "guide": [], "error": None, "functional_mismatch": None}
+    out = {"industries": industries, "law": law_rows(db, industries), "guide": [], "error": None, "functional_mismatch": None,
+           "product_note": None}
     if has_guide(db, brand_id, group_id):
         try:
             res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=GUIDE_K,
-                         product_name=brief.get("product_name"), embedder=embedder)
-            out["guide"] = [r for layer in ("제품", "브랜드", "그룹") for r in res.get(layer, [])]
+                         product_name=brief.get("product_name"), embedder=embedder, skip=_test_result)
+            products = res.get("제품", [])
+            if any(r["exact_product"] for r in products):      # 제품을 특정했으면 비슷한 다른 제품 이야기를 섞지 않는다
+                products = [r for r in products if r["exact_product"]]
+            elif products:
+                out["product_note"] = (f"'{brief.get('product_name')}' 과 이름이 같은 제품 자료가 없어 비슷한 자료({products[0]['product_name']})를 "
+                                       "참고했습니다. 같은 제품이면 sources.json 의 aliases 에 이 이름을 추가하세요")
+            out["guide"] = products + [r for layer in ("브랜드", "그룹") for r in res.get(layer, [])]
         except Exception as e:      # 키·네트워크 오류 등. 메시지에 민감 정보가 있을 수 있어 이름만 남긴다
             out["error"] = type(e).__name__
     out["functional_mismatch"] = functional_mismatch(out["guide"], brief.get("functional"))
@@ -283,7 +311,7 @@ def refs(k: dict) -> dict:
     return {"law_chunk_ids": [r["chunk_id"] for r in k["law"]], "guide": [
         {x: r[x] for x in ("chunk_id", "source_id", "layer", "section", "score")} for r in k["guide"]],
             "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
-            "embed_model": EMBED_MODEL}
+            "product_note": k.get("product_note"), "embed_model": EMBED_MODEL}
 
 
 def from_refs(db: Session, saved: dict | None) -> dict | None:
@@ -299,4 +327,5 @@ def from_refs(db: Session, saved: dict | None) -> dict | None:
         if g["chunk_id"] in rows:
             guide.append({**rows[g["chunk_id"]], "score": g.get("score")})
     return {"industries": saved.get("industries", []), "law": [rows[i] for i in saved.get("law_chunk_ids", []) if i in rows],
-            "guide": guide, "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch")}
+            "guide": guide, "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch"),
+            "product_note": saved.get("product_note")}

@@ -42,6 +42,7 @@ def env(tmp_path, monkeypatch):
         v["violations"] = copywriter.check(v, limits, brand)
         return [v], 1
     monkeypatch.setattr(copywriter, "generate_checked", fake_generate_checked)
+    monkeypatch.setattr(copywriter, "extras", lambda *a, **k: ([], {}))
 
     def override():
         with Local() as db:

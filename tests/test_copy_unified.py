@@ -54,6 +54,7 @@ def env(tmp_path, monkeypatch):
             v["violations"] = copywriter.check(v, limits, brand)
         return vs, 1
     monkeypatch.setattr(copywriter, "generate_checked", fake_generate_checked)
+    monkeypatch.setattr(copywriter, "extras", lambda *a, **k: ([], {}))     # 아이콘 후보·추가 문구 보조 호출
 
     def override():
         with Local() as db:
@@ -126,15 +127,11 @@ def test_select_variant_applies_to_all_placements_and_clears_old_batches(env):
         assert len(sel) == 3 and {(s.batch_no, s.variant_no) for s in sel} == {(2, 1)}
 
 
-def test_copy_call_also_stores_icon_candidates(env, monkeypatch):
-    """카피 호출이 (변형, 시도, 아이콘 후보) 를 돌려주면 후보를 브리프 icon_candidates 에 둔다 (아이콘 세트의 제안 호출 대체)."""
+def test_copy_stores_icon_candidates_from_extras_call(env, monkeypatch):
+    """보조 호출이 준 아이콘 후보를 브리프 icon_candidates 에 둔다 (아이콘 세트의 제안 호출 대체)."""
     from app import copywriter
     cands = [{"name": f"기능{i}", "concept": f"오브젝트 {i}"} for i in range(1, 16)]
-
-    def fake3(brand_name, brand, brief, placement, limits, knowledge=None):
-        vs = [{"headline": "제목", "body": "본문", "cta": "보기", "violations": []}] * 3
-        return vs, 1, cands
-    monkeypatch.setattr(copywriter, "generate_checked", fake3)
+    monkeypatch.setattr(copywriter, "extras", lambda *a, **k: (cands, {}))
     c, ids = env["client"], env["ids"]
     out = c.post(f"/api/designs/{ids['design']}/copy").json()
     assert out["failures"] == [] and out["icon_candidates"] == 15
@@ -142,23 +139,38 @@ def test_copy_call_also_stores_icon_candidates(env, monkeypatch):
     assert brief["icon_candidates"] == cands and brief["product_name"] == "리빙 창고 대방출"
 
 
-def test_parse_icons_and_generate_checked_returns_candidates(monkeypatch):
+def test_extras_failure_keeps_copy(env, monkeypatch):
+    """보조 호출이 실패해도 카피는 저장되고 실패만 알린다."""
     from app import copywriter
-    data = {"icons": [{"name": "정기배송", "concept": "상자"}, {"name": " ", "concept": "x"}, {"name": "정기배송", "concept": "중복"},
-                      {"name": "빠른도착"}] + [{"name": f"n{i}", "concept": ""} for i in range(20)]}
-    got = copywriter.parse_icons(data)
-    assert got[:2] == [{"name": "정기배송", "concept": "상자"}, {"name": "빠른도착", "concept": ""}] and len(got) == 15
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(copywriter, "extras", boom)
+    c, ids = env["client"], env["ids"]
+    out = c.post(f"/api/designs/{ids['design']}/copy").json()
+    assert out["failures"] == ["아이콘 후보·추가 문구: RuntimeError"] and out["groups"][0]["variants"]
 
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
-        if icons_out is not None:
-            icons_out[:] = [{"name": "기능", "concept": "c"}]
-        if assets_out is not None:
-            assets_out["광고 제목"] = ["x"]
-        return [{"headline": "h", "body": "b", "cta": "c"}]
-    monkeypatch.setattr(copywriter, "generate", fake_generate)
-    variants, attempts, icons, assets = copywriter.generate_checked("b", {}, {}, {}, copywriter.limits_for([]))
-    assert attempts == 1 and icons == [{"name": "기능", "concept": "c"}] and variants[0]["violations"] == []
+
+def test_extras_uses_small_model_kind_and_parses(monkeypatch):
+    from app import copywriter, llm
+    data = {"icons": [{"name": "정기배송", "concept": "상자"}, {"name": " ", "concept": "x"}, {"name": "정기배송", "concept": "중복"},
+                      {"name": "빠른도착"}] + [{"name": f"n{i}", "concept": ""} for i in range(20)],
+            "assets": {"광고 제목": ["x"]}}
+    seen = []
+    monkeypatch.setattr(llm, "chat_json", lambda s, u, kind, schema: seen.append((kind, schema)) or data)
+    spec = [{"field": "광고 제목", "count": 3, "max": 5, "max_chars": 30, "method": "글자 수", "placements": ["PMax"]}]
+    icons, assets = copywriter.extras("b", {}, {"product_name": "p"}, spec, [{"headline": "h", "body": "b"}])
+    assert seen[0][0] == "copy_extras" and len(icons) == 15 and icons[:2] == [{"name": "정기배송", "concept": "상자"}, {"name": "빠른도착", "concept": ""}]
     assert assets == {"광고 제목": ["x"]}
+    icons, _ = copywriter.extras("b", {}, {"product_name": "p"}, spec, [], want_icons=False)
+    assert icons == [] and "icons" not in seen[1][1]["properties"]
+
+
+def test_generate_keeps_angle_and_evidence(monkeypatch):
+    from app import copywriter, llm
+    monkeypatch.setattr(llm, "chat_json", lambda s, u, kind, schema: {"variants": [
+        {"angle": "성분·기술", "evidence": "진세노믹스", "headline": "h", "body": "b", "cta": "c"}]})
+    v = copywriter.generate("b", {}, {"product_name": "p"}, {"platform": "x", "name": "y"}, copywriter.limits_for([]))
+    assert v == [{"headline": "h", "body": "b", "cta": "c", "angle": "성분·기술", "evidence": "진세노믹스"}]
 
 
 def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monkeypatch):
@@ -167,7 +179,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
     limits = copywriter.limits_for([{"field": "제목", "max_chars": 5, "count_method": "글자 수", "level": "필수"}])
     calls: list[int] = []
 
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
+    def fake_generate(brand_name, brand, brief, placement, limits, knowledge=None):
         calls.append(1)
         return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}, {"headline": "짧다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", fake_generate)
@@ -175,7 +187,7 @@ def test_generate_checked_calls_once_unless_auto_retry_and_no_clean_variant(monk
     variants, attempts, *_ = copywriter.generate_checked("b", {}, {}, {}, limits)
     assert attempts == 1 and len(calls) == 1 and [bool(v["violations"]) for v in variants] == [True, False]
 
-    def all_bad(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
+    def all_bad(brand_name, brand, brief, placement, limits, knowledge=None):
         calls.append(1)
         return [{"headline": "너무너무긴제목입니다", "body": "본문", "cta": "보기"}]
     monkeypatch.setattr(copywriter, "generate", all_bad)
@@ -204,11 +216,10 @@ def test_asset_spec_and_parse_counts():
     data = {"assets": {"광고 제목": ["a", " a ", "", "b", "c", "d", "e", "f"], "설명": ["x"], "엉뚱": ["y"]}}
     got = copywriter.parse_assets(data, [{"field": "광고 제목", "max": 5}, {"field": "설명", "max": 5}])
     assert got == {"광고 제목": ["a", "b", "c", "d", "e"], "설명": ["x"]}
-    # 프롬프트에 요구 줄이 들어간다 (limits["assets"])
-    limits = {**copywriter.limits_for([]), "assets": spec}
-    _, user = copywriter._prompt("b", {}, {"product_name": "p"}, {"platform": "x", "name": "y"}, limits)
+    # 보조 호출 프롬프트에 요구 줄이 들어간다
+    _, user = copywriter.extras_prompt("b", {}, {"product_name": "p"}, spec, [])
     assert "[추가 문구 자산]" in user and "- 광고 제목: 정확히 5개, 각 30자 이하" in user and "PMax 정사각형 1:1" in user
-    _, user2 = copywriter._prompt("b", {}, {"product_name": "p"}, {"platform": "x", "name": "y"}, copywriter.limits_for([]))
+    _, user2 = copywriter.extras_prompt("b", {}, {"product_name": "p"}, [], [])
     assert "[추가 문구 자산]" not in user2
 
 
@@ -220,15 +231,14 @@ def test_copy_call_requests_and_stores_text_assets(env, monkeypatch):
         pv = db.get(models.PresetVersion, ids["presets"]["PMax 가로"])
         pv.conditions = [{"name": "문구 수량", "value": "광고 제목 3~15개, 설명 2~5개", "level": "강제", "status": "확인됨"}]
         db.commit()
-    seen: list[dict] = []
-    def fake4(brand_name, brand, brief, placement, limits, knowledge=None):
-        seen.append(limits)
-        vs = [{"headline": "제목", "body": "본문", "cta": "보기", "violations": []}] * 3
-        return vs, 1, [], {"광고 제목": ["하나", "둘", "셋", "넷", "다섯"], "설명": ["설명 하나", "설명 둘"]}
-    monkeypatch.setattr(copywriter, "generate_checked", fake4)
+    seen: list[list] = []
+    def fake_extras(brand_name, rules, brief, spec, variants, knowledge=None, want_icons=True):
+        seen.append(spec)
+        return [], {"광고 제목": ["하나", "둘", "셋", "넷", "다섯"], "설명": ["설명 하나", "설명 둘"]}
+    monkeypatch.setattr(copywriter, "extras", fake_extras)
     out = c.post(f"/api/designs/{ids['design']}/copy").json()
     assert out["failures"] == [] and out["text_assets"] == {"광고 제목": 5, "설명": 2}
-    assert [a["field"] for a in seen[0]["assets"]] == ["광고 제목", "설명"] and seen[0]["assets"][0]["count"] == 5
+    assert [a["field"] for a in seen[0]] == ["광고 제목", "설명"] and seen[0][0]["count"] == 5
     assert "assets" not in out["merged_limits"]
     brief = c.get(f"/api/designs/{ids['design']}").json()["brief"]
     assert brief["text_assets"]["광고 제목"] == ["하나", "둘", "셋", "넷", "다섯"]
@@ -260,16 +270,14 @@ def test_text_assets_only_endpoint_keeps_variants(env, monkeypatch):
     assert c.get(f"/api/designs/{did}").json()["text_asset_fields"] == ["광고 제목"]
     c.post(f"/api/designs/{did}/copy")
     c.post(f"/api/designs/{did}/copy/select-variant", json={"variant_no": 2})
-    seen: list[dict] = []
-    def fake_generate(brand_name, brand, brief, placement, limits, icons_out=None, assets_out=None, knowledge=None):
-        seen.append(limits)
-        if assets_out is not None:
-            assets_out.update({"광고 제목": ["하나", "둘", "셋"]})
-        return []
-    monkeypatch.setattr(copywriter, "generate", fake_generate)
+    seen: list = []
+    def fake_extras(brand_name, rules, brief, spec, variants, knowledge=None, want_icons=True):
+        seen.append((spec, want_icons))
+        return [], {"광고 제목": ["하나", "둘", "셋"]}
+    monkeypatch.setattr(copywriter, "extras", fake_extras)
     r = c.post(f"/api/designs/{did}/copy/assets")
     assert r.status_code == 200 and r.json() == {"text_assets": {"광고 제목": 3}, "fields": ["광고 제목"]}, r.text
-    assert seen[0]["assets"][0]["field"] == "광고 제목"
+    assert seen[0][0][0]["field"] == "광고 제목" and seen[0][1] is False, "추가 문구만, 아이콘 후보는 받지 않는다"
     groups = c.get(f"/api/designs/{did}/copy").json()
     assert all([v["variant_no"] for v in g["variants"] if v["selected"]] == [2] for g in groups), "시안·선택 유지"
     assert c.get(f"/api/designs/{did}").json()["brief"]["text_assets"] == {"광고 제목": ["하나", "둘", "셋"]}
@@ -305,6 +313,6 @@ def test_copy_records_knowledge_refs(env):
     c, ids = env["client"], env["ids"]
     out = c.post(f"/api/designs/{ids['design']}/copy").json()
     assert out["knowledge"] == {"law": 0, "guide": 0, "industries": out["knowledge"]["industries"], "error": None,
-                                "functional_mismatch": None}
+                                "functional_mismatch": None, "product_note": None}
     brief = c.get(f"/api/designs/{ids['design']}").json()["brief"]
     assert brief["knowledge"]["law_chunk_ids"] == [] and brief["knowledge"]["guide"] == []

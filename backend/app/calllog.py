@@ -25,7 +25,7 @@ from . import db, pricing
 from .models import ApiCall, PromptLog
 
 KINDS = ("background", "variant", "product", "icon", "copy", "copy_fit", "icon_names", "icon_redraw", "pin", "judge",
-         "knowledge")
+         "knowledge", "copy_extras")
 _design: ContextVar[int | None] = ContextVar("calllog_design", default=None)
 
 

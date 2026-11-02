@@ -234,6 +234,9 @@ def test_functional_violations():
     v = legal.functional_violations("SPF50 으로 주름까지", ["미백"])
     assert {x["phrase"] for x in v} == {"SPF", "주름"} and all(x["severity"] == "필수" for x in v)
     assert legal.functional_violations("촉촉한 보습", []) == []
+    assert [x["phrase"] for x in legal.violations("주름 개선 크림")] == ["주름 개선"]
+    assert legal.violations("주름 개선 크림", functional=["주름 개선"]) == [], "입력한 기능성의 경고 표현은 알리지 않는다"
+    assert "여드름 치료" in [x["phrase"] for x in legal.violations("여드름 치료 크림", functional=["여드름성 피부 완화"])], "금지 표현은 그대로"
 
 
 def test_brief_functional_validation():
@@ -251,3 +254,33 @@ def test_copy_check_flags_functional_outside_brief():
     rules = {"forbidden_phrases": [], "required_phrases": [], "levels": {}, "source_text": "", "functional": []}
     v = copywriter.check({"headline": "미백 크림", "body": "본문", "cta": "보기"}, copywriter.limits_for([]), rules)
     assert any(x["type"] == "functional" and x["phrase"] == "미백" for x in v)
+
+
+def test_alias_matches_product_and_drops_other_products(session):
+    """별칭이 브리프 상품명과 같으면 그 제품 자료만 쓴다(비슷한 다른 제품을 섞지 않는다). 기능성 불일치도 잡는다."""
+    from app import knowledge
+    _add(session, layer="제품", source_id="rich", title="리치", chunks=[("자음생크림 리치", "[리치] 인삼 크림")], brand_id=1,
+         product_name="자음생크림 리치", aliases=["자음생크림 60주년"], functional=["주름 개선"])
+    _add(session, layer="제품", source_id="yunjo", title="윤조", chunks=[("윤조에센스", "[윤조] 인삼 에센스")], brand_id=1,
+         product_name="윤조에센스", functional=["주름 개선"])
+    brief = {"product_name": "자음생크림 60 주년", "functional": ["주름 개선", "미백"]}
+    k = knowledge.for_copy(session, 1, None, brief, embedder=fake_embed)
+    assert [r["source_id"] for r in k["guide"]] == ["rich"] and k["product_note"] is None
+    assert "미백" in k["functional_mismatch"]
+
+
+def test_unknown_product_name_gives_note(session):
+    from app import knowledge
+    _add(session, layer="제품", source_id="rich", title="리치", chunks=[("자음생크림 리치", "[리치] 인삼 크림")], brand_id=1,
+         product_name="자음생크림 리치")
+    k = knowledge.for_copy(session, 1, None, {"product_name": "새 크림"}, embedder=fake_embed)
+    assert "이름이 같은 제품 자료가 없어" in k["product_note"] and k["guide"]
+
+
+def test_guide_skips_test_numbers_except_product_cards(session):
+    """시험 수치가 든 그룹·브랜드 조각은 재료로 고르지 않는다."""
+    from app import knowledge
+    _add(session, layer="그룹", source_id="clinical", title="임상", chunks=[("임상", "[임상] 인삼 주름 17.99% 감소")], group_id=7)
+    _add(session, layer="그룹", source_id="story", title="이야기", chunks=[("이야기", "[이야기] 인삼 연구의 역사")], group_id=7)
+    k = knowledge.for_copy(session, None, 7, {"product_name": "인삼"}, embedder=fake_embed)
+    assert [r["source_id"] for r in k["guide"]] == ["story"]

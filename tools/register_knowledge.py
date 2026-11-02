@@ -87,7 +87,7 @@ def main() -> int:
                 group_id=group.id if s["layer"] != "규제" else None,
                 brand_id=brand_ids.get(s["brand"]) if s.get("brand") else None,
                 source_url=s.get("url", ""), fetched_at=date.fromtimestamp(f.stat().st_mtime).isoformat(),
-                product_name=s.get("product_name"), functional=s.get("functional"), industry=s.get("industry"))
+                product_name=s.get("product_name"), functional=s.get("functional"), industry=s.get("industry"), aliases=s.get("aliases"))
             total += len(chunks)
             print(f"[등록] {s['id']} → 문서 {d.id}, {len(chunks)}조각")
         print(f"합계 {len(todo)}개 문서, {total}조각 (임베딩 모델 {knowledge.EMBED_MODEL})")

@@ -18,7 +18,7 @@ def _brand_rules(bv: BrandVersion, brief: dict | None = None) -> dict:
 def with_legal(r: CopyVariant, brief: dict | None) -> list[dict]:
     """저장된 위반 중 법적 표현은 버리고 지금의 표현 사전으로 다시 검사해 붙인다(사전이 바뀌거나 사전 도입 전 카피여도 최신 기준)."""
     text = " ".join([r.headline or "", r.body or "", r.cta or ""])
-    return [v for v in (r.violations or []) if v.get("type") != "legal"] + legal.violations(text, legal.source_text(brief))
+    return [v for v in (r.violations or []) if v.get("type") != "legal"] + legal.violations(text, legal.source_text(brief), (brief or {}).get("functional"))
 
 
 def _group(design: Design, db: Session) -> list[dict]:
@@ -53,7 +53,13 @@ def _knowledge(d: Design, db: Session) -> dict:
 def _knowledge_summary(k: dict) -> dict:
     """응답용 요약: 넣은 조각 수, 검색 실패, 기능성 불일치 안내."""
     return {"law": len(k["law"]), "guide": len(k["guide"]), "industries": k["industries"], "error": k["error"],
-            "functional_mismatch": k["functional_mismatch"]}
+            "functional_mismatch": k["functional_mismatch"], "product_note": k["product_note"]}
+
+
+def _latest_variants(d: Design, db: Session) -> list[dict]:
+    """첫 지면의 가장 최근 차수 카피(모든 지면이 같은 문장). 추가 문구의 어조 참고용."""
+    groups = _group(d, db)
+    return [{"headline": v["headline"], "body": v["body"]} for v in groups[0]["variants"]] if groups else []
 
 
 def _design(design_id: int, db: Session) -> Design:
@@ -81,20 +87,25 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
         raise HTTPException(400, "선택한 규격이 없습니다")
     per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
     merged = copywriter.merge_limits(per)
-    spec = copyfields.asset_spec(presets)      # PMax 등 '문구 수량' 조건 지면의 추가 문구 요구 (같은 호출에서 함께 받는다)
-    if spec:
-        merged["assets"] = spec
+    spec = copyfields.asset_spec(presets)      # PMax 등 '문구 수량' 조건 지면의 추가 문구 요구
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
     k = _knowledge(d, db)
     try:
-        variants, attempts, *rest = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged, knowledge=k)
+        variants, attempts = copywriter.generate_checked(brand_name, rules, d.brief, placement, merged, knowledge=k)
     except Exception as e:  # 키 값 등 민감 정보는 메시지에 포함하지 않는다
         return {"groups": _group(d, db), "failures": [f"카피 생성: {type(e).__name__}"], "knowledge": _knowledge_summary(k)}
-    icon_candidates = rest[0] if rest else []
-    text_assets = rest[1] if len(rest) > 1 else {}
-    extra = {"knowledge": knowledge.refs(k)}     # 이번 카피에 넣은 규제·지식 조각(분석 화면 '참고한 자료')
+    # 아이콘 후보·추가 문구는 작은 모델로 따로 받는다. 실패해도 카피는 살린다(아이콘은 세트 생성 때 다시 제안, 추가 문구는 별도 버튼·검수 안내)
+    failures: list[str] = []
+    icon_candidates, text_assets = [], {}
+    try:
+        icon_candidates, text_assets = copywriter.extras(brand_name, rules, d.brief, spec, variants, k)
+    except Exception as e:
+        failures.append(f"아이콘 후보·추가 문구: {type(e).__name__}")
+    # 이번 카피에 넣은 규제·지식 조각과 시안별 각도·근거(분석 화면 '참고한 자료')
+    extra = {"knowledge": {**knowledge.refs(k), "variants": [
+        {"variant_no": i, "angle": v.get("angle", ""), "evidence": v.get("evidence", "")} for i, v in enumerate(variants, 1)]}}
     if icon_candidates:
         # 같은 호출에서 받은 아이콘 기능명 후보를 브리프에 두면 아이콘 세트 생성이 기능명 제안 호출 없이 이것을 쓴다
         extra["icon_candidates"] = icon_candidates
@@ -113,7 +124,7 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
                 violations=copywriter.check(v, limits, rules), attempts=attempts))
     invalidate_reviews(db, d.id)
     db.commit()
-    return {"groups": _group(d, db), "failures": [], "merged_limits": {k: v for k, v in merged.items() if k != "assets"},
+    return {"groups": _group(d, db), "failures": failures, "merged_limits": merged,
             "icon_candidates": len(icon_candidates),
             "text_assets": {name: len(v) for name, v in (text_assets or {}).items()},
             "knowledge": _knowledge_summary(k)}
@@ -131,13 +142,9 @@ def create_text_assets(design_id: int, db: Session = Depends(get_db)):
     spec = copyfields.asset_spec(presets)
     if not spec:
         raise HTTPException(400, "문구를 여러 개 요구하는 지면이 선택되어 있지 않습니다")
-    per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
-    merged = {**copywriter.merge_limits(per), "assets": spec}
-    names = [a["placements"][0] for a in spec]
-    placement = {"platform": "추가 문구 자산", "name": ", ".join(dict.fromkeys(names))}
-    got: dict = {}
+    last = _latest_variants(d, db)
     try:
-        copywriter.generate(brand_name, rules, d.brief, placement, merged, assets_out=got, knowledge=_knowledge(d, db))
+        _, got = copywriter.extras(brand_name, rules, d.brief, spec, last, _knowledge(d, db), want_icons=False)
     except Exception as e:
         raise HTTPException(502, f"추가 문구 생성에 실패했습니다 ({type(e).__name__})")
     if not any(got.values()):

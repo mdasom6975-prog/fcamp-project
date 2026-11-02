@@ -24,7 +24,7 @@ from . import calllog, copyfields, copywriter, icons, imagegen, knowledge, llm, 
 from . import db as db_module
 from .models import Brand, BrandVersion, CopyVariant, Design, GeneratedImage, IconAsset, Judgment, PresetVersion
 
-STAGES = {"copy": ("copy", "copy_fit"), "background": ("background", "variant", "product"),
+STAGES = {"copy": ("copy", "copy_fit", "copy_extras"), "background": ("background", "variant", "product"),
           "icon": ("icon", "icon_names", "icon_redraw", "pin"), "judge": ("judge",)}
 STAGE_OF = {k: st for st, ks in STAGES.items() for k in ks}
 STAGE_LABEL = {"copy": "시안 생성(카피)", "background": "배경 이미지 생성", "icon": "아이콘 생성", "judge": "비전 채점"}
@@ -160,9 +160,6 @@ def _copy_prompt(db: Session, d: Design, bv: BrandVersion, brand: Brand) -> tupl
         return None
     per = [(pv.placement.name, copywriter.limits_for(pv.text_limits)) for pv in presets]
     merged = copywriter.merge_limits(per)
-    spec = copyfields.asset_spec(presets)
-    if spec:
-        merged["assets"] = spec
     names = [pv.placement.name for pv in presets]
     placement = {"platform": "모든 선택 지면 공통",
                  "name": ", ".join(names[:3]) + (f" 외 {len(names) - 3}개" if len(names) > 3 else "")}
@@ -178,7 +175,8 @@ def _knowledge_out(db: Session, brief: dict) -> dict | None:
         return None
     pick = lambda r: {x: r[x] for x in ("chunk_id", "source_id", "doc_title", "layer", "section", "text", "score", "product_name", "functional")}
     return {"industries": k["industries"], "law": [pick(r) for r in k["law"]], "guide": [pick(r) for r in k["guide"]],
-            "error": k["error"], "functional_mismatch": k["functional_mismatch"],
+            "error": k["error"], "functional_mismatch": k["functional_mismatch"], "product_note": k.get("product_note"),
+            "variants": (brief.get("knowledge") or {}).get("variants") or [],
             "functional": brief.get("functional"), "embed_model": (brief.get("knowledge") or {}).get("embed_model")}
 
 
