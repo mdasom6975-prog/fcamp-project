@@ -92,6 +92,21 @@ def test_reregister_archives_previous_version(session):
     assert [d.status for d in docs] == ["보관", "사용"]
 
 
+def test_add_document_embeds_before_writing(session):
+    """임베딩 응답을 기다리는 동안 쓰기 잠금을 잡지 않는다: 호출 시점에 세션에 쓴 내용이 없어야 한다."""
+    from app import knowledge
+    from app.models import KnowledgeDoc
+    _add(session, layer="브랜드", source_id="brand_a", title="A", chunks=[("A 1", "옛 소개")], brand_id=1)
+
+    def embedder(texts):
+        assert not session.in_transaction() and not session.new and not session.dirty
+        return fake_embed(texts)
+
+    knowledge.add_document(session, layer="브랜드", source_id="brand_a", title="A", chunks=[("A 1", "새 소개")],
+                           brand_id=1, embedder=embedder)
+    assert session.query(KnowledgeDoc).filter_by(source_id="brand_a", status="사용").count() == 1
+
+
 def test_search_filters_by_brand_and_keeps_layer_k(session):
     from app import knowledge
     _add(session, layer="규제", source_id="law", title="화장품법", chunks=[("제13조", "의약품 오인 광고 금지 아토피 치료"),

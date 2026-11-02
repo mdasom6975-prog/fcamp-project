@@ -158,14 +158,14 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
         raise ValueError(f"layer 는 {LAYERS} 중 하나: {layer}")
     if not chunks:
         raise ValueError(f"조각이 없습니다: {source_id}")
+    vectors = embedder([text for _, text in chunks])     # 네트워크 호출이라 쓰기 전에 끝낸다(SQLite 쓰기 잠금을 오래 잡지 않게)
     for old in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.source_id == source_id, KnowledgeDoc.status == "사용")):
         old.status = "보관"
     doc = KnowledgeDoc(layer=layer, source_id=source_id, title=title, group_id=group_id, brand_id=brand_id, industry=industry, visual=visual,
                        source_url=source_url, fetched_at=fetched_at or date.today().isoformat())
     db.add(doc)
     db.flush()
-    vectors = embedder([text for _, text in chunks])
-    for seq, ((section, text), vec) in enumerate(zip(chunks, vectors), 1):
+    for seq,((section, text), vec) in enumerate(zip(chunks, vectors), 1):
         db.add(KnowledgeChunk(doc_id=doc.id, seq=seq, section=section, text=text, embedding=vec,
                               embed_model=EMBED_MODEL, product_name=product_name, functional=functional or [],
                               aliases=aliases or []))
