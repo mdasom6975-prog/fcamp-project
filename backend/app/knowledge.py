@@ -132,8 +132,10 @@ def embed(texts: list[str]) -> list[list[float]]:
     for i in range(0, len(texts), EMBED_BATCH):
         batch = texts[i:i + EMBED_BATCH]
         with calllog.timed("embeddings", "knowledge", "openai", EMBED_MODEL, n=len(batch)) as info:
+            info["log_input"] = batch
             r = client().embeddings.create(model=EMBED_MODEL, input=batch)
             info["tokens_in"] = getattr(getattr(r, "usage", None), "prompt_tokens", None)
+            info["log_output"] = {"vectors": len(r.data), "dims": len(r.data[0].embedding) if r.data else 0}
         out.extend(d.embedding for d in r.data)
     return out
 

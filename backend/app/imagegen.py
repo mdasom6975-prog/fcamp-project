@@ -435,6 +435,7 @@ def _generate_cloudflare(prompt: str) -> Image.Image:
         info["prompt_text"] = {"prompt": prompt[:CF_MAX_PROMPT_CHARS]}
         r = httpx.post(url, headers={"Authorization": f"Bearer {token}"}, timeout=120.0,
                        json={"prompt": prompt[:CF_MAX_PROMPT_CHARS], "steps": CF_STEPS})
+        info["log_output"] = {"status": r.status_code, "bytes": len(r.content)}
     # 429 또는 일일 무료 할당량 초과 코드(4006)
     if r.status_code == 429 or (r.status_code in (400, 403) and "4006" in r.text):
         _bump(exhausted=True)

@@ -22,6 +22,8 @@ def _isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "STORAGE_DIR", tmp_path / "storage")
     monkeypatch.setattr(main, "_ready", True)       # 첫 요청 초기화(실제 DB 시드)를 건너뛴다
     monkeypatch.setattr(imagegen, "_caps_cache", None)
+    from app import modellog
+    monkeypatch.setattr(modellog, "LOG_DIR", tmp_path / "logs")    # 모델 입출력 로그를 backend/logs 에 쓰지 않게
     # 아이콘 격자 렌더(기본 4x3)는 격자 테스트에서만 켠다. 나머지 테스트는 아이콘마다 1장 렌더를 가정한다
     from app import icons
     monkeypatch.setattr(icons, "GRID_CELLS", 0)

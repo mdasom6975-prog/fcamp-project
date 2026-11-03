@@ -92,9 +92,10 @@ def test_image_cost_uses_recorded_tokens(log, tmp_path, monkeypatch):
     resp = NS(usage=NS(input_tokens=120, output_tokens=4160, input_tokens_details=NS(text_tokens=120, image_tokens=0)))
     info: dict = {}
     calllog.note_image_usage(info, resp)
+    assert info.pop("log_output") == {"images": 0, "b64_chars": [], "revised_prompt": None}, "입출력 로그용 요약(DB 행에는 빠진다)"
     assert info == {"tokens_in": 120, "tokens_out": 4160, "tokens_text_in": 120, "tokens_image_in": 0}
     calllog.note_image_usage(info2 := {}, NS(usage=None))
-    assert info2 == {}, "usage 가 없으면 기록하지 않는다"
+    assert info2.keys() == {"log_output"}, "usage 가 없으면 기록하지 않는다"
     calllog.record("images.generate", "icon", "openai", "gpt-image-2.5-flare", size="1536x1024", quality="low", **info)
     calllog.record("images.edit", "variant", "openai", "gpt-image-2.5-flare", size="1024x1024", quality="medium",
                    tokens_in=1000, tokens_out=10000)                          # 내역 없음 → edit 은 입력을 참조 이미지로 본다

@@ -71,6 +71,30 @@ def test_chat_json_refusal_raises(monkeypatch):
         llm.chat_json("s", "u", "copy", llm.copy_schema())
 
 
+def _model_log() -> list[dict]:
+    from app import modellog
+    return [json.loads(line) for line in modellog.path_for().read_text(encoding="utf-8").splitlines()]
+
+
+def test_model_log_writes_input_and_output_per_call(claude, monkeypatch):
+    """디버깅 로그: 호출마다 보낸 프롬프트 전문과 받은 원문을 파일 한 줄로 남긴다. 실패한 호출도 원문이 남는다."""
+    llm.chat_json("sys", "user", "copy", llm.copy_schema())
+    monkeypatch.setattr(llm, "_anthropic_client", _FakeClient(text="not json", stop_reason="refusal"))
+    with pytest.raises(llm.ChatRefused):
+        llm.chat_json("sys2", "user2", "judge", llm.copy_schema())
+    ok, refused = _model_log()
+    assert ok["kind"] == "copy" and ok["ok"] and ok["input"] == {"system": "sys", "user": "user"}
+    assert json.loads(ok["output"]["text"])["variants"][0]["headline"] == "h" and ok["tokens_in"] == 120
+    assert not refused["ok"] and refused["output"] == {"stop_reason": "refusal", "text": "not json"} and "error" in refused
+
+
+def test_model_log_can_be_turned_off(claude, monkeypatch):
+    from app import modellog
+    monkeypatch.setattr(modellog, "ENABLED", False)
+    llm.chat_json("sys", "user", "copy", llm.copy_schema())
+    assert not modellog.path_for().exists()
+
+
 def test_chat_json_openai_path(monkeypatch):
     from app import copywriter
     monkeypatch.setattr(llm, "CHAT_PROVIDER", "openai")

@@ -52,9 +52,10 @@ def anthropic_client():
 
 
 def _claude_json(system: str, user: str, schema: dict, images: list[bytes] | None = None,
-                 model: str | None = None) -> tuple[dict, object]:
+                 model: str | None = None, log: dict | None = None) -> tuple[dict, object]:
     """Claude 에 JSON 스키마 출력을 요청한다. 반환: (파싱한 dict, 응답 객체).
-    images 를 주면(PNG 바이트) 사용자 메시지 앞에 이미지 블록으로 붙인다(분석 화면의 비전 채점)."""
+    images 를 주면(PNG 바이트) 사용자 메시지 앞에 이미지 블록으로 붙인다(분석 화면의 비전 채점).
+    log 를 주면 받은 원문을 log_output 으로 넣는다(거절·잘림·JSON 오류로 실패해도 남게 검사 전에)."""
     import anthropic
     import base64
     client = anthropic_client()
@@ -75,21 +76,26 @@ def _claude_json(system: str, user: str, schema: dict, images: list[bytes] | Non
         if "fallback" not in str(e).lower() and "beta" not in str(e).lower():
             raise
         r = client.messages.create(**kwargs)        # fallback 을 받지 않는 환경(프록시·구형)이면 일반 호출
+    text = next((b.text for b in r.content if getattr(b, "type", "") == "text"), "{}")
+    if log is not None:
+        log["log_output"] = {"stop_reason": getattr(r, "stop_reason", None), "text": text}
     if getattr(r, "stop_reason", None) == "refusal":
         det = getattr(r, "stop_details", None)
         raise ChatRefused(f"모델이 요청을 거절했습니다 ({getattr(det, 'category', None) or '사유 미상'})")
     if getattr(r, "stop_reason", None) == "max_tokens":
         raise RuntimeError("응답이 길이 한도에서 잘렸습니다 (CLAUDE_MAX_TOKENS 를 올리세요)")
-    text = next((b.text for b in r.content if getattr(b, "type", "") == "text"), "{}")
     return json.loads(text or "{}"), r
 
 
-def _openai_json(system: str, user: str) -> tuple[dict, object]:
+def _openai_json(system: str, user: str, log: dict | None = None) -> tuple[dict, object]:
     from .copywriter import CHAT_MODEL, client
     r = client().chat.completions.create(
         model=CHAT_MODEL, response_format={"type": "json_object"},
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
-    return json.loads(r.choices[0].message.content or "{}"), r
+    text = r.choices[0].message.content or "{}"
+    if log is not None:
+        log["log_output"] = {"stop_reason": getattr(r.choices[0], "finish_reason", None), "text": text}
+    return json.loads(text), r
 
 
 def chat_json(system: str, user: str, kind: str, schema: dict) -> dict:
@@ -99,7 +105,8 @@ def chat_json(system: str, user: str, kind: str, schema: dict) -> dict:
     model = chat_model(kind)
     with calllog.timed("chat", kind, provider, model) as info:
         info["prompt_text"] = {"system": system, "user": user}
-        data, r = _claude_json(system, user, schema, model=model) if provider == "anthropic" else _openai_json(system, user)
+        data, r = (_claude_json(system, user, schema, model=model, log=info) if provider == "anthropic"
+                   else _openai_json(system, user, log=info))
         _note_usage(info, r, provider, model)
     return data if isinstance(data, dict) else {}
 
@@ -110,7 +117,7 @@ def vision_json(system: str, user: str, images: list[bytes], kind: str, schema: 
     model = model_for(kind)
     with calllog.timed("chat", kind, "anthropic", model, images=len(images)) as info:
         info["prompt_text"] = {"system": system, "user": user}
-        data, r = _claude_json(system, user, schema, images=images, model=model)
+        data, r = _claude_json(system, user, schema, images=images, model=model, log=info)
         _note_usage(info, r, "anthropic", model)
     return data if isinstance(data, dict) else {}
 

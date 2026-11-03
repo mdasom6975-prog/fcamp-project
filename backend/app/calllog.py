@@ -8,6 +8,9 @@ imagegen 의 일일 카운터(image_usage.json)는 한도 판정용 하루 합�
 
 보낸 프롬프트 전문은 행에 넣기엔 길어 prompt_logs 테이블에 따로 두고 행에는 prompt_id 만 남긴다
 (호출자가 timed() 의 info 에 prompt_text={"system","user"} 또는 {"prompt"} 를 넣는다). 분석 화면이 읽는다.
+
+디버깅용 입출력 로그(modellog, 파일)도 여기서 함께 쓴다. 입력은 prompt_text(없으면 info 의 log_input),
+출력은 호출자가 info 에 넣은 log_output 이다. 이 둘은 DB 행에는 넣지 않는다.
 """
 import time
 import uuid
@@ -21,7 +24,7 @@ from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from . import db, pricing
+from . import db, modellog, pricing
 from .models import ApiCall, PromptLog
 
 KINDS = ("background", "variant", "product", "icon", "copy", "copy_fit", "icon_names", "icon_redraw", "pin", "judge",
@@ -43,6 +46,8 @@ def record(api: str, kind: str, provider: str, model: str, ok: bool = True, ms: 
     """호출 1건을 기록한다. 실패해도 남긴다(과금 여부는 ok 로 구분). 기록 실패가 생성 흐름을 막지 않게 DB 오류는 삼킨다."""
     now = datetime.now(timezone.utc)
     prompt_text = extra.pop("prompt_text", None)
+    log_input = extra.pop("log_input", None)
+    log_output = extra.pop("log_output", None)
     row = {"ts": now.isoformat(timespec="seconds"), "date": now.strftime("%Y-%m-%d"), "design_id": _design.get(),
            "api": api, "kind": kind, "provider": provider, "model": model, "ok": ok, "ms": ms,
            **{k: v for k, v in extra.items() if v is not None}}
@@ -51,6 +56,7 @@ def record(api: str, kind: str, provider: str, model: str, ok: bool = True, ms: 
     pid = _save_prompt(prompt_text, now)
     if pid:
         row["prompt_id"] = pid
+    modellog.write(row, input=prompt_text if prompt_text is not None else log_input, output=log_output)
     try:
         with db.SessionLocal() as s:
             s.add(ApiCall(design_id=row["design_id"], date=row["date"], row=row))
@@ -103,7 +109,9 @@ def timed(api: str, kind: str, provider: str, model: str, **extra):
 def note_image_usage(info: dict, response) -> None:
     """OpenAI 이미지 응답(images.generate/edit)의 토큰 사용량을 기록 dict 에 넣는다. gpt-image 계열은 장당이 아니라
     토큰(텍스트 입력·이미지 입력·이미지 출력)으로 과금되므로, 이 값이 있어야 pricing 이 실제 비용을 계산한다.
-    tokens_in = 입력 전체, tokens_out = 이미지 출력, tokens_text_in/tokens_image_in = 입력 내역. usage 가 없으면 기록하지 않는다."""
+    tokens_in = 입력 전체, tokens_out = 이미지 출력, tokens_text_in/tokens_image_in = 입력 내역. usage 가 없으면 기록하지 않는다.
+    입출력 로그용 출력 요약(note_image_output)도 함께 넣는다."""
+    note_image_output(info, response)
     u = getattr(response, "usage", None)
     if u is None:
         return
@@ -113,6 +121,13 @@ def note_image_usage(info: dict, response) -> None:
     if det is not None:
         info["tokens_text_in"] = getattr(det, "text_tokens", None)
         info["tokens_image_in"] = getattr(det, "image_tokens", None)
+
+
+def note_image_output(info: dict, response) -> None:
+    """입출력 로그의 출력: 이미지 본문 대신 장수·base64 길이·모델이 고쳐 쓴 프롬프트만. DB 행에는 들어가지 않는다."""
+    data = getattr(response, "data", None) or []
+    info["log_output"] = {"images": len(data), "b64_chars": [len(getattr(d, "b64_json", None) or "") for d in data],
+                          "revised_prompt": next((p for d in data if (p := getattr(d, "revised_prompt", None))), None)}
 
 
 _ALL = object()
