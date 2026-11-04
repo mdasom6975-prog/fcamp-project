@@ -11,6 +11,7 @@
 import csv
 import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def main() -> int:
     from app.models import Brand
     init_app()
     cases = list(csv.DictReader(cases_path.open(encoding="utf-8")))
-    rows, hit_total, want_total, leaks = [], 0, 0, 0
+    rows, hit_total, want_total, leaks, times = [], 0, 0, 0, []
     with db.SessionLocal() as s:
         brands = {b.name: b for b in s.scalars(select(Brand)).all()}
         for c in cases:
@@ -56,7 +57,12 @@ def main() -> int:
                 print(f"{c['id']}: 브랜드 {c['brand']} 가 DB 에 없습니다 — register_knowledge.py 를 먼저 실행하세요")
                 return 2
             q = knowledge.query_text(c)
-            res = knowledge.search(s, q, brand_id=b.id, group_id=b.group_id, product_name=c["product_name"] or None)
+            qv = knowledge.embed([q])[0]                 # 임베딩은 미리 받아 두고 검색 시간만 잰다(네트워크 제외)
+            t0 = time.perf_counter()
+            res = knowledge.search(s, q, brand_id=b.id, group_id=b.group_id, product_name=c["product_name"] or None,
+                                   embedder=lambda _t, _v=qv: [_v])
+            ms = (time.perf_counter() - t0) * 1000
+            times.append(ms)
             hit, want, missed = grade(c["expect"], res)
             leak = sum(1 for layer in ("브랜드", "제품") for r in res.get(layer, [])
                        if not r["source_id"].endswith(c["brand"]) and f"_{c['brand']}_" not in r["source_id"])
@@ -64,7 +70,7 @@ def main() -> int:
             want_total += want
             leaks += leak
             rows.append({"id": c["id"], "brand": c["brand"], "query": q, "expect": c["expect"], "hit": hit, "want": want,
-                         "missed": missed, "leak": leak, "note": c["note"],
+                         "missed": missed, "leak": leak, "note": c["note"], "ms": round(ms),
                          "results": {k: [{x: r[x] for x in ("source_id", "section", "score", "exact_product")} for r in v]
                                      for k, v in res.items()}})
             mark = "OK " if not missed and not leak else "-- "
@@ -74,10 +80,14 @@ def main() -> int:
                     for r in rs:
                         print(f"     [{layer}] {r['score']:.3f} {r['source_id']} · {r['section']}")
     recall = hit_total / want_total if want_total else 0
+    ts = sorted(times)
+    p50, p95 = (ts[len(ts) // 2], ts[int(len(ts) * 0.95)]) if ts else (0, 0)
     print(f"\n정답 포함률 {hit_total}/{want_total} = {recall:.0%}   다른 브랜드 섞임 {leaks}건   (층별 k = {knowledge.LAYER_K})")
+    print(f"검색 시간(DB+정렬, 임베딩 제외) 중앙값 {p50:.0f}ms · p95 {p95:.0f}ms · 경로 {knowledge.SEARCH_MODE}")
     out = ROOT / "eval" / "reports" / f"rag_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"recall": recall, "hit": hit_total, "want": want_total, "leaks": leaks,
+                               "ms_p50": round(p50), "ms_p95": round(p95), "search_mode": knowledge.SEARCH_MODE,
                                "layer_k": knowledge.LAYER_K, "embed_model": knowledge.EMBED_MODEL, "cases": rows},
                               ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"보고서: {out.relative_to(ROOT)}")

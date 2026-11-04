@@ -56,6 +56,31 @@ def _added_columns() -> None:
     if insp.has_table("knowledge_chunks") and "aliases" not in {c["name"] for c in insp.get_columns("knowledge_chunks")}:
         with engine.begin() as conn:      # 제품 별칭(브리프 상품명과 제품 자료를 정확히 잇는다)
             conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN aliases JSON"))
+    if insp.has_table("knowledge_chunks"):
+        _vector_column(insp)
+
+
+def _ensure_vector_extension() -> None:
+    """pgvector 확장. Supabase 는 대시보드(Database → Extensions → vector)에서도 켤 수 있고, 여기서도 시도한다."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception as e:      # 권한이 없는 환경: 안내만 남기고 create_all 이 실패하면 그 오류가 원인을 말해 준다
+        log.warning("vector 확장을 만들지 못했습니다(%s). Supabase 대시보드 Database → Extensions 에서 vector 를 켜세요", e)
+
+
+def _vector_column(insp) -> None:
+    """knowledge_chunks.vec (pgvector): 없으면 만들고 JSON embedding 에서 채운 뒤 HNSW 인덱스를 만든다(2단계 전환, 1회)."""
+    from .models import EMBED_DIMS
+    cols = {c["name"] for c in insp.get_columns("knowledge_chunks")}
+    with engine.begin() as conn:
+        if "vec" not in cols:
+            conn.execute(text(f"ALTER TABLE knowledge_chunks ADD COLUMN vec vector({EMBED_DIMS})"))
+        # 옛 배포가 JSON 만 쓰고 남긴 조각: vec 가 비었고 차원이 맞으면 채운다
+        conn.execute(text(f"UPDATE knowledge_chunks SET vec = embedding::text::vector "
+                          f"WHERE vec IS NULL AND json_array_length(embedding::json) = {EMBED_DIMS}"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_vec ON knowledge_chunks "
+                          "USING hnsw (vec vector_cosine_ops) WITH (m = 16, ef_construction = 64)"))
 
 
 def _check_storage() -> None:
@@ -117,6 +142,7 @@ def init_app() -> None:
             try:
                 if _acquire_lock(lock_conn):
                     if not _initialized_for_deploy():    # 락을 기다리는 사이 다른 인스턴스가 끝냈을 수 있다
+                        _ensure_vector_extension()
                         Base.metadata.create_all(engine)
                         _added_columns()
                         with SessionLocal() as db:

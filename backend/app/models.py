@@ -1,10 +1,14 @@
 """docs/01_데이터구조_설계.md 의 엔티티를 그대로 옮긴 테이블 정의."""
+import os
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+
+EMBED_DIMS = int(os.getenv("EMBED_DIMS", "1536"))   # 임베딩 차원(text-embedding-3-small). 테스트는 64
 
 
 def _now() -> datetime:
@@ -344,5 +348,8 @@ class KnowledgeChunk(Base):
     aliases: Mapped[list] = mapped_column(JSON, default=list)         # 제품 청크: 브리프에 쓸 만한 다른 이름(기획 세트명·줄임말)
     functional: Mapped[list] = mapped_column(JSON, default=list)      # 제품 청크: 심사·보고된 기능성(미백·주름 개선 …)
     text: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list] = mapped_column(JSON, default=list)
+    embedding: Mapped[list] = mapped_column(JSON, default=list)       # 전환기 보존: vec 와 같은 값. 측정 뒤 제거 예정(2단계)
+    vec = mapped_column(Vector(EMBED_DIMS), nullable=True)            # pgvector. 검색은 이 컬럼으로(HNSW, 코사인)
     embed_model: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    __table_args__ = (Index("ix_knowledge_chunks_vec", "vec", postgresql_using="hnsw",
+                            postgresql_with={"m": 16, "ef_construction": 64}, postgresql_ops={"vec": "vector_cosine_ops"}),)

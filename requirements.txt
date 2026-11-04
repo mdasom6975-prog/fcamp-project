@@ -2,6 +2,7 @@
 fastapi
 sqlalchemy
 psycopg[binary]
+pgvector
 python-dotenv
 pillow
 fonttools

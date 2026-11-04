@@ -3,7 +3,8 @@
 설계: RAG 설계 문서(16, v2.1) 3~5절. 층(layer)은 규제 · 그룹 · 브랜드 · 제품 · 캠페인.
 - 다른 브랜드의 조각은 벡터 비교 전에 필터로 뺀다(브랜드 섞임은 유사도가 아니라 필터로 막는다).
 - 층마다 따로 상위 k 개를 뽑는다. 한 번에 뽑으면 브랜드 이야기가 규제 조항을 밀어낼 수 있다.
-- 임베딩은 JSON 실수 배열로 저장하고 파이썬으로 코사인 유사도를 계산한다(조각 수천 개까지 충분, 추가 의존성 없음).
+- 임베딩은 pgvector 컬럼(vec, HNSW·코사인)에 두고 검색은 SQL `ORDER BY vec <=> 질의 LIMIT k` 로 한다(2단계, 2026-11).
+  KNOWLEDGE_SEARCH=python 이면 예전 경로(JSON embedding 을 전부 읽어 파이썬 코사인)로 돌아간다. 두 경로의 결과는 같아야 한다(테스트).
 - 카피 생성(for_copy)에서 규제는 검색하지 않는다. 브리프와 법령 문장은 쓰는 말이 달라 유사도로는 놓치기 쉬우므로(1-a 평가),
   품목에서 업종이 감지되면 그 업종으로 표시한 규제 문서를 전부 넣는다. 검색은 제품·브랜드·그룹 층에만 쓴다.
 """
@@ -21,6 +22,8 @@ from .models import KnowledgeChunk, KnowledgeDoc
 LAYERS = ("규제", "그룹", "브랜드", "제품", "캠페인")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 LAYER_K = {"규제": 3, "제품": 2, "브랜드": 2, "그룹": 1}     # 검색할 때 층마다 가져올 개수
+SEARCH_MODE = os.getenv("KNOWLEDGE_SEARCH", "sql").strip().lower()   # sql(pgvector) | python(JSON 코사인, 되돌리기용)
+SQL_CANDIDATES = 40      # SQL 경로가 층마다 가져오는 상위 후보 수(skip·제품명 정확 일치를 파이썬에서 처리할 여유)
 MAX_CHARS = 800          # 이보다 긴 문단은 문장 단위로 더 자른다
 EMBED_BATCH = 64
 
@@ -168,7 +171,7 @@ def add_document(db: Session, *, layer: str, source_id: str, title: str, chunks:
     db.add(doc)
     db.flush()
     for seq,((section, text), vec) in enumerate(zip(chunks, vectors), 1):
-        db.add(KnowledgeChunk(doc_id=doc.id, seq=seq, section=section, text=text, embedding=vec,
+        db.add(KnowledgeChunk(doc_id=doc.id, seq=seq, section=section, text=text, embedding=vec, vec=vec,
                               embed_model=EMBED_MODEL, product_name=product_name, functional=functional or [],
                               aliases=aliases or []))
     db.commit()
@@ -183,18 +186,36 @@ def query_text(brief: dict) -> str:
     return " / ".join(str(brief[k]).strip() for k in keys if str(brief.get(k) or "").strip())
 
 
-def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | None) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
+def _filtered(layer: str, brand_id: int | None, group_id: int | None):
+    """층·브랜드·그룹·임베딩 모델 필터가 걸린 (조각, 문서) 질의. 거를 기준이 없는 층(브랜드 없이 브랜드 층)은 None."""
     q = (select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
          .where(KnowledgeDoc.layer == layer, KnowledgeDoc.status == "사용", KnowledgeChunk.embed_model == EMBED_MODEL))
     if layer in ("브랜드", "제품", "캠페인"):
         if brand_id is None:
-            return []
+            return None
         q = q.where(KnowledgeDoc.brand_id == brand_id)
     elif layer == "그룹":
         if group_id is None:
-            return []
+            return None
         q = q.where(KnowledgeDoc.group_id == group_id)
-    return list(db.execute(q).all())
+    return q
+
+
+def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | None) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
+    """python 경로: 필터에 맞는 조각 전부(점수는 파이썬에서)."""
+    q = _filtered(layer, brand_id, group_id)
+    return list(db.execute(q).all()) if q is not None else []
+
+
+def _candidates_sql(db: Session, layer: str, brand_id: int | None, group_id: int | None, qv: list[float],
+                    limit: int) -> list[tuple[KnowledgeChunk, KnowledgeDoc, float]]:
+    """sql 경로: pgvector 코사인 거리로 상위 limit 개만 DB 에서 가져온다. 반환 점수는 유사도(1 − 거리)."""
+    q = _filtered(layer, brand_id, group_id)
+    if q is None:
+        return []
+    dist = KnowledgeChunk.vec.cosine_distance(qv).label("dist")
+    q = q.add_columns(dist).where(KnowledgeChunk.vec.isnot(None)).order_by(dist, KnowledgeChunk.id).limit(limit)
+    return [(ch, doc, 1.0 - float(d)) for ch, doc, d in db.execute(q).all()]
 
 
 def _same_name(a: str | None, b: str | None) -> bool:
@@ -206,25 +227,46 @@ def _is_product(ch: KnowledgeChunk, name: str | None) -> bool:
     return any(_same_name(name, x) for x in [ch.product_name, *(ch.aliases or [])])
 
 
+def _exact_products(db: Session, brand_id: int | None, name: str | None) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
+    """제품명이 정확히 맞는 제품 조각(sql 경로에서 상위 후보에 못 들어도 맨 앞에 두기 위해 따로 찾는다). 한 브랜드의 제품은 많지 않다."""
+    if not name:
+        return []
+    q = _filtered("제품", brand_id, None)
+    if q is None:
+        return []
+    return [(ch, doc) for ch, doc in db.execute(q.where(KnowledgeChunk.product_name.isnot(None))).all() if _is_product(ch, name)]
+
+
 def search(db: Session, query: str, *, brand_id: int | None, group_id: int | None,
            layer_k: dict[str, int] | None = None, product_name: str | None = None, embedder=embed,
-           skip=None) -> dict[str, list[dict]]:
+           skip=None, mode: str | None = None) -> dict[str, list[dict]]:
     """질의로 층별 상위 조각을 찾는다. 반환: {층: [{chunk_id, doc_title, section, text, score, …}]}.
     규제는 모든 브랜드 공통, 그룹은 group_id, 브랜드·제품은 brand_id 로 거른다.
     product_name 이 제품 조각의 제품명·별칭과 같으면 그 조각을 맨 앞에 둔다(이름이 정확히 맞으면 유사도보다 확실하다).
-    skip(조각) 이 참인 조각은 후보에서 뺀다."""
+    skip(조각) 이 참인 조각은 후보에서 뺀다.
+    mode: "sql"(기본, pgvector 가 상위 후보를 고른다) | "python"(조각 전부를 읽어 파이썬 코사인). 환경변수 KNOWLEDGE_SEARCH."""
     layer_k = layer_k or LAYER_K
+    mode = (mode or SEARCH_MODE)
     qv = embedder([query])[0]
     out: dict[str, list[dict]] = {}
     for layer, k in layer_k.items():
+        if mode == "python":
+            scored_raw = [(ch, doc, cosine(qv, ch.embedding)) for ch, doc in _candidates(db, layer, brand_id, group_id)]
+        else:
+            scored_raw = _candidates_sql(db, layer, brand_id, group_id, qv, max(SQL_CANDIDATES, k))
+            if layer == "제품" and product_name:
+                seen = {ch.id for ch, _, _ in scored_raw}
+                for ch, doc in _exact_products(db, brand_id, product_name):
+                    if ch.id not in seen:
+                        scored_raw.append((ch, doc, 1.0 - float(db.scalar(select(KnowledgeChunk.vec.cosine_distance(qv))
+                                                                           .where(KnowledgeChunk.id == ch.id)))))
         scored = []
-        for ch, doc in _candidates(db, layer, brand_id, group_id):
+        for ch, doc, s in scored_raw:
             if skip and skip(ch):
                 continue
-            s = cosine(qv, ch.embedding)
             exact = _is_product(ch, product_name)
             scored.append((exact, s, ch, doc))
-        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        scored.sort(key=lambda x: (x[0], round(x[1], 4), -x[2].id), reverse=True)   # 동점이면 먼저 등록된 조각(두 경로가 같은 순서가 되게)
         out[layer] = [{"chunk_id": ch.id, "doc_id": doc.id, "source_id": doc.source_id, "doc_title": doc.title,
                        "layer": layer, "section": ch.section, "text": ch.text, "score": round(s, 4),
                        "product_name": ch.product_name, "functional": ch.functional, "exact_product": exact,

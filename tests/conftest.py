@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 os.environ.setdefault("DATABASE_URL", "postgresql://unused@127.0.0.1:1/unused")   # app.db import 가 실패하지 않게. 실제 연결은 아래 픽스처가 바꿔 끼운다
 os.environ.setdefault("ALLOW_LOCAL_STORAGE", "1")                                  # 테스트는 임시 폴더 저장소
+os.environ.setdefault("EMBED_DIMS", "64")                                           # 테스트의 가짜 임베딩은 64차원(vector(64))
 
 
 def _pg_bin() -> Path:

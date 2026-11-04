@@ -320,3 +320,46 @@ def test_sources_visual_cover_all_products_and_brands():
     doc = json.loads((ROOT / "brands" / "amorepacific" / "sources.json").read_text(encoding="utf-8"))
     assert all(s.get("motifs") for s in doc["sources"] if s["layer"] == "제품")
     assert all(len(s.get("directions", [])) >= 3 for s in doc["sources"] if s["layer"] == "브랜드")
+
+
+def test_sql_and_python_search_paths_agree(session):
+    """2단계: pgvector(sql) 경로와 예전 JSON 코사인(python) 경로가 같은 조각을 같은 순서로 준다.
+    제품명 정확 일치가 상위 후보 밖에 있어도 sql 경로가 따로 찾아 맨 앞에 둔다."""
+    from app import knowledge
+    for i in range(50):      # SQL_CANDIDATES(40) 보다 많은 조각: 상위 후보 자르기가 실제로 일어난다
+        _add(session, layer="제품", source_id=f"p{i}", title=f"제품 {i}", chunks=[(f"제품 {i}", f"보습 크림 성분 {i} 촉촉 피부")],
+             brand_id=1, product_name=f"제품 {i}")
+    _add(session, layer="제품", source_id="far", title="먼 제품", chunks=[("먼 제품", "완전히 다른 이야기 포장재 종이")], brand_id=1,
+         product_name="먼 제품")
+    _add(session, layer="규제", source_id="law", title="법", chunks=[("제1조", "의약품 오인 광고 금지"), ("제2조", "기능성 미백 주름")])
+    kw = dict(brand_id=1, group_id=None, embedder=fake_embed, layer_k={"규제": 2, "제품": 3})
+    for name in (None, "먼 제품"):
+        a = knowledge.search(session, "보습 크림 촉촉 피부", product_name=name, mode="sql", **kw)
+        b = knowledge.search(session, "보습 크림 촉촉 피부", product_name=name, mode="python", **kw)
+        strip = lambda res: {k: [(r["source_id"], r["exact_product"], round(r["score"], 3)) for r in v] for k, v in res.items()}
+        assert strip(a) == strip(b), name
+    assert a["제품"][0]["source_id"] == "far" and a["제품"][0]["exact_product"], "유사도가 낮은 정확 일치 제품도 맨 앞"
+
+
+def test_vector_column_backfills_from_json_once(pg_empty_engine, monkeypatch):
+    """옛 배포가 남긴 DB(vec 없음, JSON embedding 만): _added_columns 가 vec 를 만들고 채우고 HNSW 인덱스를 만든다. 두 번 돌려도 같다."""
+    from sqlalchemy import inspect, text
+    from app import db, main, models
+    eng = pg_empty_engine
+    db.Base.metadata.create_all(eng)
+    with eng.begin() as c:
+        c.execute(text("ALTER TABLE knowledge_chunks DROP COLUMN vec"))
+    import json
+    with eng.begin() as c:       # 옛 코드처럼 JSON 만 쓴다(ORM 은 vec 를 알고 있으므로 raw SQL)
+        c.execute(text("INSERT INTO knowledge_docs (id, layer, source_id, title, status, created_at) VALUES (1, '규제', 'law', '법', '사용', now())"))
+        c.execute(text("INSERT INTO knowledge_chunks (doc_id, seq, section, text, embedding, embed_model, aliases, functional) "
+                       "VALUES (1, 1, '제1조', 't', :e, 'm', '[]', '[]')"), {"e": json.dumps(fake_embed(["의약품 오인"])[0])})
+    monkeypatch.setattr(main, "engine", eng)
+    for _ in range(2):
+        main._added_columns()
+    insp = inspect(eng)
+    assert "vec" in {c["name"] for c in insp.get_columns("knowledge_chunks")}
+    assert any(i["name"] == "ix_knowledge_chunks_vec" for i in insp.get_indexes("knowledge_chunks"))
+    with eng.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM knowledge_chunks WHERE vec IS NULL")).scalar() == 0
+        assert c.execute(text("SELECT vector_dims(vec) FROM knowledge_chunks")).scalar() == models.EMBED_DIMS

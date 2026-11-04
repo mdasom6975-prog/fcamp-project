@@ -1,0 +1,1398 @@
+{
+  "recall": 0.8484848484848485,
+  "hit": 28,
+  "want": 33,
+  "leaks": 0,
+  "ms_p50": 1565,
+  "ms_p95": 1706,
+  "search_mode": "python",
+  "layer_k": {
+    "규제": 3,
+    "제품": 2,
+    "브랜드": 2,
+    "그룹": 1
+  },
+  "embed_model": "text-embedding-3-small",
+  "cases": [
+    {
+      "id": "R01",
+      "brand": "sulwhasoo",
+      "query": "자음생크림 리치 / 인삼 과학으로 탄력과 주름을 케어하는 안티에이징 크림 / 층층이 차오르는 탄력 / 40~50대 안티에이징 관심 여성",
+      "expect": "prod_sulwhasoo_jaumsaeng_rich|law_cosmetics_rule_2|ap_rni_ginsenomics/ap_rni_ginseng_antiaging",
+      "hit": 3,
+      "want": 3,
+      "missed": [],
+      "leak": 0,
+      "note": "주름 개선은 기능성 범위 조문이 함께 나와야 한다",
+      "ms": 1706,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.1736,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.1637,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.1569,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_sulwhasoo_jaumsaeng_rich",
+            "section": "자음생크림 리치",
+            "score": 0.4114,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_sulwhasoo_yunjo6",
+            "section": "윤조에센스 6세대",
+            "score": 0.2732,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 2",
+            "score": 0.1768,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 1",
+            "score": 0.1557,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginseng_antiaging",
+            "section": "아모레퍼시픽 연구 — 인삼 유래 안티에이징 5",
+            "score": 0.547,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R02",
+      "brand": "sulwhasoo",
+      "query": "윤조에센스 6세대 / 세안 후 첫 단계에 바르는 윤기 에센스 / 어떤 시간에도 단단한 윤빛 피부 / 30~40대 스킨케어 첫 단계를 고민하는 고객",
+      "expect": "prod_sulwhasoo_yunjo6",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1582,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.239,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.2228,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_13",
+            "section": "화장품법 제13조 제1항",
+            "score": 0.2216,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_sulwhasoo_yunjo6",
+            "section": "윤조에센스 6세대",
+            "score": 0.6581,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_sulwhasoo_perfecting_cushion",
+            "section": "퍼펙팅 쿠션",
+            "score": 0.326,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 1",
+            "score": 0.2898,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 2",
+            "score": 0.2231,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 10",
+            "score": 0.3518,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R03",
+      "brand": "sulwhasoo",
+      "query": "퍼펙팅 쿠션 / SPF 50+ 쿠션으로 윤기와 톤을 한 번에 / 타고난 듯 고급스러운 피부 / 30~50대 베이스 메이크업 고객",
+      "expect": "prod_sulwhasoo_perfecting_cushion|law_cosmetics_rule_2",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "자외선 차단·미백 기능성 조문",
+      "ms": 1627,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.2814,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2741,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.2633,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_sulwhasoo_perfecting_cushion",
+            "section": "퍼펙팅 쿠션",
+            "score": 0.6584,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_sulwhasoo_yunjo6",
+            "section": "윤조에센스 6세대",
+            "score": 0.4261,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 1",
+            "score": 0.2918,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 2",
+            "score": 0.1944,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 9",
+            "score": 0.3492,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R04",
+      "brand": "sulwhasoo",
+      "query": "한국의 미학과 전통의 지혜로 완성하는 홀리스틱 뷰티 브랜드 캠페인 / 시간의 흐름에 지지 않는 아름다움 / 럭셔리 스킨케어 고객",
+      "expect": "brand_sulwhasoo",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "제품 없는 브랜드 캠페인",
+      "ms": 1542,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 마목",
+            "score": 0.2514,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 나목",
+            "score": 0.233,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 라목",
+            "score": 0.2314,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_sulwhasoo_perfecting_cushion",
+            "section": "퍼펙팅 쿠션",
+            "score": 0.2452,
+            "exact_product": false
+          },
+          {
+            "source_id": "prod_sulwhasoo_jaumsaeng_rich",
+            "section": "자음생크림 리치",
+            "score": 0.2343,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 2",
+            "score": 0.4916,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 1",
+            "score": 0.4891,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 18",
+            "score": 0.3143,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R05",
+      "brand": "sulwhasoo",
+      "query": "자음생크림 리치 / 48시간 만에 콜라겐을 회복시키는 크림 / 콜라겐 회복 효능을 강조 / 40~50대 여성",
+      "expect": "prod_sulwhasoo_jaumsaeng_rich|law_cosmetics_13/law_cosmetics_rule_annex5#아목",
+      "hit": 1,
+      "want": 2,
+      "missed": [
+        "law_cosmetics_13/law_cosmetics_rule_annex5#아목"
+      ],
+      "leak": 0,
+      "note": "효능 단정 표현 → 부당 광고 조문",
+      "ms": 1531,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2216,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.1856,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.1668,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_sulwhasoo_jaumsaeng_rich",
+            "section": "자음생크림 리치",
+            "score": 0.4798,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_sulwhasoo_yunjo6",
+            "section": "윤조에센스 6세대",
+            "score": 0.3186,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 1",
+            "score": 0.2621,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_sulwhasoo",
+            "section": "설화수 브랜드 소개 2",
+            "score": 0.252,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginseng_antiaging",
+            "section": "아모레퍼시픽 연구 — 인삼 유래 안티에이징 5",
+            "score": 0.3835,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R06",
+      "brand": "laneige",
+      "query": "워터 슬리핑 마스크 / 밤사이 수분을 채워 주는 슬리핑 마스크 / 자고 일어나면 촉촉한 피부 / 20~30대 건조 피부",
+      "expect": "prod_laneige_water_sleeping_mask",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1508,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2828,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.2036,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.1913,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_laneige_water_sleeping_mask",
+            "section": "워터 슬리핑 마스크",
+            "score": 0.6152,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_laneige_cream_skin_refiner",
+            "section": "크림 스킨 세라펩타이드 리파이너",
+            "score": 0.3888,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_laneige",
+            "section": "라네즈 브랜드 소개 1",
+            "score": 0.1754,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.3896,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R07",
+      "brand": "laneige",
+      "query": "래디언-C 크림 / 비타민 C 유도체로 칙칙한 피부 톤을 맑게 / 빛톤 피부 / 20~30대 톤 고민 고객",
+      "expect": "prod_laneige_radian_c_cream|law_cosmetics_13/law_cosmetics_rule_annex5#나목",
+      "hit": 1,
+      "want": 2,
+      "missed": [
+        "law_cosmetics_13/law_cosmetics_rule_annex5#나목"
+      ],
+      "leak": 0,
+      "note": "기능성 아닌 제품을 미백 기능성처럼 보이게 하면 안 된다",
+      "ms": 1504,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2803,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.2443,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.2231,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_laneige_radian_c_cream",
+            "section": "래디언-C 크림",
+            "score": 0.6099,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_laneige_cream_skin_refiner",
+            "section": "크림 스킨 세라펩타이드 리파이너",
+            "score": 0.4228,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_laneige",
+            "section": "라네즈 브랜드 소개 1",
+            "score": 0.1383,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.3796,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R08",
+      "brand": "laneige",
+      "query": "크림 스킨 세라펩타이드 리파이너 / 크림을 녹인 고보습 토너 / 첫 단계부터 깊은 보습 / 20~30대",
+      "expect": "prod_laneige_cream_skin_refiner",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1517,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_22",
+            "section": "화장품법 시행규칙 제22조",
+            "score": 0.1478,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_13",
+            "section": "화장품법 제13조 제2항",
+            "score": 0.1391,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 바목",
+            "score": 0.1303,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_laneige_cream_skin_refiner",
+            "section": "크림 스킨 세라펩타이드 리파이너",
+            "score": 0.5973,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_laneige_water_sleeping_mask",
+            "section": "워터 슬리핑 마스크",
+            "score": 0.2455,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_laneige",
+            "section": "라네즈 브랜드 소개 1",
+            "score": 0.249,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 5",
+            "score": 0.2428,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R09",
+      "brand": "laneige",
+      "query": "호기심으로 이전에 없던 스킨케어를 만드는 브랜드 캠페인 / OPEN TO WONDER / 20대 새로운 제품을 좋아하는 고객",
+      "expect": "brand_laneige",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "제품 없는 브랜드 캠페인",
+      "ms": 1504,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_13",
+            "section": "화장품법 제13조 제1항",
+            "score": 0.2207,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.2015,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 나목",
+            "score": 0.1974,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_laneige_cream_skin_refiner",
+            "section": "크림 스킨 세라펩타이드 리파이너",
+            "score": 0.2419,
+            "exact_product": false
+          },
+          {
+            "source_id": "prod_laneige_water_sleeping_mask",
+            "section": "워터 슬리핑 마스크",
+            "score": 0.1982,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_laneige",
+            "section": "라네즈 브랜드 소개 1",
+            "score": 0.4424,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 18",
+            "score": 0.4135,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R10",
+      "brand": "laneige",
+      "query": "래디언-C 크림 / 잡티를 지우는 미백 크림 / 2주 만에 미백 효과 / 20~30대 여성",
+      "expect": "law_cosmetics_rule_2|law_cosmetics_13/law_cosmetics_rule_annex5#나목",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "기능성 표시 없는 제품의 미백 주장",
+      "ms": 1498,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.1991,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.1844,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 나목",
+            "score": 0.1819,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_laneige_radian_c_cream",
+            "section": "래디언-C 크림",
+            "score": 0.4644,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_laneige_cream_skin_refiner",
+            "section": "크림 스킨 세라펩타이드 리파이너",
+            "score": 0.3758,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_laneige",
+            "section": "라네즈 브랜드 소개 1",
+            "score": 0.1597,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginseng_antiaging",
+            "section": "아모레퍼시픽 연구 — 인삼 유래 안티에이징 5",
+            "score": 0.4036,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R11",
+      "brand": "innisfree",
+      "query": "데일리 유브이 수분장벽 선세럼 / 매일 바르는 세럼 제형 자외선 차단제 / 가볍게 매일 지키는 피부 / 20~30대 데일리 선케어",
+      "expect": "prod_innisfree_uv_sun_serum|law_cosmetics_rule_2",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1565,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2648,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.1985,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.1971,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_innisfree_uv_sun_serum",
+            "section": "데일리 유브이 수분장벽 선세럼",
+            "score": 0.6375,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_innisfree_greentea_ha_cream",
+            "section": "그린티 히알루론산 크림",
+            "score": 0.2539,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 1",
+            "score": 0.2133,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 2",
+            "score": 0.1962,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.3779,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R12",
+      "brand": "innisfree",
+      "query": "그린티 히알루론산 크림 / 제주 녹차와 히알루론산으로 보습하는 크림 / 제주 녹차의 촉촉함 / 20대 수분 부족 피부",
+      "expect": "prod_innisfree_greentea_ha_cream|ap_rni_green_tea",
+      "hit": 1,
+      "want": 2,
+      "missed": [
+        "ap_rni_green_tea"
+      ],
+      "leak": 0,
+      "note": "그룹 공통에서 녹차 연구가 나와야 한다",
+      "ms": 1534,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2631,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.2478,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.2431,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_innisfree_greentea_ha_cream",
+            "section": "그린티 히알루론산 크림",
+            "score": 0.5211,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_innisfree_uv_sun_serum",
+            "section": "데일리 유브이 수분장벽 선세럼",
+            "score": 0.2477,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 1",
+            "score": 0.2604,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 2",
+            "score": 0.2268,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.3945,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R13",
+      "brand": "innisfree",
+      "query": "제주 자연 원료로 만드는 자연주의 브랜드 캠페인 / 제주의 자연을 담다 / 자연주의 뷰티를 좋아하는 고객",
+      "expect": "brand_innisfree",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "제품 없는 브랜드 캠페인",
+      "ms": 1506,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 다목",
+            "score": 0.2047,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.1983,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 라목",
+            "score": 0.1934,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_innisfree_greentea_ha_cream",
+            "section": "그린티 히알루론산 크림",
+            "score": 0.247,
+            "exact_product": false
+          },
+          {
+            "source_id": "prod_innisfree_uv_sun_serum",
+            "section": "데일리 유브이 수분장벽 선세럼",
+            "score": 0.1266,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 2",
+            "score": 0.4646,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 1",
+            "score": 0.348,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 18",
+            "score": 0.3277,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R14",
+      "brand": "innisfree",
+      "query": "그린티 히알루론산 크림 / 100% 천연 성분으로 자극이 전혀 없는 크림 / 부작용 없는 순한 보습 / 민감 피부 20대",
+      "expect": "prod_innisfree_greentea_ha_cream|law_cosmetics_13/law_cosmetics_rule_annex5#사목/law_cosmetics_rule_annex5#아목",
+      "hit": 1,
+      "want": 2,
+      "missed": [
+        "law_cosmetics_13/law_cosmetics_rule_annex5#사목/law_cosmetics_rule_annex5#아목"
+      ],
+      "leak": 0,
+      "note": "근거 없는 안전 주장",
+      "ms": 1588,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2999,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.2993,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 나목",
+            "score": 0.2814,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_innisfree_greentea_ha_cream",
+            "section": "그린티 히알루론산 크림",
+            "score": 0.5581,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_innisfree_uv_sun_serum",
+            "section": "데일리 유브이 수분장벽 선세럼",
+            "score": 0.2414,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 1",
+            "score": 0.3228,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 2",
+            "score": 0.2589,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.4475,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R15",
+      "brand": "innisfree",
+      "query": "데일리 유브이 수분장벽 선세럼 / 피부 노화를 막아 주는 선세럼 / 자외선으로부터 젊은 피부 / 30대",
+      "expect": "prod_innisfree_uv_sun_serum|law_cosmetics_rule_2",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1535,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.3032,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.2198,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.1766,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_innisfree_uv_sun_serum",
+            "section": "데일리 유브이 수분장벽 선세럼",
+            "score": 0.5602,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_innisfree_greentea_ha_cream",
+            "section": "그린티 히알루론산 크림",
+            "score": 0.2716,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 1",
+            "score": 0.3155,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_innisfree",
+            "section": "이니스프리 브랜드 소개 2",
+            "score": 0.2617,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_rni_ginsenomics",
+            "section": "아모레퍼시픽 연구 — 진세노믹스 2",
+            "score": 0.4692,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R16",
+      "brand": "aestura",
+      "query": "아토베리어365 크림 / 민감 피부를 위한 세라마이드 보습 크림 / 민감 피부 장벽 보습 / 건조하고 민감한 피부의 20~40대",
+      "expect": "prod_aestura_atobarrier365_cream|law_cosmetics_13/law_cosmetics_rule_annex5#가목",
+      "hit": 1,
+      "want": 2,
+      "missed": [
+        "law_cosmetics_13/law_cosmetics_rule_annex5#가목"
+      ],
+      "leak": 0,
+      "note": "",
+      "ms": 1594,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2485,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.171,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.1648,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_aestura_atobarrier365_cream",
+            "section": "아토베리어365 크림",
+            "score": 0.6434,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_aestura_acica365",
+            "section": "에이시카365",
+            "score": 0.4835,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 2",
+            "score": 0.3193,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 1",
+            "score": 0.2941,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 10",
+            "score": 0.4336,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R17",
+      "brand": "aestura",
+      "query": "아토베리어365 크림 / 아토피 피부를 개선하는 크림 / 아토피 걱정 없는 피부 / 아토피로 고민하는 고객",
+      "expect": "law_cosmetics_13/law_cosmetics_rule_annex5#가목|law_cosmetics_2",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "의약품 오인 — 화장품 정의(의약품 제외)와 부당 광고 조문",
+      "ms": 1574,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.2689,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 가목",
+            "score": 0.2057,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.2015,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_aestura_atobarrier365_cream",
+            "section": "아토베리어365 크림",
+            "score": 0.6308,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_aestura_acica365",
+            "section": "에이시카365",
+            "score": 0.5181,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 2",
+            "score": 0.3094,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 1",
+            "score": 0.2794,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 9",
+            "score": 0.5333,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R18",
+      "brand": "aestura",
+      "query": "에이시카365 / 붉은기를 진정시키는 약산성 크림 / 민감 붉은기 진정 / 붉은기가 고민인 민감 피부",
+      "expect": "prod_aestura_acica365",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1571,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.3026,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 카목",
+            "score": 0.2511,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.2412,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_aestura_acica365",
+            "section": "에이시카365",
+            "score": 0.6069,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_aestura_atobarrier365_cream",
+            "section": "아토베리어365 크림",
+            "score": 0.4296,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 2",
+            "score": 0.1329,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 1",
+            "score": 0.1255,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 10",
+            "score": 0.4191,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R19",
+      "brand": "aestura",
+      "query": "더마UV365 / 민감 피부를 위한 자외선 케어 / 민감 피부 데일리 선케어 / 민감 피부 30대",
+      "expect": "prod_aestura_dermauv365|law_cosmetics_rule_2",
+      "hit": 2,
+      "want": 2,
+      "missed": [],
+      "leak": 0,
+      "note": "",
+      "ms": 1575,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.254,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_2",
+            "section": "화장품법 제2조 (1)",
+            "score": 0.1985,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 자목",
+            "score": 0.1945,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_aestura_dermauv365",
+            "section": "더마UV365",
+            "score": 0.6178,
+            "exact_product": true
+          },
+          {
+            "source_id": "prod_aestura_atobarrier365_cream",
+            "section": "아토베리어365 크림",
+            "score": 0.4864,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 2",
+            "score": 0.2588,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 1",
+            "score": 0.2218,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 10",
+            "score": 0.4172,
+            "exact_product": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "R20",
+      "brand": "aestura",
+      "query": "태평양제약 헤리티지와 피부과 전문의 협업 브랜드 캠페인 / 오래도록 건강한 아름다움 / 민감 피부 고객",
+      "expect": "brand_aestura",
+      "hit": 1,
+      "want": 1,
+      "missed": [],
+      "leak": 0,
+      "note": "제품 없는 브랜드 캠페인",
+      "ms": 1567,
+      "results": {
+        "규제": [
+          {
+            "source_id": "law_cosmetics_rule_2",
+            "section": "화장품법 시행규칙 제2조",
+            "score": 0.3342,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 나목",
+            "score": 0.2705,
+            "exact_product": false
+          },
+          {
+            "source_id": "law_cosmetics_rule_annex5",
+            "section": "화장품법 시행규칙 별표 5 제2호 다목",
+            "score": 0.2601,
+            "exact_product": false
+          }
+        ],
+        "제품": [
+          {
+            "source_id": "prod_aestura_acica365",
+            "section": "에이시카365",
+            "score": 0.4473,
+            "exact_product": false
+          },
+          {
+            "source_id": "prod_aestura_atobarrier365_cream",
+            "section": "아토베리어365 크림",
+            "score": 0.4214,
+            "exact_product": false
+          }
+        ],
+        "브랜드": [
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 1",
+            "score": 0.6198,
+            "exact_product": false
+          },
+          {
+            "source_id": "brand_aestura",
+            "section": "에스트라 브랜드 소개 2",
+            "score": 0.5908,
+            "exact_product": false
+          }
+        ],
+        "그룹": [
+          {
+            "source_id": "ap_safe_products",
+            "section": "아모레퍼시픽 안전한 제품 9",
+            "score": 0.5028,
+            "exact_product": false
+          }
+        ]
+      }
+    }
+  ]
+}

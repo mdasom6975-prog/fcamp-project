@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 지식 검색을 pgvector 로 (2단계)
+- `knowledge_chunks.vec vector(1536)` + HNSW(코사인) 인덱스. 검색은 층·브랜드 필터를 건 채 `ORDER BY vec <=> 질의 LIMIT k` 로 DB 가 상위 후보를 고르고, 제품명 정확 일치·skip 은 파이썬에서 마무리한다(`knowledge.search`, 결과 모양 동일)
+- 기존 DB 는 첫 초기화에서 확장 생성 → 컬럼 추가 → JSON `embedding` 에서 백필 → 인덱스 생성을 한 번만 한다(`main._vector_column`). JSON 컬럼은 되돌리기용으로 이번에는 남긴다
+- `KNOWLEDGE_SEARCH=python` 이면 예전 경로(JSON 전부 읽어 파이썬 코사인). 두 경로가 같은 결과를 주는지 테스트로 고정. 동점은 먼저 등록된 조각이 앞
+- `eval/rag_search.py` 가 질의마다 검색 시간(임베딩 제외)을 재서 중앙값·p95 와 경로를 보고서에 남긴다. 테스트의 가짜 임베딩은 `EMBED_DIMS=64`
+- 의존성 `pgvector`(Vercel 포함). Supabase prod 는 Database → Extensions 에서 vector 를 켜 둔다(코드도 시도한다)
+
 ### 로컬과 운영을 같은 구성으로: Supabase dev/prod
 - SQLite 폴백을 없앴다. 로컬 개발도 Supabase Postgres + Storage(dev 프로젝트)를 쓰고, Vercel 은 prod 프로젝트를 쓴다. `DATABASE_URL`·`SUPABASE_*` 가 없으면 앱이 시작하지 않는다(`db.py`, `main._check_storage`; `ALLOW_LOCAL_STORAGE=1` 은 테스트·오프라인용). `.env` 는 `db.py` 가 읽는다
 - 테스트는 임시 Postgres(+pgvector)를 세션마다 띄운다(`tests/conftest.py`, conda-forge `postgresql`·`pgvector`, 테스트마다 템플릿 DB 복제). SQLite 는 외래키를 검사하지 않아 숨어 있던 테스트 데이터 오류 1건을 고쳤다
