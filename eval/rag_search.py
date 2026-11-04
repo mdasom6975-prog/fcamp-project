@@ -60,11 +60,16 @@ def main() -> int:
     show = args[args.index("--show") + 1] if "--show" in args else None
     from sqlalchemy import select
 
-    from app import db, knowledge
+    from app import db, knowledge, legal
     from app.main import init_app
     from app.models import Brand
     init_app()
     cases = list(csv.DictReader(cases_path.open(encoding="utf-8")))
+    # 규제 k: 카피 생성(for_copy)과 같은 규칙 — 업종의 규제 조각이 LAW_ALL_MAX 이하면 전부(평가에서는 LAYER_K), 넘으면 LAW_K 상위
+    with db.SessionLocal() as s0:
+        law_total = len(knowledge.law_rows(s0, ["화장품"]))
+    layer_k = {**knowledge.LAYER_K, **({"규제": knowledge.LAW_K} if law_total > knowledge.LAW_ALL_MAX else {})}
+    print(f"규제 조각 {law_total}개 → 규제 k={layer_k['규제']} ({'검색 상위' if law_total > knowledge.LAW_ALL_MAX else '전부 투입 규모'})")
     rows, hit_total, want_total, leaks, times = [], 0, 0, 0, []
     with db.SessionLocal() as s:
         brands = {b.name: b for b in s.scalars(select(Brand)).all()}
@@ -76,8 +81,9 @@ def main() -> int:
             q = knowledge.query_text(c)
             qv = cached_embed(q)                       # 같은 질의 텍스트는 같은 벡터(재현성, eval/cache). 검색 시간만 잰다(네트워크 제외)
             t0 = time.perf_counter()
+            inds = legal.detect(legal.source_text(c)) or None      # 카피 생성과 같은 업종 필터(3-B: 규제가 여러 업종으로 늘어난 뒤)
             res = knowledge.search(s, q, brand_id=b.id, group_id=b.group_id, product_name=c["product_name"] or None,
-                                   embedder=lambda _t, _v=qv: [_v])
+                                   embedder=lambda _t, _v=qv: [_v], industries=inds, layer_k=layer_k)
             ms = (time.perf_counter() - t0) * 1000
             times.append(ms)
             hit, want, missed = grade(c["expect"], res)
@@ -99,13 +105,13 @@ def main() -> int:
     recall = hit_total / want_total if want_total else 0
     ts = sorted(times)
     p50, p95 = (ts[len(ts) // 2], ts[int(len(ts) * 0.95)]) if ts else (0, 0)
-    print(f"\n정답 포함률 {hit_total}/{want_total} = {recall:.0%}   다른 브랜드 섞임 {leaks}건   (층별 k = {knowledge.LAYER_K})")
+    print(f"\n정답 포함률 {hit_total}/{want_total} = {recall:.0%}   다른 브랜드 섞임 {leaks}건   (층별 k = {layer_k})")
     print(f"검색 시간(DB+정렬, 임베딩 제외) 중앙값 {p50:.0f}ms · p95 {p95:.0f}ms · 경로 {knowledge.SEARCH_MODE}")
     out = ROOT / "eval" / "reports" / f"rag_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps({"recall": recall, "hit": hit_total, "want": want_total, "leaks": leaks,
                                "ms_p50": round(p50), "ms_p95": round(p95), "search_mode": knowledge.SEARCH_MODE,
-                               "layer_k": knowledge.LAYER_K, "embed_model": knowledge.EMBED_MODEL, "cases": rows},
+                               "layer_k": layer_k, "embed_model": knowledge.EMBED_MODEL, "cases": rows},
                               ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"보고서: {out.relative_to(ROOT)}")
     return 0

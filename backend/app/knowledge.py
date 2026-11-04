@@ -6,8 +6,8 @@
 - 임베딩은 pgvector 컬럼(vec, HNSW·코사인)에 두고 검색은 SQL `ORDER BY vec <=> 질의 LIMIT k` 로 한다(2단계, 2026-11).
   KNOWLEDGE_SEARCH=python 이면 예전 경로(JSON embedding 을 전부 읽어 파이썬 코사인)로 돌아간다. 두 경로의 결과는 같아야 한다(테스트).
 - 모든 층을 한 번의 질의로 가져오고(왕복 1회), 기본은 하이브리드: 벡터 순위 + pg_trgm word_similarity 순위를 RRF 로 합친다(3단계, 60건 81% → 85%).
-- 카피 생성(for_copy)에서 규제는 검색하지 않는다. 브리프와 법령 문장은 쓰는 말이 달라 유사도로는 놓치기 쉬우므로(1-a 평가),
-  품목에서 업종이 감지되면 그 업종으로 표시한 규제 문서를 전부 넣는다. 검색은 제품·브랜드·그룹 층에만 쓴다.
+- 카피 생성(for_copy)의 규제: 업종이 감지되면 그 업종 규제 조각이 LAW_ALL_MAX 이하일 때는 전부 넣고(브리프와 법령 문장은 말이 달라
+  유사도로 놓치기 쉽다, 1-a 평가), 넘으면(3-B 법령 전문 등록 뒤 300여 조각) 업종 필터 + 검색 상위 LAW_K 만 넣는다.
 """
 import math
 import os
@@ -190,10 +190,19 @@ def query_text(brief: dict) -> str:
     return " / ".join(str(brief[k]).strip() for k in keys if str(brief.get(k) or "").strip())
 
 
-def _filtered(layer: str, brand_id: int | None, group_id: int | None):
+def _industry_ok(industries: list[str] | None):
+    """규제 층 업종 필터: 업종을 주면 그 업종으로 표시된 문서(업종 없는 정의 조문 포함)만. 안 주면 전부."""
+    if not industries:
+        return None
+    return or_(KnowledgeDoc.industry.is_(None), KnowledgeDoc.industry.in_(industries))
+
+
+def _filtered(layer: str, brand_id: int | None, group_id: int | None, industries: list[str] | None = None):
     """층·브랜드·그룹·임베딩 모델 필터가 걸린 (조각, 문서) 질의. 거를 기준이 없는 층(브랜드 없이 브랜드 층)은 None."""
     q = (select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
          .where(KnowledgeDoc.layer == layer, KnowledgeDoc.status == "사용", KnowledgeChunk.embed_model == EMBED_MODEL))
+    if layer == "규제" and _industry_ok(industries) is not None:
+        q = q.where(_industry_ok(industries))
     if layer in ("브랜드", "제품", "캠페인"):
         if brand_id is None:
             return None
@@ -205,21 +214,24 @@ def _filtered(layer: str, brand_id: int | None, group_id: int | None):
     return q
 
 
-def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | None) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
+def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | None,
+                industries: list[str] | None = None) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
     """python 경로: 필터에 맞는 조각 전부(점수는 파이썬에서)."""
-    q = _filtered(layer, brand_id, group_id)
+    q = _filtered(layer, brand_id, group_id, industries)
     return list(db.execute(q).all()) if q is not None else []
 
 
 def _candidates_sql(db: Session, qv: list[float], query: str, brand_id: int | None, group_id: int | None,
-                    layers: list[str], limit: int, hybrid: bool) -> dict[str, list[tuple[KnowledgeChunk, KnowledgeDoc, float]]]:
+                    layers: list[str], limit: int, hybrid: bool,
+                    industries: list[str] | None = None) -> dict[str, list[tuple[KnowledgeChunk, KnowledgeDoc, float]]]:
     """sql 경로: 모든 층을 한 번의 질의로(왕복 1회). 층마다 코사인 거리 순위(window) 상위 limit 개.
     hybrid 면 pg_trgm similarity(조각 글, 질의) 순위도 함께 매겨 두 순위 중 하나라도 limit 안이면 가져오고,
     점수는 RRF = 1/(K+벡터순위) + 1/(K+글자순위). 아니면 점수는 유사도(1 − 거리).
     브랜드·제품·캠페인 층은 brand_id, 그룹 층은 group_id 로 거른다(없으면 그 층은 빈 결과)."""
     layer = KnowledgeDoc.layer
     dist = KnowledgeChunk.vec.cosine_distance(qv)
-    scope = or_(layer == "규제",
+    law_ok = _industry_ok(industries)
+    scope = or_(layer == "규제" if law_ok is None else and_(layer == "규제", law_ok),
                 and_(layer.in_(("브랜드", "제품", "캠페인")), KnowledgeDoc.brand_id == brand_id) if brand_id is not None else false(),
                 and_(layer == "그룹", KnowledgeDoc.group_id == group_id) if group_id is not None else false())
     cols = [KnowledgeChunk.id.label("cid"), dist.label("dist"),
@@ -270,13 +282,15 @@ def _exact_products(db: Session, brand_id: int | None, name: str | None) -> list
 
 def search(db: Session, query: str, *, brand_id: int | None, group_id: int | None,
            layer_k: dict[str, int] | None = None, product_name: str | None = None, embedder=embed,
-           skip=None, mode: str | None = None, hybrid: bool | None = None) -> dict[str, list[dict]]:
+           skip=None, mode: str | None = None, hybrid: bool | None = None,
+           industries: list[str] | None = None) -> dict[str, list[dict]]:
     """질의로 층별 상위 조각을 찾는다. 반환: {층: [{chunk_id, doc_title, section, text, score, …}]}.
     규제는 모든 브랜드 공통, 그룹은 group_id, 브랜드·제품은 brand_id 로 거른다.
     product_name 이 제품 조각의 제품명·별칭과 같으면 그 조각을 맨 앞에 둔다(이름이 정확히 맞으면 유사도보다 확실하다).
     skip(조각) 이 참인 조각은 후보에서 뺀다.
     mode: "sql"(기본, pgvector 가 상위 후보를 고른다. 모든 층을 한 질의로) | "python"(조각 전부를 읽어 파이썬 코사인). 환경변수 KNOWLEDGE_SEARCH.
-    hybrid: 벡터 순위 + 글자 순위 RRF(sql 경로만). 기본은 환경변수 KNOWLEDGE_HYBRID. 점수 의미가 달라진다(RRF 합, 0.03 안팎)."""
+    hybrid: 벡터 순위 + 글자 순위 RRF(sql 경로만). 기본은 환경변수 KNOWLEDGE_HYBRID. 점수 의미가 달라진다(RRF 합, 0.03 안팎).
+    industries: 규제 층을 이 업종(과 업종 없는 문서)으로 거른다. 규제가 여러 업종으로 늘어난 뒤(3-B) 식품 조문이 화장품 브리프에 섞이지 않게."""
     layer_k = layer_k or LAYER_K
     mode = (mode or SEARCH_MODE)
     hybrid = HYBRID if hybrid is None else hybrid
@@ -284,10 +298,11 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
     out: dict[str, list[dict]] = {}
     by_layer = None
     if mode != "python":
-        by_layer = _candidates_sql(db, qv, query, brand_id, group_id, list(layer_k), max(SQL_CANDIDATES, *layer_k.values()), hybrid)
+        by_layer = _candidates_sql(db, qv, query, brand_id, group_id, list(layer_k), max(SQL_CANDIDATES, *layer_k.values()), hybrid,
+                                   industries)
     for layer, k in layer_k.items():
         if by_layer is None:
-            scored_raw = [(ch, doc, cosine(qv, ch.embedding)) for ch, doc in _candidates(db, layer, brand_id, group_id)]
+            scored_raw = [(ch, doc, cosine(qv, ch.embedding)) for ch, doc in _candidates(db, layer, brand_id, group_id, industries)]
         else:
             scored_raw = by_layer[layer]
             if layer == "제품" and product_name:        # 정확 일치 제품이 상위 후보 밖이어도 맨 앞에 두기 위해 따로 찾는다
@@ -313,7 +328,9 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
 
 # ── 카피 생성에 붙이기 ────────────────────────────────────────────────────
 
-GUIDE_K = {k: v for k, v in LAYER_K.items() if k != "규제"}    # 카피에서 검색하는 층(규제는 업종으로 전부 넣는다)
+GUIDE_K = {k: v for k, v in LAYER_K.items() if k != "규제"}    # 카피에서 검색하는 층(규제는 아래 LAW_* 규칙)
+LAW_K = int(os.getenv("KNOWLEDGE_LAW_K", "6"))               # 규제가 많을 때 카피에 넣을 조각 수(검색 상위)
+LAW_ALL_MAX = int(os.getenv("KNOWLEDGE_LAW_ALL_MAX", "24"))  # 업종의 규제 조각이 이 수 이하면 검색 없이 전부 넣는다(작을 때는 전부가 더 확실하다)
 _TEST_NUMBER = re.compile(r"\d+(?:\.\d+)?\s*%")
 
 
@@ -378,12 +395,19 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     - 임베딩 호출이 실패하면 guide 없이 진행하고 error 에 오류 이름만 남긴다(카피 생성을 막지 않는다)"""
     from . import legal
     industries = legal.detect(legal.source_text(brief))
-    out = {"industries": industries, "law": law_rows(db, industries), "guide": [], "error": None, "functional_mismatch": None,
-           "product_note": None, "motifs": None, "directions": brand_directions(db, brand_id)}
-    if has_guide(db, brand_id, group_id):
+    law_all = law_rows(db, industries)
+    # 규제: 업종의 조각이 LAW_ALL_MAX 이하면 전부(작을 때는 검색보다 확실), 그보다 많으면 검색 상위 LAW_K (3-B 에서 법령 전문을 넣자 수백 조각)
+    law_search = len(law_all) > LAW_ALL_MAX
+    out = {"industries": industries, "law": [] if law_search else law_all, "guide": [], "error": None, "functional_mismatch": None,
+           "product_note": None, "motifs": None, "directions": brand_directions(db, brand_id),
+           "law_mode": "search" if law_search else "all", "law_total": len(law_all)}
+    if has_guide(db, brand_id, group_id) or law_search:
         try:
-            res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=GUIDE_K,
-                         product_name=brief.get("product_name"), embedder=embedder, skip=_test_result)
+            layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {})}
+            res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=layer_k,
+                         product_name=brief.get("product_name"), embedder=embedder, skip=_test_result, industries=industries or None)
+            if law_search:
+                out["law"] = res.get("규제", [])
             products = res.get("제품", [])
             if any(r["exact_product"] for r in products):      # 제품을 특정했으면 비슷한 다른 제품 이야기를 섞지 않는다
                 products = [r for r in products if r["exact_product"]]
@@ -404,7 +428,8 @@ def refs(k: dict) -> dict:
         {x: r[x] for x in ("chunk_id", "source_id", "layer", "section", "score")} for r in k["guide"]],
             "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
             "product_note": k.get("product_note"), "embed_model": EMBED_MODEL,
-            "motifs": k.get("motifs"), "directions": k.get("directions") or []}
+            "motifs": k.get("motifs"), "directions": k.get("directions") or [],
+            "law_mode": k.get("law_mode"), "law_total": k.get("law_total")}
 
 
 def from_refs(db: Session, saved: dict | None) -> dict | None:

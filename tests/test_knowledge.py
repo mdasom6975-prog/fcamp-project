@@ -378,3 +378,33 @@ def test_hybrid_finds_substring_match_that_vectors_miss(session):
     assert plain["규제"][0]["section"] == "자목", "낱말만 보면 두 조각이 동점이라 먼저 등록된 쪽… 이 아니라 공유 낱말 수가 같은 자목"
     assert hybrid["규제"][0]["section"] == "바목"
     assert 0 < hybrid["규제"][0]["score"] < 0.05, "RRF 점수는 1/(K+순위) 의 합"
+
+
+def test_search_filters_law_by_industry_keeping_untagged(session):
+    """3-B: 규제가 여러 업종으로 늘면 업종 필터로 거른다. 업종 없는 문서(정의 조문)는 어느 업종에도 들어간다."""
+    from app import knowledge
+    _add(session, layer="규제", source_id="cos", title="화장품법", industry="화장품", chunks=[("제13조", "의약품 오인 광고 금지 표시")])
+    _add(session, layer="규제", source_id="food", title="식품표시광고법", industry="건강기능식품", chunks=[("제8조", "질병 예방 치료 효능 표시 광고 금지")])
+    _add(session, layer="규제", source_id="def", title="정의", chunks=[("제2조", "화장품이란 인체를 청결 미화 광고 표시")])
+    kw = dict(brand_id=None, group_id=None, layer_k={"규제": 5}, embedder=fake_embed)
+    for mode in ("sql", "python"):
+        got = {r["source_id"] for r in knowledge.search(session, "광고 표시 금지", industries=["화장품"], mode=mode, hybrid=False, **kw)["규제"]}
+        assert got == {"cos", "def"}, mode
+    assert {r["source_id"] for r in knowledge.search(session, "광고 표시 금지", hybrid=False, **kw)["규제"]} == {"cos", "food", "def"}, "업종을 안 주면 전부"
+
+
+def test_for_copy_switches_law_to_search_when_many(session, monkeypatch):
+    """규제 조각이 LAW_ALL_MAX 이하면 전부 넣고(검색 없음), 넘으면 업종 필터 + 검색 상위 LAW_K 만 넣는다."""
+    from app import knowledge
+    for i in range(6):
+        _add(session, layer="규제", source_id=f"cos{i}", title=f"화장품법 {i}", industry="화장품",
+             chunks=[(f"제{i}조", "의약품 오인 광고 금지" if i == 0 else f"영업 등록 신고 서류 {i}")])
+    brief = {"product_name": "크림", "description": "아토피 치료 화장품 광고", "key_message": "의약품 오인"}
+    monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 10)
+    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    assert k["law_mode"] == "all" and len(k["law"]) == 6 and k["law_total"] == 6
+    monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 3)
+    monkeypatch.setattr(knowledge, "LAW_K", 2)
+    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    assert k["law_mode"] == "search" and len(k["law"]) == 2 and k["law"][0]["source_id"] == "cos0", "검색 상위가 들어간다"
+    assert knowledge.refs(k)["law_mode"] == "search"

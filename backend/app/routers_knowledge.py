@@ -157,7 +157,7 @@ def search(body: SearchIn, db: Session = Depends(get_db)):
     from . import legal
     industries = legal.detect(legal.source_text(brief))
     res = knowledge.search(db, q, brand_id=body.brand_id, group_id=body.group_id, product_name=body.product_name or None,
-                           embedder=knowledge.embed)      # 호출 시점의 embed(테스트가 바꿔 끼운다)
+                           embedder=knowledge.embed, industries=industries or None)      # 호출 시점의 embed(테스트가 바꿔 끼운다)
     return {"query": q, "industries": industries, "law_all": [r["chunk_id"] for r in knowledge.law_rows(db, industries)],
             "layers": [{"layer": layer, "k": knowledge.LAYER_K.get(layer), "rows": [
                 {k: r[k] for k in ("chunk_id", "doc_id", "source_id", "doc_title", "section", "score", "exact_product", "product_name")}

@@ -47,6 +47,942 @@
       "industry": "화장품"
     },
     {
+      "id": "law_cosmetics_1",
+      "layer": "규제",
+      "title": "화장품법 제1조(목적)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0001&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_2_2",
+      "layer": "규제",
+      "title": "화장품법 제2조의2(영업의 종류)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0002&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_2_3",
+      "layer": "규제",
+      "title": "화장품법 제2조의3(화장품의 날)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0002&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3",
+      "layer": "규제",
+      "title": "화장품법 제3조(영업의 등록)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_2",
+      "layer": "규제",
+      "title": "화장품법 제3조의2(맞춤형화장품판매업의 신고)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_3",
+      "layer": "규제",
+      "title": "화장품법 제3조의3(결격사유)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_4",
+      "layer": "규제",
+      "title": "화장품법 제3조의4(맞춤형화장품조제관리사 자격시험)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=04&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_5",
+      "layer": "규제",
+      "title": "화장품법 제3조의5(맞춤형화장품조제관리사의 결격사유)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=05&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_6",
+      "layer": "규제",
+      "title": "화장품법 제3조의6(자격증 대여 등의 금지)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=06&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_7",
+      "layer": "규제",
+      "title": "화장품법 제3조의7(유사명칭의 사용금지)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=07&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_3_8",
+      "layer": "규제",
+      "title": "화장품법 제3조의8(맞춤형화장품조제관리사 자격의 취소)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0003&joBrNo=08&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_4",
+      "layer": "규제",
+      "title": "화장품법 제4조(기능성화장품의 심사 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0004&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_4_2",
+      "layer": "규제",
+      "title": "화장품법 제4조의2(영유아 또는 어린이 사용 화장품의 관리)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0004&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_5",
+      "layer": "규제",
+      "title": "화장품법 제5조(영업자의 의무 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0005&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_5_2",
+      "layer": "규제",
+      "title": "화장품법 제5조의2(위해화장품의 회수)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0005&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_6",
+      "layer": "규제",
+      "title": "화장품법 제6조(폐업 등의 신고)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0006&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_8",
+      "layer": "규제",
+      "title": "화장품법 제8조(화장품 안전기준 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0008&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_9",
+      "layer": "규제",
+      "title": "화장품법 제9조(안전용기ㆍ포장 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0009&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_10",
+      "layer": "규제",
+      "title": "화장품법 제10조(화장품의 기재사항)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0010&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_11",
+      "layer": "규제",
+      "title": "화장품법 제11조(화장품의 가격표시)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0011&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_12",
+      "layer": "규제",
+      "title": "화장품법 제12조(기재ㆍ표시상의 주의)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0012&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_14",
+      "layer": "규제",
+      "title": "화장품법 제14조(표시ㆍ광고 내용의 실증 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0014&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_15",
+      "layer": "규제",
+      "title": "화장품법 제15조(영업의 금지)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0015&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_15_2",
+      "layer": "규제",
+      "title": "화장품법 제15조의2(동물실험을 실시한 화장품 등의 유통판매 금지)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0015&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_16",
+      "layer": "규제",
+      "title": "화장품법 제16조(판매 등의 금지 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0016&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_17",
+      "layer": "규제",
+      "title": "화장품법 제17조(단체 설립)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0017&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_18",
+      "layer": "규제",
+      "title": "화장품법 제18조(보고와 검사 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0018&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_18_2",
+      "layer": "규제",
+      "title": "화장품법 제18조의2(소비자화장품안전관리감시원)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0018&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_19",
+      "layer": "규제",
+      "title": "화장품법 제19조(시정명령)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0019&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_20",
+      "layer": "규제",
+      "title": "화장품법 제20조(검사명령)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0020&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_22",
+      "layer": "규제",
+      "title": "화장품법 제22조(개수명령)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0022&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_23",
+      "layer": "규제",
+      "title": "화장품법 제23조(회수ㆍ폐기명령 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0023&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_23_2",
+      "layer": "규제",
+      "title": "화장품법 제23조의2(위해화장품의 공표)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0023&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_24",
+      "layer": "규제",
+      "title": "화장품법 제24조(등록의 취소 등)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0024&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_24_2",
+      "layer": "규제",
+      "title": "화장품법 제24조의2(기능성화장품의 인정 취소)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0024&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_26",
+      "layer": "규제",
+      "title": "화장품법 제26조(영업자의 지위 승계)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0026&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_26_2",
+      "layer": "규제",
+      "title": "화장품법 제26조의2(행정제재처분 효과의 승계)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0026&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_27",
+      "layer": "규제",
+      "title": "화장품법 제27조(청문)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0027&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_28",
+      "layer": "규제",
+      "title": "화장품법 제28조(과징금처분)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0028&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_28_2",
+      "layer": "규제",
+      "title": "화장품법 제28조의2(위반사실의 공표)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0028&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_28_3",
+      "layer": "규제",
+      "title": "화장품법 제28조의3(직접구매 해외화장품에 대한 검사 및 관계 기관 정보 제공)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0028&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_28_4",
+      "layer": "규제",
+      "title": "화장품법 제28조의4(직접구매 해외화장품에 대한 실태조사)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0028&joBrNo=04&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_29",
+      "layer": "규제",
+      "title": "화장품법 제29조(자발적 관리의 지원)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0029&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_30",
+      "layer": "규제",
+      "title": "화장품법 제30조(수출용 제품의 예외)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0030&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_31",
+      "layer": "규제",
+      "title": "화장품법 제31조(등록필증 등의 재교부)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0031&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_32",
+      "layer": "규제",
+      "title": "화장품법 제32조(수수료)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0032&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_33",
+      "layer": "규제",
+      "title": "화장품법 제33조(화장품산업의 지원)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0033&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_33_2",
+      "layer": "규제",
+      "title": "화장품법 제33조의2(국제협력)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0033&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_34",
+      "layer": "규제",
+      "title": "화장품법 제34조(권한 등의 위임ㆍ위탁)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0034&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_36",
+      "layer": "규제",
+      "title": "화장품법 제36조(벌칙)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0036&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_37",
+      "layer": "규제",
+      "title": "화장품법 제37조(벌칙)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0037&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_38",
+      "layer": "규제",
+      "title": "화장품법 제38조(벌칙)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0038&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_39",
+      "layer": "규제",
+      "title": "화장품법 제39조(양벌규정)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0039&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_40",
+      "layer": "규제",
+      "title": "화장품법 제40조(과태료)",
+      "kind": "law",
+      "law": "화장품법",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=291337&joNo=0040&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_1",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제1조(목적)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0001&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_2_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제2조의2(맞춤형화장품의 제외 대상)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0002&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제3조(제조업의 등록 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0003&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_4",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제4조(화장품책임판매업의 등록 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0004&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_5",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제5조(화장품제조업 등의 변경등록)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0005&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_6",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제6조(시설기준 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0006&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_7",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제7조(화장품의 품질관리기준 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0007&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조(책임판매관리자의 자격기준 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의2(맞춤형화장품판매업의 신고)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의3(맞춤형화장품판매업의 변경신고)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_4",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의4(맞춤형화장품판매업의 시설기준)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=04&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_5",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의5(맞춤형화장품조제관리사 자격시험)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=05&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_6",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의6(맞춤형화장품조제관리사 자격증의 발급 신청 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=06&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_8_7",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제8조의7(시험운영기관의 지정 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0008&joBrNo=07&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_9",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제9조(기능성화장품의 심사)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0009&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_10",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제10조(보고서 제출 대상 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0010&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_10_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제10조의2(영유아 또는 어린이 사용 화장품의 표시ㆍ광고)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0010&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_10_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제10조의3(제품별 안전성 자료의 작성ㆍ보관)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0010&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_10_4",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제10조의4(실태조사의 실시)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0010&joBrNo=04&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_10_5",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제10조의5(위해요소 저감화계획의 수립)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0010&joBrNo=05&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_11",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제11조(화장품제조업자의 준수사항 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0011&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_12",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제12조(화장품책임판매업자의 준수사항)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0012&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_12_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제12조의2(맞춤형화장품판매업자의 준수사항)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0012&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_13",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제13조(화장품의 생산실적 등 보고)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0013&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_14",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제14조(책임판매관리자 등의 교육)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0014&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_14_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제14조의2(회수 대상 화장품의 기준 및 위해성 등급 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0014&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_14_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제14조의3(위해화장품의 회수계획 및 회수절차 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0014&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_14_4",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제14조의4(행정처분의 감경 또는 면제)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0014&joBrNo=04&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_15",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제15조(폐업 등의 신고)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0015&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_17",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제17조(화장품 원료 등의 위해평가)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0017&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_17_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제17조의2(지정ㆍ고시된 원료의 사용기준의 안전성 검토)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0017&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_17_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제17조의3(원료의 사용금지 해제 또는 변경 신청 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0017&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_18",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제18조(안전용기ㆍ포장 대상 품목 및 기준)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0018&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_19",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제19조(화장품 포장의 기재ㆍ표시 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0019&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_20",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제20조(화장품 가격의 표시)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0020&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_21",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제21조(기재ㆍ표시상의 주의사항)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0021&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_23",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제23조(표시ㆍ광고 실증의 대상 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0023&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_24",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제24조(관계 공무원의 자격 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0024&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_25",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제25조(수거 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0025&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_26",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제26조(화장품 판매 모니터링)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0026&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_26_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제26조의2(소비자화장품안전관리감시원의 자격 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0026&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_27",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제27조(회수ㆍ폐기명령 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0027&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_28",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제28조(위해화장품의 공표)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0028&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_29",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제29조(행정처분기준)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0029&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_30",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제30조(과징금의 징수절차)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0030&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_30_2",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제30조의2(직접구매 해외화장품에 대한 검사)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0030&joBrNo=02&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_30_3",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제30조의3(직접구매 해외화장품에 대한 실태조사)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0030&joBrNo=03&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_31",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제31조(등록필증 등의 재발급 등)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0031&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_32",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제32조(수수료)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0032&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
+      "id": "law_cosmetics_rule_33",
+      "layer": "규제",
+      "title": "화장품법 시행규칙 제33조(규제의 재검토)",
+      "kind": "law",
+      "law": "화장품법 시행규칙",
+      "url": "https://www.law.go.kr/LSW/lsSideInfoP.do?lsiSeq=285249&joNo=0033&joBrNo=00&docCls=jo&urlMode=lsScJoRltInfoR",
+      "industry": "화장품"
+    },
+    {
       "id": "ap_ingredients",
       "layer": "그룹",
       "title": "아모레퍼시픽 투명한 성분",
