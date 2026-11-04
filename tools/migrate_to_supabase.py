@@ -1,4 +1,6 @@
-"""기존 로컬 데이터(SQLite + backend/storage + backend/data 의 로그)를 Supabase(Postgres + Storage)로 옮긴다.
+"""[1회용] 예전 로컬 데이터(SQLite + backend/storage + backend/data 의 로그)를 Supabase(Postgres + Storage)로 옮긴다.
+앱은 더 이상 SQLite 를 쓰지 않는다(로컬도 Supabase dev 프로젝트). 남은 app.db 를 dev 로 가져갈 때 한 번 쓰고 나면 역할이 끝난다.
+환경 사이 복제(prod → dev)는 tools/sync_env.py.
 
 실행: DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_KEY 를 환경변수로 주고
       backend/.venv/bin/python tools/migrate_to_supabase.py [--sqlite backend/data/app.db] [--dry-run]

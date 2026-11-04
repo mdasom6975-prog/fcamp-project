@@ -21,7 +21,7 @@ def mig():
     return m
 
 
-def test_migration_copies_rows_normalizes_paths_and_uploads(mig, tmp_path, monkeypatch):
+def test_migration_copies_rows_normalizes_paths_and_uploads(mig, tmp_path, monkeypatch, pg_engine):
     # 원본: 옛 방식(절대 경로)으로 파일 경로를 가진 SQLite
     old_storage = tmp_path / "old" / "storage"
     (old_storage / "thumbs").mkdir(parents=True)
@@ -38,8 +38,7 @@ def test_migration_copies_rows_normalizes_paths_and_uploads(mig, tmp_path, monke
     (data / "prompt_log" / "p1.json").write_text(json.dumps({"prompt": "P"}), encoding="utf-8")
     (data / "api_calls.jsonl").write_text(json.dumps({"design_id": 5, "date": "2026-10-20", "api": "chat"}) + "\n{깨진줄\n")
 
-    dst = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
-    db.Base.metadata.create_all(dst)
+    dst = pg_engine
     bucket: dict[str, bytes] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:

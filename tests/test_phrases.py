@@ -2,7 +2,6 @@
 외부 API 는 호출하지 않는다 (generate_checked 를 가짜로 바꾼다)."""
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 
@@ -25,13 +24,13 @@ def test_effective_prefers_campaign_and_falls_back_per_list():
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import copywriter, models
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     seen: list[dict] = []

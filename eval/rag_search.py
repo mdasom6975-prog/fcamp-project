@@ -1,7 +1,7 @@
 """RAG 검색 품질 평가 (설계 16 · 6절, 1-a 수용 기준). 생성 없이 검색 결과만 채점한다.
 
 실행: backend/.venv/bin/python eval/rag_search.py [--cases eval/rag_cases.csv] [--show R07]
-- 먼저 tools/register_knowledge.py 로 지식을 등록해 둔다(같은 DB: DATABASE_URL, 없으면 backend/data/app.db)
+- 먼저 tools/register_knowledge.py 로 지식을 등록해 둔다(같은 DB: backend/.env 의 DATABASE_URL)
 - 각 건의 브리프로 층별 검색(knowledge.LAYER_K)을 하고, expect 의 출처 id 가 결과에 있는지 본다
   · expect 는 '|' 로 나열, 'a/b' 는 둘 중 하나면 정답, '출처#글자' 는 절 이름까지 맞아야 정답(예: 별표의 특정 목)
 - 지표: 정답 포함률(Recall) — 기대한 출처 중 나온 비율, 다른 브랜드 섞임 — 브랜드·제품 조각이 다른 브랜드 것이면 1건

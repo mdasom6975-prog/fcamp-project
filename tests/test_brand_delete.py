@@ -4,7 +4,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app import storage
@@ -16,11 +16,8 @@ from app.routers_assets import get_db
 
 
 @pytest.fixture
-def Local(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
-    @event.listens_for(engine, "connect")
-    def _fk(dbapi, _):            # 운영(Postgres)처럼 외래키를 강제한다: 삭제 순서가 틀리면 여기서 실패한다
-        dbapi.execute("PRAGMA foreign_keys=ON")
+def Local(tmp_path, pg_engine):
+    engine = pg_engine            # Postgres 는 외래키를 강제한다: 삭제 순서가 틀리면 여기서 실패한다
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
 

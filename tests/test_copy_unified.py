@@ -1,8 +1,7 @@
 """카피를 캠페인당 1회 생성해 모든 지면이 같은 문장을 쓰는지(매체 간 통일), 시안 번호 선택이 모든 지면에 적용되는지 검사.
-외부 API 는 호출하지 않는다 (generate_checked 를 가짜로 바꾼다). 임시 sqlite DB 를 쓴다."""
+외부 API 는 호출하지 않는다 (generate_checked 를 가짜로 바꾼다). 임시 Postgres DB 를 쓴다."""
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 IG = [{"field": "기본 문구", "max_chars": 125, "count_method": "글자 수", "level": "권장"},
@@ -34,13 +33,13 @@ def test_merge_limits_empty():
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import copywriter, models
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     calls: list[dict] = []

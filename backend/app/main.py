@@ -14,7 +14,8 @@ from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import models, state  # noqa: F401  (models: 테이블 등록)
-from .db import BASE_DIR, DB_PATH, STORAGE_DIR, Base, SessionLocal, engine
+from . import storage
+from .db import BASE_DIR, STORAGE_DIR, Base, SessionLocal, engine
 from .routers_analysis import router as analysis_router
 from .routers_assets import router as assets_router
 from .routers_brands import router as brands_router
@@ -36,28 +37,8 @@ _init_lock = threading.Lock()
 _ready = False
 
 
-def _legacy_sqlite_columns() -> None:
-    """create_all 은 기존 테이블에 컬럼을 추가하지 않으므로, 없으면 직접 추가한다 (SQLite 로컬 DB 의 기존 데이터 보존).
-    Postgres 는 새로 만든 스키마라 필요 없다."""
-    if "description" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE brands ADD COLUMN description VARCHAR(300) NOT NULL DEFAULT ''"))
-    bv_cols = {c["name"] for c in inspect(engine).get_columns("brand_versions")}
-    if "logo_square_asset_id" not in bv_cols:
-        with engine.begin() as conn:      # 정사각 로고 자산(PMax 등 1:1 로고 조건)
-            conn.execute(text("ALTER TABLE brand_versions ADD COLUMN logo_square_asset_id INTEGER"))
-    if "logo_position" not in bv_cols:
-        with engine.begin() as conn:      # 합성 로고 자리(브랜드 고정)
-            conn.execute(text("ALTER TABLE brand_versions ADD COLUMN logo_position VARCHAR(10)"))
-    icon_cols = {c["name"] for c in inspect(engine).get_columns("icon_assets")}
-    for col, ddl in (("prompt", "TEXT"), ("source_path", "VARCHAR(500)")):   # 3D 아이콘 전환으로 추가된 컬럼
-        if col not in icon_cols:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE icon_assets ADD COLUMN {col} {ddl}"))
-
-
 def _added_columns() -> None:
-    """배포된 Postgres 에도 이미 있는 테이블에 새로 생긴 컬럼. SQLite·Postgres 모두 없을 때만 추가한다.
+    """이미 있는 테이블에 새로 생긴 컬럼. create_all 은 기존 테이블에 컬럼을 추가하지 않으므로 없을 때만 추가한다.
     외래키 제약은 새로 만든 DB 에만 생기고(create_all), 여기서 추가한 컬럼은 정수 컬럼이다."""
     if "group_id" not in {c["name"] for c in inspect(engine).get_columns("brands")}:
         with engine.begin() as conn:      # 브랜드 그룹(아모레퍼시픽 → 설화수 등)
@@ -75,6 +56,14 @@ def _added_columns() -> None:
     if insp.has_table("knowledge_chunks") and "aliases" not in {c["name"] for c in insp.get_columns("knowledge_chunks")}:
         with engine.begin() as conn:      # 제품 별칭(브리프 상품명과 제품 자료를 정확히 잇는다)
             conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN aliases JSON"))
+
+
+def _check_storage() -> None:
+    """파일 원본은 Supabase Storage 에만 둔다. 설정이 없으면 로컬 폴더에만 써서 운영과 어긋나므로, 명시적으로 허용(ALLOW_LOCAL_STORAGE=1,
+    테스트·오프라인 점검용)하지 않으면 시작하지 않는다."""
+    if not storage.remote() and os.getenv("ALLOW_LOCAL_STORAGE", "").strip() != "1":
+        raise RuntimeError("SUPABASE_URL · SUPABASE_SERVICE_KEY 가 없습니다. backend/.env 에 dev 프로젝트의 값을 넣으세요(.env.example). "
+                           "로컬 폴더에만 저장하며 띄우려면 ALLOW_LOCAL_STORAGE=1.")
 
 
 INIT_KEY = "schema_init"      # KV 키: 초기화를 마친 배포(VERCEL_GIT_COMMIT_SHA)를 적어 둔다
@@ -112,7 +101,7 @@ def _acquire_lock(conn) -> bool:
 def init_app() -> None:
     """스키마 생성 + 규격 시드. 프로세스(함수 인스턴스)당 한 번, Vercel 에서는 배포당 한 번만 한다.
     Vercel 은 ASGI lifespan 을 보장하지 않으므로 미들웨어가 첫 요청에서도 부른다. 인스턴스 여러 개가 동시에 처음 뜰 때
-    시드가 겹치지 않게 Postgres 에서는 트랜잭션 advisory lock 을 잡는다."""
+    시드가 겹치지 않게 트랜잭션 advisory lock 을 잡는다(로컬도 같은 Postgres 라 같은 경로를 탄다)."""
     global _ready
     if _ready:
         return
@@ -122,16 +111,13 @@ def init_app() -> None:
         if _initialized_for_deploy():
             _ready = True
             return
-        if engine.dialect.name == "sqlite":
-            DB_PATH.parent.mkdir(exist_ok=True)
+        _check_storage()
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         with engine.connect() as lock_conn:
             try:
-                if engine.dialect.name != "postgresql" or _acquire_lock(lock_conn):
+                if _acquire_lock(lock_conn):
                     if not _initialized_for_deploy():    # 락을 기다리는 사이 다른 인스턴스가 끝냈을 수 있다
                         Base.metadata.create_all(engine)
-                        if engine.dialect.name == "sqlite":
-                            _legacy_sqlite_columns()
                         _added_columns()
                         with SessionLocal() as db:
                             seed(db)

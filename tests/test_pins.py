@@ -5,7 +5,6 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 ICONS = ["보관함", "선물", "알림", "수집", "공개", "기대"]
@@ -30,13 +29,13 @@ def _one() -> Image.Image:
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import models, storage
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
 

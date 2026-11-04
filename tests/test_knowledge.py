@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,11 +23,8 @@ def fake_embed(texts: list[str]) -> list[list[float]]:
 
 
 @pytest.fixture
-def session(tmp_path):
-    from app.db import Base
-    eng = create_engine(f"sqlite:///{tmp_path / 'k.db'}")
-    Base.metadata.create_all(eng)
-    with sessionmaker(bind=eng)() as s:
+def session(pg_engine):
+    with sessionmaker(bind=pg_engine)() as s:
         yield s
 
 

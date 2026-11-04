@@ -2,11 +2,11 @@
 
 - 편집 화면에서 저장한 지면: 위치·크기는 그대로, 문구만 바뀐다. 직접 고친 문구는 overwrite_custom 일 때만 덮어쓴다.
 - 편집하지 않은 지면: 배경을 유지한 채 새 문구로 다시 합성한다(이미지 생성 호출 없음).
-외부 API 는 호출하지 않는다. 임시 sqlite DB 와 임시 storage 를 쓴다."""
+외부 API 는 호출하지 않는다. 임시 Postgres DB 와 임시 storage 를 쓴다."""
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 W = H = 1080
@@ -15,13 +15,13 @@ B = {"headline": "이번 주말 특가", "body": "주말에만 만나는 한정 
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, pg_engine):
     from app import models
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     store = tmp_path / "storage"

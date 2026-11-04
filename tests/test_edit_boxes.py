@@ -3,24 +3,23 @@
 - 미리보기 응답이 끌어 옮길 요소의 상자(요소 id → 캔버스 px)와 안전영역 여백을 준다.
 - 본문은 제목처럼 편집하고, CTA 는 위치를 옮길 수 있으며, 저장한 레이아웃에도 본문·CTA 가 남는다.
 - 범위를 벗어난 위치는 거절한다(화면의 드래그는 같은 범위로 자른다).
-외부 API 는 호출하지 않는다. 임시 sqlite DB 와 임시 storage 를 쓴다."""
+외부 API 는 호출하지 않는다. 임시 Postgres DB 와 임시 storage 를 쓴다."""
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 W = H = 1080
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import models, routers_edit
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     store = tmp_path / "storage"      # conftest 의 _isolated_state 가 저장소 폴더로 쓰는 곳

@@ -48,16 +48,15 @@ def test_logo_files_fit_app_limits(d):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, pg_engine):
     from fastapi.testclient import TestClient
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
     from app import routers_assets, seed
     from app.db import Base
     from app.main import app
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     with Local() as db:

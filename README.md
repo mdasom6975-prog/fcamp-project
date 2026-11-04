@@ -5,7 +5,7 @@ RFP: 브랜드 아이덴티티를 유지하며 매체·광고 유형·지면 규
 
 ## 실행
 ```bash
-# 백엔드 (터미널 1)
+# 백엔드 (터미널 1) — 먼저 backend/.env 에 Supabase dev 프로젝트 값을 넣는다(.env.example 참고)
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -17,8 +17,8 @@ cd frontend
 npm install
 npm run dev        # http://localhost:5173
 ```
-첫 실행 시 SQLite(`backend/data/app.db`)가 만들어지고 규격 프리셋이 시드됩니다. `DATABASE_URL`(Supabase Postgres)·`SUPABASE_URL`·`SUPABASE_SERVICE_KEY` 를 환경변수로 주면 같은 코드가 Postgres·Supabase Storage 를 씁니다.
-배포: Vercel(프론트 정적 + FastAPI Python 함수) + Supabase 는 `docs/11_Vercel_Supabase_배포.md`.
+로컬과 운영이 같은 구성(Supabase Postgres + Storage)을 씁니다. 프로젝트만 **dev**(로컬 개발)와 **prod**(Vercel 배포)로 나뉘고, `backend/.env` 의 `DATABASE_URL`·`SUPABASE_URL`·`SUPABASE_SERVICE_KEY` 가 어느 쪽을 보는지 정합니다. 첫 요청에서 스키마와 규격 프리셋이 시드됩니다. SQLite 는 더 이상 쓰지 않습니다.
+데이터 채우기·복제: `tools/seed_env.py`(브랜드 + 지식을 같은 입력으로), `tools/sync_env.py`(prod → dev 복제). 배포: Vercel(프론트 정적 + FastAPI Python 함수) + Supabase 는 `docs/11_Vercel_Supabase_배포.md`.
 대안으로 클라우드 VM 1대에 올려 시연하는 절차(접근 비밀번호·터널 주소·비용)는 `docs/10_시연_배포.md`, 운영 파일은 `deploy/`.
 
 ## 기준 데이터와 검증 (워크북 Day 2~4)
@@ -28,7 +28,7 @@ npm run dev        # http://localhost:5173
 - `tools/seed_demo.py`: `brands/*` 브랜드(와 `demo/campaigns/*.json` 이 있으면 캠페인)를 실행 중인 앱에 한 번에 등록(과금 없음, 재실행 안전). 검증은 `tests/test_demo_data.py`
 - `tools/hash_logo.py <로고>`: 로고 해시·비율 기록
 - `prompts/*.md`: 모델에 보내는 모든 프롬프트 문장 (코드에는 두지 않음). 형식·변경 규칙은 `prompts/README.md`, 로더는 `backend/app/prompts.py`
-- 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q`
+- 검증: `REQUIRE_VERIFIED_SPECS=1 backend/.venv/bin/python -m pytest tests -q` — 테스트는 임시 Postgres(+pgvector)를 직접 띄운다. 바이너리는 `conda create -n pgtest -c conda-forge postgresql pgvector` 로 한 번 받아 둔다(`tests/conftest.py`)
 - 평가 보고서: `backend/.venv/bin/python eval/run_eval.py` → `eval/reports/<날짜_시각>/report.html` (검수 통과율·위반 유형·시안별 결과·시간·비용·모델별 집계). `--rerun` 으로 검수를 다시 돌리고, `--designs`/`--brand` 로 대상을 고른다. `--as-brand brands/kucha/brand.json` 을 주면 같은 시안을 그 브랜드 규칙으로 교차 검수해 판정이 달라진 항목 비교표를 넣는다(DB 변경 없음)
   - `tests/test_prompts_snapshot.py`: 프롬프트 렌더링 결과를 `tests/fixtures/prompts/*.txt` 와 글자 단위로 비교. 문장을 의도적으로 바꿨을 때만 `UPDATE_PROMPT_SNAPSHOTS=1` 로 갱신
 - 이미지 생성 비교(실제 과금, DB 의 시안 1개 필요): `backend/scripts/compare_models.py` 모델별 1장 → `backend/storage/compare/index.html`

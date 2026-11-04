@@ -1,19 +1,17 @@
 """main.init_app: 배포당 한 번만 초기화, 락 대기, 실패해도 인스턴스가 죽지 않는다."""
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import db, main, state
 
 
 @pytest.fixture
-def init_env(tmp_path, monkeypatch):
-    eng = create_engine(f"sqlite:///{tmp_path / 'init.db'}", connect_args={"check_same_thread": False})
+def init_env(pg_empty_engine, monkeypatch):
+    eng = pg_empty_engine
     Local = sessionmaker(bind=eng, autoflush=False)
     for mod, name in ((main, "engine"), (main, "SessionLocal"), (db, "SessionLocal")):
         monkeypatch.setattr(mod, name, eng if name == "engine" else Local)
     monkeypatch.setattr(main, "_ready", False)
-    monkeypatch.setattr(main, "DB_PATH", tmp_path / "init.db")
     calls = {"seed": 0}
     real = main.seed
     monkeypatch.setattr(main, "seed", lambda s: (calls.__setitem__("seed", calls["seed"] + 1), real(s))[1])

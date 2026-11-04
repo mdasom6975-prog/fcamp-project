@@ -8,7 +8,7 @@
     backend/.venv/bin/python eval/run_eval.py --designs 8 15       # 특정 시안만
     backend/.venv/bin/python eval/run_eval.py --brand 쿠챠          # 브랜드 이름으로 고르기
     backend/.venv/bin/python eval/run_eval.py --rerun              # 시안마다 검수를 다시 실행 (사람 '확인함' 표시는 초기화됨)
-    backend/.venv/bin/python eval/run_eval.py --db backend/data/app.db --out eval/reports/직접지정
+    backend/.venv/bin/python eval/run_eval.py --db postgresql://… --out eval/reports/직접지정   # 기본 DB 는 DATABASE_URL(backend/.env)
     backend/.venv/bin/python eval/run_eval.py --as-brand brands/kucha/brand.json   # 같은 시안을 쿠챠 규칙으로 교차 검수해 비교표 추가
 
 출력: eval/reports/<YYYYMMDD_HHMM>/report.html · results.json · summary.csv
@@ -539,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--designs", type=int, nargs="*", help="시안 id (생략하면 합성본이 있는 광고 시안 전부)")
     ap.add_argument("--brand", help="브랜드 이름으로 고르기")
     ap.add_argument("--rerun", action="store_true", help="시안마다 검수를 다시 실행 (사람 '확인함' 표시 초기화)")
-    ap.add_argument("--db", default=str(ROOT / "backend" / "data" / "app.db"), help="SQLite 파일 (기본 backend/data/app.db)")
+    ap.add_argument("--db", help="DB 접속 URL (기본: backend/.env 의 DATABASE_URL)")
     ap.add_argument("--out", help="출력 폴더 (기본 eval/reports/<날짜_시각>)")
     ap.add_argument("--as-brand", help="교차 검수: brands/<id>/brand.json 의 규칙으로 같은 시안을 다시 판정해 비교표를 넣는다 (DB 변경 없음)")
     a = ap.parse_args(argv)
@@ -547,11 +547,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"브랜드 규칙 파일이 없습니다: {a.as_brand}", file=sys.stderr)
         return 2
 
-    db_path = Path(a.db)
-    if not db_path.exists():
-        print(f"DB 가 없습니다: {db_path}", file=sys.stderr)
+    try:
+        engine = db_module.make_engine(a.db or None)
+    except RuntimeError as e:          # DATABASE_URL 없음
+        print(e, file=sys.stderr)
         return 2
-    engine = db_module.make_engine(f"sqlite:///{db_path}")
     factory = sessionmaker(bind=engine, autoflush=False)
     db_module.SessionLocal = factory          # calllog·analysis 가 같은 DB 를 읽게 한다
     data = build_report(factory, a.designs or None, a.brand, a.rerun, a.as_brand)

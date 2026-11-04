@@ -5,7 +5,6 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 WIDE_SVG = ('<svg width="120" height="19" viewBox="0 0 120 19" fill="none" xmlns="http://www.w3.org/2000/svg">'
@@ -13,13 +12,13 @@ WIDE_SVG = ('<svg width="120" height="19" viewBox="0 0 120 19" fill="none" xmlns
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, pg_engine):
     from app import storage
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
 

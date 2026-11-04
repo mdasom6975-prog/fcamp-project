@@ -6,10 +6,9 @@ import pytest
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, pg_engine):
     """APP_PASSWORD/APP_PUBLIC 을 지운 상태의 앱. /api/health 가 실제 backend/data 를 읽지 않게 임시 DB 로 돌린다."""
     from fastapi.testclient import TestClient
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
     from app import main
@@ -18,7 +17,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.delenv("APP_PASSWORD", raising=False)
     monkeypatch.delenv("APP_USER", raising=False)
     monkeypatch.delenv("APP_PUBLIC", raising=False)
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     monkeypatch.setattr(main, "SessionLocal", sessionmaker(bind=engine, autoflush=False))
     return TestClient(main.app)

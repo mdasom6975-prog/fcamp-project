@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### 로컬과 운영을 같은 구성으로: Supabase dev/prod
+- SQLite 폴백을 없앴다. 로컬 개발도 Supabase Postgres + Storage(dev 프로젝트)를 쓰고, Vercel 은 prod 프로젝트를 쓴다. `DATABASE_URL`·`SUPABASE_*` 가 없으면 앱이 시작하지 않는다(`db.py`, `main._check_storage`; `ALLOW_LOCAL_STORAGE=1` 은 테스트·오프라인용). `.env` 는 `db.py` 가 읽는다
+- 테스트는 임시 Postgres(+pgvector)를 세션마다 띄운다(`tests/conftest.py`, conda-forge `postgresql`·`pgvector`, 테스트마다 템플릿 DB 복제). SQLite 는 외래키를 검사하지 않아 숨어 있던 테스트 데이터 오류 1건을 고쳤다
+- `tools/sync_env.py`(prod → dev 복제: 표 전부 + 버킷 파일. 원본이 옛 배포라 없는 컬럼·테이블은 건너뛴다), `tools/seed_env.py`(브랜드 + 지식을 같은 입력으로 채우기). `eval/run_eval.py --db` 는 접속 URL(기본 `DATABASE_URL`). `tools/migrate_to_supabase.py` 는 옛 SQLite 이전 1회용으로 남긴다
+
 ### 모델 호출 입출력 로그(디버깅)
 - 모든 모델 호출(카피·보조·채점 LLM, 이미지 생성·편집, 임베딩)마다 보낸 입력 전문과 받은 출력을 `backend/logs/model_calls_날짜.jsonl` 에 한 줄씩 쓴다(`modellog.py`, calllog 가 기록할 때 함께). 거절·잘림 등 실패한 호출도 받은 원문이 남는다
 - 이미지는 본문 대신 장수·base64 길이·고쳐 쓴 프롬프트, 임베딩은 벡터 개수·차원만 남긴다. `MODEL_LOG=0` 으로 끄고, Vercel 은 기본 꺼짐. 로그 폴더는 git 에서 제외

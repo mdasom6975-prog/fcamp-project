@@ -14,7 +14,9 @@
 ```
 
 - 함수는 `vercel.json` 의 rewrite 로 `/api/*` 를 모두 받는다. 최대 실행 시간 300초(OpenAI 이미지 호출 타임아웃 240초 안에 끝나게).
-- 로컬 개발은 그대로다: `DATABASE_URL`·`SUPABASE_*` 가 없으면 SQLite(`backend/data/app.db`)와 `backend/storage/` 를 쓴다.
+- 로컬 개발도 같은 구성이다. Supabase 프로젝트를 **dev**(로컬 개발용)와 **prod**(Vercel 이 쓰는 것) 둘로 두고, `backend/.env` 에는 dev 값을,
+  Vercel 환경변수에는 prod 값을 넣는다. `DATABASE_URL` 이 없으면 앱이 시작하지 않는다(SQLite 폴백은 없앴다 — 2026-11-03).
+  Storage 설정이 없으면도 시작하지 않는다(`ALLOW_LOCAL_STORAGE=1` 이면 로컬 폴더에만 저장, 테스트·오프라인 점검용).
 - 파일은 DB에 **키**(`bg_ab12.png`, `exports/exp_1_….zip`)로 적는다. 읽을 때 Supabase에서 함수의 `/tmp/storage` 로 내려받아 쓰고,
   이미지·ZIP을 브라우저에 줄 때는 서명 URL로 리다이렉트한다(Vercel 함수 응답은 4.5MB 가 한계).
 - 예전에 `backend/data/` 파일로 쌓던 것은 DB 테이블로 옮겼다: 일일 이미지 카운터·모델 지원 여부 → `kv`, 호출 기록 → `api_calls`,
@@ -23,16 +25,25 @@
 
 ## 2. Supabase 준비
 
+dev 와 prod 두 프로젝트를 같은 절차로 만든다(리전은 둘 다 같게). 아래 값은 프로젝트마다 따로 나온다.
+
 1. 새 프로젝트를 만든다(리전은 Vercel 함수 리전과 같게. vercel.json 의 regions 를 Supabase 리전에 맞춘다: 서울 ap-northeast-2 → icn1, 뭄바이 ap-south-1 → bom1, 미국 동부 us-east-1 → iad1). DB 비밀번호를 적어 둔다.
 2. **DATABASE_URL**: 프로젝트 → Connect → *Transaction pooler* 의 URI(포트 6543). `postgresql://…` 그대로 붙이면 앱이 `postgresql+psycopg://` 로 바꾼다.
    서버리스는 요청마다 연결을 열고 닫으므로 직접 연결(5432) 대신 풀러를 써야 연결 한도를 넘지 않는다.
 3. **SUPABASE_URL / SUPABASE_SERVICE_KEY**: Project Settings → API 의 Project URL 과 `service_role` 키.
    이 키는 서버(Vercel 환경변수)에만 두고 프론트·저장소에는 넣지 않는다.
 4. Storage → New bucket → 이름 `brand-studio`, **Private**. (기존 데이터를 이전하면 3번 스크립트가 만들어 준다.)
+5. Database → Extensions 에서 **vector** 를 켠다(pgvector. 지식 검색을 벡터 컬럼으로 옮기는 다음 단계용. 테스트 DB 는 자동으로 켠다).
 
-## 3. 기존 데이터 이전 (선택)
+### 2-1. dev 와 prod 를 같은 데이터로
 
-로컬에서 만든 브랜드·시안·파일을 가져갈 때만. **앱이 이 DB에 처음 접속하기 전에** 실행한다(앱이 먼저 시드하면 id가 겹쳐 스크립트가 멈춘다).
+- 처음 채울 때: 각 환경에서 `tools/seed_env.py`(브랜드 등록 + 지식 등록을 같은 입력으로). prod 는 `--base https://demo:<APP_PASSWORD>@<프로젝트>.vercel.app` 과 prod 의 `DATABASE_URL` 로.
+- 생성물(캠페인·이미지·호출 기록)까지 맞출 때: `tools/sync_env.py` 로 **prod → dev** 복제(`*_FROM` 에 prod 값, 대상은 `backend/.env`). `--dry-run` 으로 양을 보고, dev 를 비우고 맞추려면 `--replace`.
+  반대 방향(dev → prod)은 `TARGET_ENV=prod` 와 `--allow-prod` 를 함께 줘야 하고, 되돌릴 수 없다.
+
+## 3. 옛 로컬 데이터(SQLite) 이전 — 1회용
+
+SQLite 를 쓰던 때의 `backend/data/app.db` 를 dev 로 가져갈 때만(한 번 옮기면 끝). **앱이 이 DB에 처음 접속하기 전에** 실행한다(앱이 먼저 시드하면 id가 겹쳐 스크립트가 멈춘다).
 
 ```bash
 export DATABASE_URL='postgresql://…:6543/postgres'
@@ -82,9 +93,10 @@ backend/.venv/bin/python tools/seed_demo.py --base https://demo:<APP_PASSWORD>@<
 
 ## 7. 코드에서 달라진 점
 
-- `backend/app/db.py`: `DATABASE_URL` 지원(Postgres는 NullPool·prepared statement 끔), `STORAGE_DIR`(Vercel 에서는 `/tmp/storage`).
+- `backend/app/db.py`: `DATABASE_URL` 필수(NullPool·prepared statement 끔, 로컬도 같음), `STORAGE_DIR`(Vercel 에서는 `/tmp/storage`, 그 밖은 `backend/storage/` 캐시). `.env` 는 여기서 읽는다.
 - `backend/app/storage.py`: 파일 저장소(`put`·`local`·`exists`·`delete`·`response`). 라우터는 파일 시스템을 직접 쓰지 않는다.
 - `backend/app/state.py` + `models.py`(`KV`·`ApiCall`·`PromptLog`·`Judgment`): 파일 기록을 DB로.
-- `backend/app/main.py`: 초기화를 `init_app()` 으로 묶어 lifespan 과 첫 요청 양쪽에서 한 번만 실행. 옛 `ALTER TABLE` 보정은 SQLite 에서만.
+- `backend/app/main.py`: 초기화를 `init_app()` 으로 묶어 lifespan 과 첫 요청 양쪽에서 한 번만 실행. Storage 설정이 없으면 시작하지 않는다(`_check_storage`).
 - `api/index.py`, `vercel.json`, `.vercelignore`, `requirements.txt`(Vercel용, 루트), `.env.example`.
-- `tools/migrate_to_supabase.py`: 로컬 데이터 이전.
+- `tools/migrate_to_supabase.py`: 옛 SQLite 데이터 이전(1회용). `tools/sync_env.py`: 환경 사이 복제. `tools/seed_env.py`: 브랜드·지식 시드.
+- `tests/conftest.py`: 임시 Postgres(conda-forge `pgtest` 환경의 postgresql + pgvector)를 세션마다 띄워 테스트. SQLite 테스트 DB 는 없앴다.

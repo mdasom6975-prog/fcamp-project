@@ -1,5 +1,5 @@
 """아이콘 세트가 광고 이미지 캠페인의 검수·내보내기에 들어가는지, 부족분 채우기(icons/fill)가 동작하는지 검사.
-외부 API 는 호출하지 않는다 (기능명 제안·렌더는 가짜 함수로 바꾼다). 임시 sqlite DB 와 임시 storage 를 쓴다."""
+외부 API 는 호출하지 않는다 (기능명 제안·렌더는 가짜 함수로 바꾼다). 임시 Postgres DB 와 임시 storage 를 쓴다."""
 import io
 import json
 import zipfile
@@ -7,7 +7,6 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 
@@ -18,13 +17,13 @@ def _blob() -> Image.Image:
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import models, routers_export, routers_icons
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     # 저장소 폴더는 conftest 의 _isolated_state 가 임시 폴더로 바꿔 둔다
@@ -174,8 +173,11 @@ def test_fill_invalidates_only_icon_review_items(env, monkeypatch):
     c, did, Local, models = env["client"], env["ids"]["design"], env["Local"], env["models"]
     env["add_icons"](9)
     c.post(f"/api/designs/{did}/review")
-    with Local() as db:   # 지면 검수 결과가 있다고 가정한 행 (검수 실행 뒤에 넣어야 검수 자체의 무효화를 피한다)
-        db.add(models.ReviewResult(design_id=did, preset_version_id=12345, category="규격", item="가짜", status="통과",
+    from app import seed
+    with Local() as db:   # 지면 검수 결과가 있다고 가정한 행 (검수 실행 뒤에 넣어야 검수 자체의 무효화를 피한다). 지면은 실제 규격 행(외래키)
+        seed.seed(db)
+        pid = db.scalar(select(models.PresetVersion.id).order_by(models.PresetVersion.id))
+        db.add(models.ReviewResult(design_id=did, preset_version_id=pid, category="규격", item="가짜", status="통과",
                                    level=None, message="", blocking=False, needs_human=False))
         db.commit()
     monkeypatch.setattr(icons, "propose3d_more", lambda *a, **k: [{"name": "새기능", "concept": "x"}])
@@ -184,7 +186,7 @@ def test_fill_invalidates_only_icon_review_items(env, monkeypatch):
     with Local() as db:
         rows = db.scalars(select(models.ReviewResult).where(models.ReviewResult.design_id == did)).all()
         assert all(not r.valid for r in rows if r.preset_version_id is None)
-        assert all(r.valid for r in rows if r.preset_version_id == 12345), "지면 결과는 유지"
+        assert all(r.valid for r in rows if r.preset_version_id == pid), "지면 결과는 유지"
 
 
 def test_icon_set_uses_candidates_from_copy_call_without_proposal(env, monkeypatch):

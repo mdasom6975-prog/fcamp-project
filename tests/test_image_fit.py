@@ -1,10 +1,9 @@
 """광고 이미지 규격 맞춤(비율군별 배경 생성 + 내용 상자 크롭 + 로고 자리)과 배경 형태 선택 검사.
-외부 API 는 호출하지 않는다 (generate_background 를 가짜로 바꾼다). 임시 sqlite DB 와 임시 storage 를 쓴다."""
+외부 API 는 호출하지 않는다 (generate_background 를 가짜로 바꾼다). 임시 Postgres DB 와 임시 storage 를 쓴다."""
 import pytest
 from app import storage
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 FONT = "backend/fonts/Pretendard-Bold.otf"
@@ -146,13 +145,13 @@ def test_style_prompt_files_do_not_mention_people_except_person_style():
 
 # ---- routers_images: 비율군별 생성 ----
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, pg_engine):
     from app import imagegen, models, routers_images
     from app.db import Base
     from app.main import app
     from app.routers_assets import get_db
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
     # 저장소 폴더는 conftest 의 _isolated_state 가 임시 폴더로 바꿔 둔다

@@ -3,7 +3,7 @@
 실행: backend/.venv/bin/python tools/register_knowledge.py brands/amorepacific/sources.json [--only id1,id2] [--dry-run]
 - 먼저 tools/fetch_sources.py 로 raw/ 를 채운다. raw/<id>.txt 가 없는 출처는 건너뛰고 알려 준다
 - --dry-run: 임베딩·저장 없이 어떻게 잘리는지만 보여 준다(과금 없음). 청킹을 바꿔 볼 때 먼저 이것으로 확인한다
-- DB 는 앱과 같다(DATABASE_URL, 없으면 backend/data/app.db). 브랜드가 아직 없으면 brands/<slug>/brand.json 으로 먼저 등록한다(과금 없음)
+- DB 는 앱과 같다(backend/.env 의 DATABASE_URL — dev 프로젝트. prod 에 넣을 때는 DATABASE_URL 을 prod 값으로 바꿔 실행). 브랜드가 아직 없으면 brands/<slug>/brand.json 으로 먼저 등록한다(과금 없음)
 - 같은 출처 id 로 다시 등록하면 이전 문서는 '보관' 으로 바뀌고 새 문서가 쓰인다
 - 자르기: 규제(법령)는 조·항 단위, 별표("annex")는 목 단위, 제품은 제품 하나가 조각 하나, 나머지는 문단 단위(800자 넘으면 문장으로 더 자름)
 """

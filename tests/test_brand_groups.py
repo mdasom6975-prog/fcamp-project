@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 
 ROOT = Path(__file__).resolve().parent.parent
 GROUP_BRANDS = sorted(p.parent.name for p in (ROOT / "brands").glob("*/brand.json")
@@ -14,7 +14,7 @@ BRAND = {"name": "테스트", "colors": [{"role": "주조색", "hex": "#123456"}
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, pg_engine):
     from fastapi.testclient import TestClient
     from sqlalchemy.orm import sessionmaker
 
@@ -22,7 +22,7 @@ def client(tmp_path):
     from app.db import Base
     from app.main import app
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", connect_args={"check_same_thread": False})
+    engine = pg_engine
     Base.metadata.create_all(engine)
     Local = sessionmaker(bind=engine, autoflush=False)
 
@@ -66,10 +66,10 @@ def test_update_keeps_group_unless_sent(client):
     assert client.put(f"/api/brands/{bid}", json={**BRAND, "group_id": None}).json()["group_id"] is None
 
 
-def test_added_column_on_existing_db(tmp_path, monkeypatch):
-    """group_id 가 없던 기존 DB(로컬 SQLite·배포된 Postgres)에 컬럼을 추가하고, 다시 불러도 안전하다."""
+def test_added_column_on_existing_db(pg_empty_engine, monkeypatch):
+    """group_id 가 없던 기존 DB(배포된 Postgres)에 컬럼을 추가하고, 다시 불러도 안전하다."""
     from app import main
-    eng = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    eng = pg_empty_engine
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE brands (id INTEGER PRIMARY KEY, name VARCHAR(100))"))
         conn.execute(text("INSERT INTO brands (id, name) VALUES (1, '기존')"))
