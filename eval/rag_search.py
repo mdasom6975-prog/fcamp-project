@@ -37,6 +37,23 @@ def grade(expect: str, results: dict[str, list[dict]]) -> tuple[int, int, list[s
     return len(want) - len(missed), len(want), missed
 
 
+CACHE = ROOT / "eval" / "cache" / "query_embeddings.json"
+
+
+def cached_embed(q: str) -> list[float]:
+    """질의 임베딩 캐시. OpenAI 임베딩은 호출마다 소수 셋째 자리에서 흔들려(2단계에서 확인) 같은 질의도 실행마다 결과가
+    조금씩 달라진다. (모델, 질의 텍스트) 가 같으면 저장된 벡터를 쓴다. 파일은 저장소에 둔다(다른 기계에서도 같은 결과)."""
+    import hashlib
+    from app import knowledge
+    key = hashlib.sha1(f"{knowledge.EMBED_MODEL}\n{q}".encode()).hexdigest()
+    cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
+    if key not in cache:
+        cache[key] = {"model": knowledge.EMBED_MODEL, "query": q, "vector": knowledge.embed([q])[0]}
+        CACHE.parent.mkdir(exist_ok=True)
+        CACHE.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    return cache[key]["vector"]
+
+
 def main() -> int:
     args = sys.argv[1:]
     cases_path = Path(args[args.index("--cases") + 1]) if "--cases" in args else ROOT / "eval" / "rag_cases.csv"
@@ -57,7 +74,7 @@ def main() -> int:
                 print(f"{c['id']}: 브랜드 {c['brand']} 가 DB 에 없습니다 — register_knowledge.py 를 먼저 실행하세요")
                 return 2
             q = knowledge.query_text(c)
-            qv = knowledge.embed([q])[0]                 # 임베딩은 미리 받아 두고 검색 시간만 잰다(네트워크 제외)
+            qv = cached_embed(q)                       # 같은 질의 텍스트는 같은 벡터(재현성, eval/cache). 검색 시간만 잰다(네트워크 제외)
             t0 = time.perf_counter()
             res = knowledge.search(s, q, brand_id=b.id, group_id=b.group_id, product_name=c["product_name"] or None,
                                    embedder=lambda _t, _v=qv: [_v])

@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### 검색 기반 다지기 (3단계 A): 왕복 1회 · 하이브리드 검색 · 평가 셋 60건
+- 검색이 모든 층을 **한 번의 SQL** 로 가져온다(층별 window 순위, `knowledge._candidates_sql`). 층마다 따로 왕복하던 4회가 1회로: dev(싱가포르) 기준 검색 시간 중앙값 1273ms → 939ms
+- **하이브리드 검색**(기본 켬, `KNOWLEDGE_HYBRID=0` 으로 끔): 벡터 순위와 pg_trgm `word_similarity(질의, 조각)` 순위를 RRF(K=60) 로 합친다. 60건 정답 포함률 81% → 85%. `similarity()` 는 83%, `strict_word_similarity` 는 85%(`KNOWLEDGE_KW_SIM`). 점수 의미가 RRF 합으로 바뀐다(0.03 안팎). 초기화가 `pg_trgm` 확장도 만든다
+- 평가 셋 `eval/rag_cases.csv` 20 → 60건(브랜드 4 × 15): 제품 별칭, 비교·최고 표현(바목), 전문가 추천(다목), 외국 제품·제휴(라·마목), 비방(카목), 멸종위기종(차목), 의약품 오인, 기능성 오인, 그룹 성분·안전·원료 정책을 고르게. 남은 놓침 15건은 거의 규제 층 — 브리프 말과 법령 말이 달라 유사도로 못 잇는 경우(관련성 채점·질의 재작성이 4단계 리서처의 몫)
+- 평가 재현성: 질의 임베딩 캐시 `eval/cache/query_embeddings.json`(모델+질의 텍스트 기준, 저장소에 둔다). OpenAI 임베딩이 호출마다 흔들려 같은 코드의 결과가 달라지던 문제를 없앴다
+
 ### 지식 검색을 pgvector 로 (2단계)
 - `knowledge_chunks.vec vector(1536)` + HNSW(코사인) 인덱스. 검색은 층·브랜드 필터를 건 채 `ORDER BY vec <=> 질의 LIMIT k` 로 DB 가 상위 후보를 고르고, 제품명 정확 일치·skip 은 파이썬에서 마무리한다(`knowledge.search`, 결과 모양 동일)
 - 기존 DB 는 첫 초기화에서 확장 생성 → 컬럼 추가 → JSON `embedding` 에서 백필 → 인덱스 생성을 한 번만 한다(`main._vector_column`). JSON 컬럼은 되돌리기용으로 이번에는 남긴다

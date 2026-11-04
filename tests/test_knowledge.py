@@ -179,7 +179,7 @@ def test_rag_cases_reference_known_sources():
     doc = json.loads((ROOT / "brands" / "amorepacific" / "sources.json").read_text(encoding="utf-8"))
     ids = {s["id"] for s in doc["sources"]}
     cases = list(csv.DictReader((ROOT / "eval" / "rag_cases.csv").open(encoding="utf-8")))
-    assert len(cases) == 20
+    assert len(cases) == 60, "3단계에서 60건으로 확장(브랜드 4 × 15)"
     for c in cases:
         for want in c["expect"].split("|"):
             assert {a.partition("#")[0] for a in want.split("/")} <= ids, f"{c['id']}: 모르는 출처 {want}"
@@ -334,7 +334,7 @@ def test_sql_and_python_search_paths_agree(session):
     _add(session, layer="규제", source_id="law", title="법", chunks=[("제1조", "의약품 오인 광고 금지"), ("제2조", "기능성 미백 주름")])
     kw = dict(brand_id=1, group_id=None, embedder=fake_embed, layer_k={"규제": 2, "제품": 3})
     for name in (None, "먼 제품"):
-        a = knowledge.search(session, "보습 크림 촉촉 피부", product_name=name, mode="sql", **kw)
+        a = knowledge.search(session, "보습 크림 촉촉 피부", product_name=name, mode="sql", hybrid=False, **kw)
         b = knowledge.search(session, "보습 크림 촉촉 피부", product_name=name, mode="python", **kw)
         strip = lambda res: {k: [(r["source_id"], r["exact_product"], round(r["score"], 3)) for r in v] for k, v in res.items()}
         assert strip(a) == strip(b), name
@@ -363,3 +363,18 @@ def test_vector_column_backfills_from_json_once(pg_empty_engine, monkeypatch):
     with eng.connect() as c:
         assert c.execute(text("SELECT count(*) FROM knowledge_chunks WHERE vec IS NULL")).scalar() == 0
         assert c.execute(text("SELECT vector_dims(vec) FROM knowledge_chunks")).scalar() == models.EMBED_DIMS
+
+
+def test_hybrid_finds_substring_match_that_vectors_miss(session):
+    """3단계 하이브리드: 질의와 낱말이 하나도 같지 않아 벡터(가짜 임베딩은 낱말 해시)로는 0점인 조각도, 글자가 겹치면(pg_trgm)
+    후보에 들어온다. 벡터만으로는 다른 조각이 앞서고, 하이브리드면 '최고' 조각이 앞선다."""
+    from app import knowledge
+    _add(session, layer="규제", source_id="annex", title="별표", chunks=[
+        ("바목", "경쟁상품과 비교하는 광고는 배타성을 띤 최고 또는 최상 등의 절대적 표현을 하지 말 것"),
+        ("자목", "저속하거나 혐오감을 주는 표현 도안 사진 등을 이용하는 광고를 하지 말 것")])
+    q = "최고의 탄력을 주는 크림 광고를 하지 말 것"      # '광고를' '하지' '말' '것' 은 두 조각 모두에, '최고의' 는 어느 쪽에도 없다
+    plain = knowledge.search(session, q, brand_id=None, group_id=None, layer_k={"규제": 1}, embedder=fake_embed, hybrid=False)
+    hybrid = knowledge.search(session, q, brand_id=None, group_id=None, layer_k={"규제": 1}, embedder=fake_embed, hybrid=True)
+    assert plain["규제"][0]["section"] == "자목", "낱말만 보면 두 조각이 동점이라 먼저 등록된 쪽… 이 아니라 공유 낱말 수가 같은 자목"
+    assert hybrid["규제"][0]["section"] == "바목"
+    assert 0 < hybrid["규제"][0]["score"] < 0.05, "RRF 점수는 1/(K+순위) 의 합"

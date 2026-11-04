@@ -5,6 +5,7 @@
 - 층마다 따로 상위 k 개를 뽑는다. 한 번에 뽑으면 브랜드 이야기가 규제 조항을 밀어낼 수 있다.
 - 임베딩은 pgvector 컬럼(vec, HNSW·코사인)에 두고 검색은 SQL `ORDER BY vec <=> 질의 LIMIT k` 로 한다(2단계, 2026-11).
   KNOWLEDGE_SEARCH=python 이면 예전 경로(JSON embedding 을 전부 읽어 파이썬 코사인)로 돌아간다. 두 경로의 결과는 같아야 한다(테스트).
+- 모든 층을 한 번의 질의로 가져오고(왕복 1회), 기본은 하이브리드: 벡터 순위 + pg_trgm word_similarity 순위를 RRF 로 합친다(3단계, 60건 81% → 85%).
 - 카피 생성(for_copy)에서 규제는 검색하지 않는다. 브리프와 법령 문장은 쓰는 말이 달라 유사도로는 놓치기 쉬우므로(1-a 평가),
   품목에서 업종이 감지되면 그 업종으로 표시한 규제 문서를 전부 넣는다. 검색은 제품·브랜드·그룹 층에만 쓴다.
 """
@@ -13,7 +14,7 @@ import os
 import re
 from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import calllog
@@ -24,6 +25,9 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 LAYER_K = {"규제": 3, "제품": 2, "브랜드": 2, "그룹": 1}     # 검색할 때 층마다 가져올 개수
 SEARCH_MODE = os.getenv("KNOWLEDGE_SEARCH", "sql").strip().lower()   # sql(pgvector) | python(JSON 코사인, 되돌리기용)
 SQL_CANDIDATES = 40      # SQL 경로가 층마다 가져오는 상위 후보 수(skip·제품명 정확 일치를 파이썬에서 처리할 여유)
+HYBRID = os.getenv("KNOWLEDGE_HYBRID", "1").strip() == "1"   # 하이브리드(기본 켬): 벡터 순위 + 글자(pg_trgm) 순위를 RRF 로 합친다. 0 이면 벡터만(3단계 측정: 81% → 85%)
+RRF_K = 60               # Reciprocal Rank Fusion 상수. 1/(K+순위) 의 합
+KW_SIM = os.getenv("KNOWLEDGE_KW_SIM", "word").strip()   # word(기본, 85%) | strict_word(85%) | similarity(83%) — 60건 측정 2026-11-04
 MAX_CHARS = 800          # 이보다 긴 문단은 문장 단위로 더 자른다
 EMBED_BATCH = 64
 
@@ -207,15 +211,42 @@ def _candidates(db: Session, layer: str, brand_id: int | None, group_id: int | N
     return list(db.execute(q).all()) if q is not None else []
 
 
-def _candidates_sql(db: Session, layer: str, brand_id: int | None, group_id: int | None, qv: list[float],
-                    limit: int) -> list[tuple[KnowledgeChunk, KnowledgeDoc, float]]:
-    """sql 경로: pgvector 코사인 거리로 상위 limit 개만 DB 에서 가져온다. 반환 점수는 유사도(1 − 거리)."""
-    q = _filtered(layer, brand_id, group_id)
-    if q is None:
-        return []
-    dist = KnowledgeChunk.vec.cosine_distance(qv).label("dist")
-    q = q.add_columns(dist).where(KnowledgeChunk.vec.isnot(None)).order_by(dist, KnowledgeChunk.id).limit(limit)
-    return [(ch, doc, 1.0 - float(d)) for ch, doc, d in db.execute(q).all()]
+def _candidates_sql(db: Session, qv: list[float], query: str, brand_id: int | None, group_id: int | None,
+                    layers: list[str], limit: int, hybrid: bool) -> dict[str, list[tuple[KnowledgeChunk, KnowledgeDoc, float]]]:
+    """sql 경로: 모든 층을 한 번의 질의로(왕복 1회). 층마다 코사인 거리 순위(window) 상위 limit 개.
+    hybrid 면 pg_trgm similarity(조각 글, 질의) 순위도 함께 매겨 두 순위 중 하나라도 limit 안이면 가져오고,
+    점수는 RRF = 1/(K+벡터순위) + 1/(K+글자순위). 아니면 점수는 유사도(1 − 거리).
+    브랜드·제품·캠페인 층은 brand_id, 그룹 층은 group_id 로 거른다(없으면 그 층은 빈 결과)."""
+    layer = KnowledgeDoc.layer
+    dist = KnowledgeChunk.vec.cosine_distance(qv)
+    scope = or_(layer == "규제",
+                and_(layer.in_(("브랜드", "제품", "캠페인")), KnowledgeDoc.brand_id == brand_id) if brand_id is not None else false(),
+                and_(layer == "그룹", KnowledgeDoc.group_id == group_id) if group_id is not None else false())
+    cols = [KnowledgeChunk.id.label("cid"), dist.label("dist"),
+            func.row_number().over(partition_by=layer, order_by=(dist, KnowledgeChunk.id)).label("rn_vec")]
+    if hybrid:
+        # 글자 유사도 측정: similarity(조각, 질의) 는 긴 글끼리라 희석된다. word_similarity(질의, 조각) 는 질의의 트라이그램이
+        # 조각 안에 얼마나 있는지(질의가 짧을수록 선명). KNOWLEDGE_KW_SIM 으로 고른다(3단계 측정용)
+        sim = (func.word_similarity(query, KnowledgeChunk.text) if KW_SIM == "word" else
+               func.strict_word_similarity(query, KnowledgeChunk.text) if KW_SIM == "strict_word" else
+               func.similarity(KnowledgeChunk.text, query))
+        cols.append(func.row_number().over(partition_by=layer, order_by=(sim.desc(), KnowledgeChunk.id)).label("rn_kw"))
+    sub = (select(*cols).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+           .where(KnowledgeDoc.status == "사용", KnowledgeChunk.embed_model == EMBED_MODEL, KnowledgeChunk.vec.isnot(None),
+                  layer.in_(layers), scope).subquery())
+    keep = sub.c.rn_vec <= limit
+    extra = [sub.c.rn_vec]
+    if hybrid:
+        keep = or_(keep, sub.c.rn_kw <= limit)
+        extra.append(sub.c.rn_kw)
+    q = (select(KnowledgeChunk, KnowledgeDoc, sub.c.dist, *extra).join(sub, sub.c.cid == KnowledgeChunk.id)
+         .join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id).where(keep))
+    out: dict[str, list] = {l: [] for l in layers}
+    for row in db.execute(q).all():
+        ch, doc, d = row[0], row[1], float(row[2])
+        score = (1.0 / (RRF_K + row[3]) + 1.0 / (RRF_K + row[4])) if hybrid else 1.0 - d
+        out[doc.layer].append((ch, doc, score))
+    return out
 
 
 def _same_name(a: str | None, b: str | None) -> bool:
@@ -239,27 +270,32 @@ def _exact_products(db: Session, brand_id: int | None, name: str | None) -> list
 
 def search(db: Session, query: str, *, brand_id: int | None, group_id: int | None,
            layer_k: dict[str, int] | None = None, product_name: str | None = None, embedder=embed,
-           skip=None, mode: str | None = None) -> dict[str, list[dict]]:
+           skip=None, mode: str | None = None, hybrid: bool | None = None) -> dict[str, list[dict]]:
     """질의로 층별 상위 조각을 찾는다. 반환: {층: [{chunk_id, doc_title, section, text, score, …}]}.
     규제는 모든 브랜드 공통, 그룹은 group_id, 브랜드·제품은 brand_id 로 거른다.
     product_name 이 제품 조각의 제품명·별칭과 같으면 그 조각을 맨 앞에 둔다(이름이 정확히 맞으면 유사도보다 확실하다).
     skip(조각) 이 참인 조각은 후보에서 뺀다.
-    mode: "sql"(기본, pgvector 가 상위 후보를 고른다) | "python"(조각 전부를 읽어 파이썬 코사인). 환경변수 KNOWLEDGE_SEARCH."""
+    mode: "sql"(기본, pgvector 가 상위 후보를 고른다. 모든 층을 한 질의로) | "python"(조각 전부를 읽어 파이썬 코사인). 환경변수 KNOWLEDGE_SEARCH.
+    hybrid: 벡터 순위 + 글자 순위 RRF(sql 경로만). 기본은 환경변수 KNOWLEDGE_HYBRID. 점수 의미가 달라진다(RRF 합, 0.03 안팎)."""
     layer_k = layer_k or LAYER_K
     mode = (mode or SEARCH_MODE)
+    hybrid = HYBRID if hybrid is None else hybrid
     qv = embedder([query])[0]
     out: dict[str, list[dict]] = {}
+    by_layer = None
+    if mode != "python":
+        by_layer = _candidates_sql(db, qv, query, brand_id, group_id, list(layer_k), max(SQL_CANDIDATES, *layer_k.values()), hybrid)
     for layer, k in layer_k.items():
-        if mode == "python":
+        if by_layer is None:
             scored_raw = [(ch, doc, cosine(qv, ch.embedding)) for ch, doc in _candidates(db, layer, brand_id, group_id)]
         else:
-            scored_raw = _candidates_sql(db, layer, brand_id, group_id, qv, max(SQL_CANDIDATES, k))
-            if layer == "제품" and product_name:
+            scored_raw = by_layer[layer]
+            if layer == "제품" and product_name:        # 정확 일치 제품이 상위 후보 밖이어도 맨 앞에 두기 위해 따로 찾는다
                 seen = {ch.id for ch, _, _ in scored_raw}
                 for ch, doc in _exact_products(db, brand_id, product_name):
                     if ch.id not in seen:
-                        scored_raw.append((ch, doc, 1.0 - float(db.scalar(select(KnowledgeChunk.vec.cosine_distance(qv))
-                                                                           .where(KnowledgeChunk.id == ch.id)))))
+                        d = float(db.scalar(select(KnowledgeChunk.vec.cosine_distance(qv)).where(KnowledgeChunk.id == ch.id)))
+                        scored_raw.append((ch, doc, (1.0 / (RRF_K + SQL_CANDIDATES + 1)) * 2 if hybrid else 1.0 - d))
         scored = []
         for ch, doc, s in scored_raw:
             if skip and skip(ch):

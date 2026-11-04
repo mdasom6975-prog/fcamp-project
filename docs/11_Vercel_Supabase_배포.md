@@ -33,7 +33,7 @@ dev 와 prod 두 프로젝트를 같은 절차로 만든다(리전은 둘 다 �
 3. **SUPABASE_URL / SUPABASE_SERVICE_KEY**: Project Settings → API 의 Project URL 과 `service_role` 키.
    이 키는 서버(Vercel 환경변수)에만 두고 프론트·저장소에는 넣지 않는다.
 4. Storage → New bucket → 이름 `brand-studio`, **Private**. (기존 데이터를 이전하면 3번 스크립트가 만들어 준다.)
-5. Database → Extensions 에서 **vector** 를 켠다(pgvector. 지식 검색이 `knowledge_chunks.vec` 로 돈다. 앱도 첫 초기화에서 `CREATE EXTENSION IF NOT EXISTS` 를 시도하지만 대시보드에서 켜 두는 쪽이 확실하다. 테스트 DB 는 자동으로 켠다).
+5. Database → Extensions 에서 **vector** 와 **pg_trgm** 을 켠다(pgvector·하이브리드 검색. 지식 검색이 `knowledge_chunks.vec` 로 돈다. 앱도 첫 초기화에서 `CREATE EXTENSION IF NOT EXISTS` 를 시도하지만 대시보드에서 켜 두는 쪽이 확실하다. 테스트 DB 는 자동으로 켠다).
 
 ### 2-1. dev 와 prod 를 같은 데이터로
 

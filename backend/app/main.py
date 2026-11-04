@@ -61,12 +61,13 @@ def _added_columns() -> None:
 
 
 def _ensure_vector_extension() -> None:
-    """pgvector 확장. Supabase 는 대시보드(Database → Extensions → vector)에서도 켤 수 있고, 여기서도 시도한다."""
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    except Exception as e:      # 권한이 없는 환경: 안내만 남기고 create_all 이 실패하면 그 오류가 원인을 말해 준다
-        log.warning("vector 확장을 만들지 못했습니다(%s). Supabase 대시보드 Database → Extensions 에서 vector 를 켜세요", e)
+    """pgvector(벡터 검색)·pg_trgm(하이브리드 글자 유사도) 확장. Supabase 는 대시보드(Database → Extensions)에서도 켤 수 있고, 여기서도 시도한다."""
+    for ext in ("vector", "pg_trgm"):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext}"))
+        except Exception as e:      # 권한이 없는 환경: 안내만 남기고 create_all·검색이 실패하면 그 오류가 원인을 말해 준다
+            log.warning("%s 확장을 만들지 못했습니다(%s). Supabase 대시보드 Database → Extensions 에서 켜세요", ext, e)
 
 
 def _vector_column(insp) -> None:

@@ -96,6 +96,7 @@ def pg_server(tmp_path_factory):
         srv.admin("CREATE DATABASE tpl_empty")
         with db.make_engine(srv.url("tpl_empty")).connect() as c:
             c.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            c.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             c.commit()
         srv.admin("CREATE DATABASE tpl TEMPLATE tpl_empty")
         eng = db.make_engine(srv.url("tpl"))
