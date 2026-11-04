@@ -78,4 +78,40 @@ export const api = {
     f.append('file', file)
     return fetch('/api/assets', { method: 'POST', body: f }).then((r) => j<{ id: number; width: number | null; height: number | null; name: string; note?: string | null }>(r))
   },
+  // 지식 브라우저(아모레퍼시픽 입장 첫 화면). 조회는 과금 없음, knowledgeSearch 만 임베딩 1회
+  knowledgeSummary: (groupId: number | null) =>
+    fetch(`/api/knowledge/summary${groupId ? `?group_id=${groupId}` : ''}`).then((r) => j<KnowledgeSummary>(r)),
+  knowledgeDocs: (layer: string, groupId: number | null, brandId: number | null) =>
+    fetch(`/api/knowledge/docs?layer=${encodeURIComponent(layer)}${groupId ? `&group_id=${groupId}` : ''}${brandId ? `&brand_id=${brandId}` : ''}`).then((r) => j<KnowledgeDoc[]>(r)),
+  knowledgeChunks: (docId: number, groupId: number | null) =>
+    fetch(`/api/knowledge/docs/${docId}/chunks${groupId ? `?group_id=${groupId}` : ''}`).then((r) => j<{ doc: KnowledgeDocDetail; chunks: KnowledgeChunk[] }>(r)),
+  knowledgeSearch: (body: { group_id: number | null; brand_id: number | null; product_name: string; description: string; key_message: string; target: string }) =>
+    fetch('/api/knowledge/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => j<KnowledgeSearch>(r)),
+}
+
+export type KnowledgeSummary = {
+  group: { id: number; name: string } | null
+  brands: { id: number; name: string; docs: number }[]
+  layers: { layer: string; docs: number; chunks: number }[]
+  docs: number; chunks: number; embed_model: string; last_registered: string | null
+}
+export type KnowledgeDoc = {
+  id: number; source_id: string; title: string; layer: string; brand_id: number | null; brand: string | null; industry: string | null
+  status: string; source_url: string; fetched_at: string; created_at: string | null; chunks: number; archived: number; used_designs: number
+}
+export type KnowledgeDocDetail = {
+  id: number; title: string; layer: string; source_id: string; source_url: string; fetched_at: string; industry: string | null; status: string
+  created_at: string | null; motifs: string | null; directions: string[]
+}
+export type KnowledgeUse = {
+  design_id: number; brand: string; product_name: string; status: string; created_at: string | null
+  headline: string; violations: number; count: number; blocked: boolean; role: '규제' | '근거'; score?: number | null
+}
+export type KnowledgeChunk = {
+  id: number; seq: number; section: string; text: string; chars: number; product_name: string | null; aliases: string[]; functional: string[]
+  embed_model: string; has_vector: boolean; used: KnowledgeUse[]
+}
+export type KnowledgeSearch = {
+  query: string; industries: string[]; law_all: number[]; mode: string; hybrid: boolean
+  layers: { layer: string; k: number | null; rows: { chunk_id: number; doc_id: number; source_id: string; doc_title: string; section: string; score: number; exact_product: boolean; product_name: string | null }[] }[]
 }

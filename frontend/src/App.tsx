@@ -7,6 +7,7 @@ import AnalysisPage from './AnalysisPage'
 import SmallBizPage from './SmallBizPage'
 import EvolutionPage from './EvolutionPage'
 import Landing from './Landing'
+import KnowledgePage from './KnowledgePage'
 import BusyOverlay from './Busy'
 import './App.css'
 
@@ -23,7 +24,9 @@ export default function App() {
   const group = hash === '#/group'
   const scope = group ? 'group' : 'solo'
   const evolution = hash === '#/evolution'
-  const [tab, setTab] = useState<'brand' | 'preset' | 'design' | 'analysis'>('brand')
+  // 그룹 입구(아모레퍼시픽 입장)는 지식 브라우저가 첫 화면, 단독 브랜드 입구(타 브랜드 생성)는 브랜드 등록이 첫 화면
+  const [tab, setTab] = useState<'knowledge' | 'brand' | 'preset' | 'design' | 'analysis'>(() => window.location.hash === '#/group' ? 'knowledge' : 'brand')
+  useEffect(() => { setTab(hash === '#/group' ? 'knowledge' : 'brand') }, [hash])
   // 시안 작업 브랜드 (새로고침해도 유지)
   const [workBrandId, setWorkBrandIdState] = useState<number | null>(() => {
     try { const v = localStorage.getItem('workBrandId'); return v ? Number(v) : null } catch { return null }
@@ -33,8 +36,12 @@ export default function App() {
     try { id === null ? localStorage.removeItem('workBrandId') : localStorage.setItem('workBrandId', String(id)) } catch { /* 저장 실패는 무시 */ }
   }, [])
   const [groupName, setGroupName] = useState('')
+  const [groupId, setGroupId] = useState<number | null>(null)
   useEffect(() => {
-    if (group) api.brands().then((b) => setGroupName(groupNames(b).join('·'))).catch(() => setGroupName(''))
+    if (group) {
+      api.brands().then((b) => setGroupName(groupNames(b).join('·'))).catch(() => setGroupName(''))
+      api.brandGroups().then((gs) => setGroupId(gs[0]?.id ?? null)).catch(() => setGroupId(null))
+    }
   }, [group])
   if (evolution) return <><header className="topbar"><a className="brandmark" href="#/"><span className="logo-mark">B</span>RAG 진화 시연</a></header><EvolutionPage /></>
   if (!smallBiz && !studio && !group) return <Landing />
@@ -45,13 +52,17 @@ export default function App() {
       <header className="topbar">
         <a className="brandmark" href="#/"><span className="logo-mark">B</span>{group ? `${groupName || '그룹'} 스튜디오` : '브랜드 스튜디오'}</a>
         <nav className="tabs">
+          {group && <button className={tab === 'knowledge' ? 'on' : ''} onClick={() => setTab('knowledge')} title="등록된 규제·그룹·브랜드·제품 지식과 그 지식이 쓰인 카피">지식</button>}
           <button className={tab === 'brand' ? 'on' : ''} onClick={() => setTab('brand')}>브랜드</button>
           <button className={tab === 'design' ? 'on' : ''} onClick={() => setTab('design')}>규격·메시지·시안</button>
           <button className={tab === 'preset' ? 'on' : ''} onClick={() => setTab('preset')}>규격 라이브러리</button>
           <button className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')} title="학습·개발용: 입력↔결과 대조, 보낸 프롬프트, 비용">분석</button>
         </nav>
       </header>
-      {tab === 'brand'
+      {tab === 'knowledge' && group
+        ? (groupId === null ? <p className="muted" style={{ padding: 24 }}>지식을 불러오는 중…</p>
+           : <KnowledgePage groupId={groupId} onMakeCampaign={(id) => { setWorkBrandId(id); setTab('design') }} />)
+        : tab === 'brand' || tab === 'knowledge'
         ? <BrandPage key={scope} scope={scope} onGoDesign={(id) => { setWorkBrandId(id); setTab('design') }} />
         : tab === 'preset' ? <PresetLibrary />
         : tab === 'analysis' ? <AnalysisPage key={scope} scope={scope} workBrandId={workBrandId} />

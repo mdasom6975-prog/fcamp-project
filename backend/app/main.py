@@ -23,6 +23,7 @@ from .routers_copy import router as copy_router
 from .routers_edit import router as edit_router
 from .routers_export import router as export_router
 from .routers_icons import router as icons_router
+from .routers_knowledge import router as knowledge_router
 from .routers_images import router as images_router
 from .routers_designs import router as designs_router
 from .routers_presets import router as presets_router
@@ -233,6 +234,7 @@ app.include_router(brands_router)
 app.include_router(copy_router)
 app.include_router(images_router)
 app.include_router(icons_router)
+app.include_router(knowledge_router)
 app.include_router(edit_router)
 app.include_router(review_router)
 app.include_router(export_router)
