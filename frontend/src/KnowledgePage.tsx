@@ -196,7 +196,7 @@ function SearchProbe({ groupId, brands, onPick }: { groupId: number | null; bran
 }
 
 
-function ImportPanel({ brandId, brandName, onDone }: { brandId: number; brandName: string; onDone: (firstDoc?: number | null) => void }) {
+export function ImportPanel({ brandId, brandName, onDone }: { brandId: number; brandName: string; onDone: (firstDoc?: number | null) => void }) {
   /* 제품 가져오기: 목록 발견(과금 없음) → 아직 없는 제품을 4개씩 가져오기(제품당 임베딩 1회) → 진행·문제 표시. 사용자 입력은 버튼 두 번. */
   const [open, setOpen] = useState(false)
   const [disc, setDisc] = useState<ProductsDiscover | null>(null)

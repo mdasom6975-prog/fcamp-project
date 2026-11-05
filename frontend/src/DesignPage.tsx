@@ -9,7 +9,8 @@ import MasterPreview from './MasterPreview'
 import { useWorkspace } from './useWorkspace'
 import { busy as overlay, type Order, type QuizItem, type SketchCard } from './Busy'
 import { applyVariant } from './variants'
-import { getJson, inScope, type BrandScope } from './api'
+import { api, getJson, inScope, type BrandScope, type KnowledgeDoc } from './api'
+import { ImportPanel } from './KnowledgePage'
 
 type PresetLite = {
   id: number; name: string; status: string; production_width: number | null; production_height: number | null
@@ -1637,6 +1638,9 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand,
 
         <section className="card step-card">
           <header><h3><span className="step-no">②</span> 상품·메시지 입력</h3><span className="muted">광고 시안 + 카피</span></header>
+          {scope === 'group' && workId !== null && (
+            <ProductPicker brandId={workId} brandName={work?.name ?? ''} onPick={(v) => setBrief({ ...brief, ...v })} />
+          )}
           <div className="field-grid">
             <label>서비스·상품 <span className="req">*</span>
               <input value={brief.product_name} maxLength={100} placeholder="예: 신선식품 새벽배송 서비스" onChange={(e) => setBrief({ ...brief, product_name: e.target.value })} />
@@ -1944,5 +1948,49 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand,
         })()}
       </main>
     </>
+  )
+}
+
+
+/* 3단계 제품 고르기(00 정의서 v2.3): 등록된 제품 지식에서 고르면 상품명·설명·제품 이미지가 채워진다(직접 입력도 그대로 가능).
+   공식 사이트 제품 가져오기는 이 목록 옆의 보조 동작(KnowledgePage 의 ImportPanel 재사용). 그룹 입구에서만 보인다. */
+function ProductPicker({ brandId, brandName, onPick }: { brandId: number; brandName: string; onPick: (v: { product_name: string; description: string; product_image_asset_id: number | null }) => void }) {
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([])
+  const [groupId, setGroupId] = useState<number | null>(null)
+  const [picked, setPicked] = useState<number | ''>('')
+  const [note, setNote] = useState('')
+  const load = useCallback(() => {
+    api.brandGroups().then((gs) => {
+      const gid = gs[0]?.id ?? null
+      setGroupId(gid)
+      return api.knowledgeDocs('제품', gid, brandId)
+    }).then(setDocs).catch(() => setDocs([]))
+  }, [brandId])
+  useEffect(() => { setPicked(''); setNote(''); load() }, [load])
+  const pick = async (id: number | '') => {
+    setPicked(id)
+    if (id === '') return
+    try {
+      const d = await api.knowledgeChunks(id, groupId)
+      const c = d.chunks[0]
+      const text = (c?.text ?? '').replace(`[${d.doc.title}] `, '')
+      onPick({ product_name: c?.product_name ?? d.doc.title.replace(' 제품 정보', ''), description: text.split('기능성 화장품 표시 여부')[0].trim().slice(0, 1000),
+               product_image_asset_id: d.doc.image_asset_id ?? null })
+      setNote(d.doc.image_asset_id ? '상품명·설명·제품 이미지를 채웠습니다. 핵심 메시지와 타깃만 쓰면 됩니다' : '상품명·설명을 채웠습니다(제품 이미지는 없음). 핵심 메시지와 타깃만 쓰면 됩니다')
+    } catch (e) { setNote((e as Error).message) }
+  }
+  return (
+    <div className="product-picker">
+      <label className="msg-field">제품 고르기 <span className="opt">(등록된 제품 {docs.length}개)</span>
+        <div className="row">
+          <select value={picked} onChange={(e) => pick(e.target.value ? Number(e.target.value) : '')} style={{ flex: 1, minWidth: 240 }}>
+            <option value="">직접 입력</option>
+            {docs.map((d) => <option key={d.id} value={d.id}>{d.title.replace(' 제품 정보', '')}</option>)}
+          </select>
+          <ImportPanel brandId={brandId} brandName={brandName} onDone={() => load()} />
+        </div>
+        <span className="muted">{note || '고르면 상품명·설명·제품 이미지가 채워집니다. 목록에 없으면 "제품 가져오기"로 공식 사이트에서 가져오거나 직접 입력하세요'}</span>
+      </label>
+    </div>
   )
 }
