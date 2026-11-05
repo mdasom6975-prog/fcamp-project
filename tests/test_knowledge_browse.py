@@ -99,3 +99,27 @@ def test_search_preview_uses_same_search_as_copy(client, world):
     assert all(row["source_id"] != "prod_l" for row in layers["제품"]), "다른 브랜드 제품은 나오지 않는다"
     assert r["query"].startswith("자음생크림 / 인삼 탄력 크림") and r["mode"] == "sql"
     assert client.post("/api/knowledge/search", json={}).status_code == 400
+
+
+def test_copy_evidence_endpoint_marks_core_law_and_control(client, world, pg_engine):
+    """S2 4단계 근거: 브리프에 남은 refs 로 규제(핵심/검색 구분)·제품·브랜드·그룹 조각과 시안별 angle 을 돌려준다. 기록이 없으면 has=false."""
+    from app import knowledge
+    with sessionmaker(bind=pg_engine)() as s:
+        d = s.get(models.Design, world["design"])
+        d.brief = {**d.brief, "knowledge": {**d.brief["knowledge"], "law_mode": "core+search", "law_total": 30, "industries": ["화장품"],
+                                             "variants": [{"variant_no": 1, "angle": "탄력", "evidence": "인삼"}]}}
+        s.commit()
+    orig = knowledge.CORE_LAW
+    knowledge.CORE_LAW = {"화장품": ("law13",)}
+    try:
+        r = client.get(f"/api/designs/{world['design']}/evidence").json()
+    finally:
+        knowledge.CORE_LAW = orig
+    assert r["has"] and r["law_mode"] == "core+search" and [x["core"] for x in r["law"]] == [True]
+    assert [g["layer"] for g in r["guide"]] == ["제품"] and r["variants"][0]["angle"] == "탄력"
+    with sessionmaker(bind=pg_engine)() as s:
+        d2 = models.Design(brand_id=world["solo"], brand_version_id=s.get(models.Brand, world["solo"]).current_version_id, kind="광고 이미지",
+                           brief={"product_name": "x", "knowledge": {"law_mode": "off", "law_chunk_ids": [], "guide": []}})
+        s.add(d2); s.commit(); did = d2.id
+    r2 = client.get(f"/api/designs/{did}/evidence").json()
+    assert r2["has"] is True and r2["law"] == [] and r2["guide"] == [] and r2["law_mode"] == "off"

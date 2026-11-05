@@ -4,6 +4,7 @@ import ImageGrid, { type GridItem, type ImgRow } from './ImageGrid'
 type Item = {
   id: number; category: string; item: string; status: string; raw_status: string; message: string
   level: string | null; blocking: boolean; needs_human: boolean; confirmed: boolean
+  evidence?: { phrase?: string; law?: string; reason?: string; suggest?: string; grounded?: boolean } | null   // 법적·기능성 항목의 근거 조문·수정 제안(S2)
 }
 type Group = { preset_id: number | null; name: string; items: Item[]; summary: Record<string, number>; export_ready: boolean }
 type Exp = {
@@ -151,7 +152,14 @@ export default function ReviewPanel({ designId }: { designId: number }) {
                   <td style={{ whiteSpace: 'nowrap' }}><span className={`badge ${cls(it.status)}`}>{it.status}</span></td>
                   <td>{it.category}</td>
                   <td>{it.item}{it.blocking && <span className="badge b-need" style={{ marginLeft: 4 }}>차단</span>}</td>
-                  <td className="muted">{it.message}</td>
+                  <td className="muted">
+                    {it.evidence?.law ? (
+                      <>
+                        {it.evidence.reason || it.message}
+                        <div className="rv-evidence"><span>근거</span> {it.evidence.law}{it.evidence.suggest ? <><br /><span>제안</span> {it.evidence.suggest}</> : null}{it.evidence.grounded ? <><br /><span>참고</span> 입력에 있던 표현이라 근거 자료를 확인하세요</> : null}</div>
+                      </>
+                    ) : it.message}
+                  </td>
                   <td>
                     {it.category === '문구' && it.item.includes('글자 수') && it.status === '수정 필요' && g.preset_id !== null && (
                       <button type="button" disabled={fitting !== null || busy} onClick={() => fit(g.preset_id as number)}>

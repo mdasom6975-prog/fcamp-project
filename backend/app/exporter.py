@@ -103,6 +103,7 @@ def review_csv(groups: list[dict]) -> bytes:
     rows = []
     for g in groups:
         for it in g["items"]:
+            ev = it.get("evidence") or {}
             rows.append([g["name"], it["category"], it["item"], it["status"], "차단" if it["blocking"] else "",
-                         it["message"], "확인함" if it["confirmed"] else ""])
-    return csv_bytes(["지면", "분류", "항목", "상태", "차단", "내용", "사람 확인"], rows)
+                         it["message"], "확인함" if it["confirmed"] else "", ev.get("law", ""), ev.get("suggest", "")])
+    return csv_bytes(["지면", "분류", "항목", "상태", "차단", "내용", "사람 확인", "근거 조문", "수정 제안"], rows)

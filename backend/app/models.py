@@ -160,6 +160,7 @@ class ReviewResult(Base):
     needs_human: Mapped[bool] = mapped_column(Boolean, default=False)      # 사람이 확인해야 하는 항목
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)        # 사람이 '확인함' 표시
     location: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)     # 근거: {phrase, law, reason, suggest, grounded} (법적·기능성 항목, S2)
     valid: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

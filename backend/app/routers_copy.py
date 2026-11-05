@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import calllog, copyfields, copywriter, knowledge, legal, phrases
+from . import analysis, calllog, copyfields, copywriter, knowledge, legal, phrases
 from .models import Brand, BrandVersion, CopyVariant, Design, PresetVersion
 from .routers_assets import get_db, get_design
 from .routers_review import invalidate_reviews
@@ -246,3 +246,21 @@ def select_variant(design_id: int, variant_no: int = Body(..., embed=True), db: 
         raise HTTPException(404, "해당 번호의 시안이 없습니다")
     db.commit()
     return {"variant_no": variant_no, "preset_ids": picked}
+
+
+@router.get("/designs/{design_id}/evidence")
+def copy_evidence(design_id: int, db: Session = Depends(get_db)):
+    """4단계 근거 패널(S2): 최근 카피 생성이 본 규제(핵심·검색 구분)·제품·브랜드·그룹 조각과 시안별 angle·evidence.
+    브리프에 남은 refs 로 재구성하므로 호출·과금이 없다. 기록이 없으면 {"has": false}."""
+    d = _design(design_id, db)
+    brief = d.brief or {}
+    k = analysis._knowledge_out(db, brief)
+    refs = brief.get("knowledge") or {}
+    if k is None:
+        return {"has": False, "law_mode": refs.get("law_mode")}
+    core_ids = {sid for ind in k["industries"] for sid in knowledge.CORE_LAW.get(ind, ())}
+    for r in k["law"]:
+        r["core"] = r["source_id"] in core_ids
+    return {"has": True, "industries": k["industries"], "law_mode": refs.get("law_mode"), "law_total": refs.get("law_total"),
+            "law": k["law"], "guide": k["guide"], "variants": k["variants"], "error": k["error"],
+            "functional_mismatch": k["functional_mismatch"], "product_note": k["product_note"], "embed_model": k["embed_model"]}

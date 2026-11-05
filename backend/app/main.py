@@ -57,6 +57,9 @@ def _added_columns() -> None:
     if insp.has_table("knowledge_chunks") and "aliases" not in {c["name"] for c in insp.get_columns("knowledge_chunks")}:
         with engine.begin() as conn:      # 제품 별칭(브리프 상품명과 제품 자료를 정확히 잇는다)
             conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN aliases JSON"))
+    if insp.has_table("review_results") and "evidence" not in {c["name"] for c in insp.get_columns("review_results")}:
+        with engine.begin() as conn:      # 검수 항목의 근거(조문·제안, S2)
+            conn.execute(text("ALTER TABLE review_results ADD COLUMN evidence JSON"))
     if insp.has_table("knowledge_chunks"):
         _vector_column(insp)
 

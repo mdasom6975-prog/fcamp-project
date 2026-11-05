@@ -123,3 +123,18 @@ def test_review_warns_when_phrase_came_from_user_input(tmp_path):
 def test_review_passes_clean_copy(tmp_path):
     items = _review(tmp_path, "오늘 구운 딸기 케이크")
     assert [i["status"] for i in items] == ["통과"]
+
+
+def test_review_legal_item_carries_evidence_and_csv_columns(tmp_path):
+    """S2 6단계: 법적 항목은 근거(조문·제안)를 evidence 로 갖고 메시지에 제안이 붙으며, 검수결과.csv 에 '근거 조문'·'수정 제안' 열로 나간다."""
+    from app import exporter
+    items = _review(tmp_path, "세계 최초 케이크")
+    bad = next(i for i in items if i["blocking"])
+    ev = bad["evidence"]
+    assert ev and ev["phrase"] and "표시·광고의 공정화" in ev["law"] and ev["grounded"] is False
+    if ev["suggest"]:
+        assert f"제안: {ev['suggest']}" in bad["message"]
+    rows = [{**i, "confirmed": False} for i in items]
+    text = exporter.review_csv([{"name": "Meta · 피드", "items": rows}]).decode("utf-8-sig")
+    head, first = text.splitlines()[0], text.splitlines()[1]
+    assert head.endswith("근거 조문,수정 제안") and "표시·광고의 공정화" in first

@@ -84,7 +84,7 @@ def _out(r: ReviewResult) -> dict:
     if r.needs_human and r.confirmed and r.status == "확인 필요":
         status, note = "통과", f"{r.message} — 사람이 확인함"
     return {"id": r.id, "category": r.category, "item": r.item, "status": status, "raw_status": r.status,
-            "message": note, "level": r.level, "blocking": r.blocking and status != "통과",
+            "message": note, "level": r.level, "blocking": r.blocking and status != "통과", "evidence": r.evidence,
             "needs_human": r.needs_human, "confirmed": r.confirmed, "location": r.location}
 
 
@@ -188,7 +188,8 @@ def run_review(design_id: int, db: Session = Depends(get_db)):
     for pid, it in results:
         db.add(ReviewResult(design_id=d.id, preset_version_id=pid, category=it["category"], item=it["item"],
                             status=it["status"], level=it["level"], message=it["message"],
-                            blocking=it["blocking"], needs_human=it["needs_human"], location=it["location"]))
+                            blocking=it["blocking"], needs_human=it["needs_human"], location=it["location"],
+                            evidence=it.get("evidence")))
     db.commit()
     out = _collect(db, d)
     if out["export_ready"]:

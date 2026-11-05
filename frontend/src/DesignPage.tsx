@@ -330,6 +330,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
       {err && <div className="notice err">{err}</div>}
       {pickNote && view === 'copy' && <div className="notice ok">{pickNote}</div>}
       {view === 'copy' && <DevStats designId={designId} kinds={['copy', 'copy_fit', 'copy_extras']} label="카피 생성" refreshKey={`${busy}-${groups.length}-${count}-${fitting}`} />}
+      {view === 'copy' && has && <EvidencePanel designId={designId} refreshKey={`${groups.length}-${count}`} />}
 
       {!has && view === 'copy' && <p className="muted gen-empty">카피 생성을 누르면 선택한 규격의 글자 수 제한에 맞춰 시안 문구를 만듭니다.</p>}
       {!has && view !== 'copy' && <p className="muted gen-empty">먼저 ③ 카피·시안에서 카피를 생성하고 시안을 고르면 {view === 'images' ? '이미지를' : '아이콘을'} 만들 수 있습니다.</p>}
@@ -1991,6 +1992,62 @@ function ProductPicker({ brandId, brandName, onPick }: { brandId: number; brandN
         </div>
         <span className="muted">{note || '고르면 상품명·설명·제품 이미지가 채워집니다. 목록에 없으면 "제품 가져오기"로 공식 사이트에서 가져오거나 직접 입력하세요'}</span>
       </label>
+    </div>
+  )
+}
+
+
+/* 4단계 근거 패널(S2): 최근 카피 생성이 본 규제(핵심·검색 구분)·제품·브랜드·그룹 조각과 시안별 angle·evidence.
+   GET /api/designs/{id}/evidence — 브리프에 남은 참조로 재구성하므로 과금 없음. 대조군(law_mode=off)은 "지식 없이 만든 카피"로 표시. */
+type EvidenceRow = { chunk_id: number; source_id: string; doc_title: string; layer: string; section: string; text: string; score: number | null; product_name: string | null; core?: boolean }
+type Evidence = { has: boolean; industries?: string[]; law_mode?: string | null; law_total?: number | null; law?: EvidenceRow[]; guide?: EvidenceRow[]
+  variants?: { variant_no: number; angle: string; evidence: string }[]; error?: string | null; functional_mismatch?: string | null; product_note?: string | null }
+function EvidencePanel({ designId, refreshKey }: { designId: number; refreshKey: string }) {
+  const [ev, setEv] = useState<Evidence | null>(null)
+  const [open, setOpen] = useState<number | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  useEffect(() => { getJson<Evidence>(`/api/designs/${designId}/evidence`).then((e) => e && setEv(e)).catch(() => setEv(null)) }, [designId, refreshKey])
+  if (!ev) return null
+  if (!ev.has) {
+    return <div className="evidence"><strong>근거</strong><span className="muted">{ev.law_mode === 'off' ? '지식 없이 만든 카피입니다(대조군). 규제·제품·브랜드 자료를 참고하지 않았습니다' : '아직 카피를 만들지 않았거나 참고 기록이 없습니다'}</span></div>
+  }
+  const core = (ev.law ?? []).filter((r) => r.core), searched = (ev.law ?? []).filter((r) => !r.core)
+  const byLayer = (l: string) => (ev.guide ?? []).filter((r) => r.layer === l)
+  const lawShown = showAll ? (ev.law ?? []) : core
+  const row = (r: EvidenceRow, tag?: string) => (
+    <li key={r.chunk_id} className={open === r.chunk_id ? 'open' : ''}>
+      <button type="button" onClick={() => setOpen(open === r.chunk_id ? null : r.chunk_id)}>
+        {tag && <em>{tag}</em>}{r.section || r.doc_title}{r.layer === '제품' && r.product_name ? ` · ${r.product_name}` : ''}{r.score != null && !r.core ? <span className="muted"> {r.score.toFixed(3)}</span> : null}
+      </button>
+      {open === r.chunk_id && <p>{r.text}</p>}
+    </li>
+  )
+  return (
+    <div className="evidence">
+      <strong>이 카피가 본 근거</strong>
+      <span className="muted">
+        규제 {ev.law?.length ?? 0}조각{core.length ? ` (핵심 ${core.length} 항상 투입${searched.length ? ` + 검색 ${searched.length}` : ''})` : ''}{ev.industries?.length ? ` · 업종 ${ev.industries.join('·')}` : ''}
+        {' · '}제품 {byLayer('제품').length} · 브랜드 {byLayer('브랜드').length} · 그룹 {byLayer('그룹').length}
+        {ev.error ? ` · 검색 실패(${ev.error})` : ''}
+      </span>
+      {(ev.product_note || ev.functional_mismatch) && <p className="muted">{ev.product_note ?? ev.functional_mismatch}</p>}
+      <div className="evidence-cols">
+        <div>
+          <h5>규제 {ev.law_mode === 'core+search' ? '(핵심은 항상, 나머지는 검색)' : ev.law_mode === 'all' ? '(업종 규제 전부)' : ''}</h5>
+          <ul>{lawShown.map((r) => row(r, r.core ? '핵심' : '검색'))}</ul>
+          {searched.length > 0 && <button type="button" className="soft" onClick={() => setShowAll(!showAll)}>{showAll ? '핵심만 보기' : `검색으로 보충한 ${searched.length}조각 보기`}</button>}
+        </div>
+        <div>
+          <h5>제품 · 브랜드 · 그룹</h5>
+          <ul>{[...byLayer('제품'), ...byLayer('브랜드'), ...byLayer('그룹')].map((r) => row(r, r.layer))}</ul>
+          {(ev.guide ?? []).length === 0 && <p className="muted">이 브랜드에 등록된 제품·브랜드·그룹 자료가 없습니다</p>}
+        </div>
+      </div>
+      {(ev.variants ?? []).length > 0 && (
+        <ul className="evidence-angles">
+          {(ev.variants ?? []).map((v) => <li key={v.variant_no}><em>시안 {LETTERS[v.variant_no - 1] ?? v.variant_no}</em> {v.angle}{v.evidence ? <span className="muted"> — 근거: {v.evidence}</span> : null}</li>)}
+        </ul>
+      )}
     </div>
   )
 }

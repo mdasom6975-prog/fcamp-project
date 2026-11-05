@@ -16,9 +16,9 @@ from .copyfields import EXTRA
 from .textcount import count_len
 
 
-def item(category, name, status, message="", level=None, blocking=False, needs_human=False, location=None):
+def item(category, name, status, message="", level=None, blocking=False, needs_human=False, location=None, evidence=None):
     return {"category": category, "item": name, "status": status, "message": message, "level": level,
-            "blocking": blocking, "needs_human": needs_human, "location": location}
+            "blocking": blocking, "needs_human": needs_human, "location": location, "evidence": evidence}
 
 
 def _spec_fail(level: str | None) -> tuple[str, bool]:
@@ -303,10 +303,13 @@ def review_preset(pv, img_row, texts: dict, text_el: dict | None, logo_box, scri
     for h in hits:
         blocking = h["severity"] == "block"
         out.append(item("법적", f"법적 표현 '{h['phrase']}'", "수정 필요" if blocking else "경고",
-                        f"{h['reason']} — 근거: {h['law']}" + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
-                        "필수" if blocking else "권장", blocking))
+                        f"{h['reason']} — 근거: {h['law']}" + (f" · 제안: {h['suggest']}" if h.get("suggest") else "")
+                        + (" (입력에 있던 표현: 근거 자료 확인)" if h["grounded"] else ""),
+                        "필수" if blocking else "권장", blocking,
+                        evidence={"phrase": h["phrase"], "law": h["law"], "reason": h["reason"], "suggest": h.get("suggest", ""), "grounded": h["grounded"]}))
     for v in legal.functional_violations(joined, brand.get("functional")):     # 입력한 기능성 밖의 기능성 표현(입력한 캠페인만)
-        out.append(item("법적", f"기능성 표현 '{v['phrase']}'", "수정 필요", f"{v['detail']} — 근거: {v['law']}", "필수", True))
+        out.append(item("법적", f"기능성 표현 '{v['phrase']}'", "수정 필요", f"{v['detail']} — 근거: {v['law']}", "필수", True,
+                        evidence={"phrase": v["phrase"], "law": v["law"], "reason": v.get("detail", ""), "suggest": v.get("suggest", ""), "grounded": False}))
     if not hits:
         out.append(item("법적", "법적 표현", "통과", "금지·주의 표현 사전에 걸리는 표현이 없습니다(참고용 자동 검사, 법률 자문 아님)", "필수"))
     for ph in brand["required_phrases"]:
