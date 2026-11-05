@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type KnowledgeSummary } from './api'
 
 /* 첫 화면: 진입점 둘.
-   - 아모레퍼시픽 입장(#/group): 지식이 등록된 그룹. 첫 화면은 브랜드 입력이 아니라 RAG 지식 브라우저.
+   - 아모레퍼시픽 입장(#/group): 지식이 등록된 그룹. 1단계 브랜드 탭으로 들어간다(지식 브라우저는 '지식' 탭, 00 정의서 v2).
    - 타 브랜드 생성(#/studio): 브랜드를 직접 등록하고 지식 검색 없이 시안을 만든다(RAG 유무 비교용 대조군, 기존 스튜디오 화면 그대로).
    소상공인(#/smallbiz)·RAG 진화 시연(#/evolution)은 주소로는 열리지만 첫 화면 카드에서는 뺐다(2026-11 재기획). */
 export default function Landing() {
@@ -28,7 +28,7 @@ export default function Landing() {
           <div className="entry-chips">
             {['규제', '그룹', '브랜드', '제품'].map((n) => <em key={n}>{n} {layer(n)?.docs ?? '…'}</em>)}
           </div>
-          <b>지식 보기 →</b>
+          <b>브랜드 고르고 시작 →</b>
         </a>
         <a className="landing-card entry-other" href="#/studio">
           <strong>타 브랜드 생성</strong>

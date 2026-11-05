@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, inScope, ITEM_LABELS, type BrandForm, type BrandScope, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition } from './api'
+import { api, inScope, ITEM_LABELS, type BrandForm, type BrandScope, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition, type KnowledgeSummary } from './api'
 import ColorPicker from './ColorPicker'
 
 const LEVELS: Level[] = ['필수', '권장']
@@ -92,6 +92,7 @@ export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; on
   const [defaults, setDefaults] = useState<{ levels: Record<string, Level>; color_roles: string[] } | null>(null)
   const [provided, setProvided] = useState<{ name: string; label: string }[]>([])
   const [brands, setBrands] = useState<{ id: number; name: string; group_id: number | null; group_name: string | null }[]>([])
+  const [knowledge, setKnowledge] = useState<KnowledgeSummary | null>(null)   // 1단계에 지식 건수 한 줄(00 정의서 v2.3). 그룹 입구에서만
   const [brandGroups, setBrandGroups] = useState<{ id: number; name: string }[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [versions, setVersions] = useState<{ id: number; version_no: number }[]>([])
@@ -114,6 +115,10 @@ export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; on
 
   const loadBrands = useCallback(() => Promise.all([api.brands(), api.brandGroups()])
     .then(([b, g]) => { setBrands(inScope(b, scope)); setBrandGroups(g) }), [scope])
+  useEffect(() => {
+    if (scope !== 'group') return
+    api.brandGroups().then((gs) => gs[0] ? api.knowledgeSummary(gs[0].id) : null).then((k) => setKnowledge(k)).catch(() => setKnowledge(null))
+  }, [scope])
 
   useEffect(() => {
     Promise.all([api.defaults(), api.providedFonts()]).then(([d, f]) => {
@@ -275,6 +280,13 @@ export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; on
           {brands.filter((b) => b.group_id === g.id).map((b) => (
             <button key={b.id} className={`chip ${b.id === selected ? 'on' : ''}`} onClick={() => openBrand(b.id)}>{b.name}</button>
           ))}
+          {knowledge && knowledge.group?.id === g.id && (
+            <span className="muted bp-knowledge">
+              등록된 지식: {knowledge.layers.filter((l) => l.docs > 0).map((l) => `${l.layer} ${l.docs}`).join(' · ')}
+              {selected && knowledge.brands.some((b) => b.id === selected) ? ` · 이 브랜드 자료 ${knowledge.brands.find((b) => b.id === selected)!.docs}` : ''}
+              {' '}(카피와 검수의 근거로 쓰입니다. 전체는 "지식" 탭)
+            </span>
+          )}
         </div>
       ))}
 

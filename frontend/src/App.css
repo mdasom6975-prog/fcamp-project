@@ -972,3 +972,4 @@ a.brandmark { color: inherit; text-decoration: none; }
 .kb-cta { align-items: flex-start; border-style: solid; border-color: var(--line-strong); }
 .kb-cta-fields { display: flex; gap: 8px; margin-top: 8px; }
 .kb-cta-fields input { flex: 1; min-width: 0; font-size: 13px; }
+.bp-knowledge { flex-basis: 100%; font-size: 12px; margin-top: -2px; }

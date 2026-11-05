@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type KnowledgeChunk, type KnowledgeDoc, type KnowledgeDocDetail, type KnowledgeSearch, type KnowledgeSummary, type ProductImportResult, type ProductsDiscover } from './api'
 
 /* 지식 브라우저 — 아모레퍼시픽 입장의 첫 화면(2026-11 재기획, docs/wireframes 아티팩트 2·3번).
-   좌: 층(규제·그룹·브랜드·제품·캠페인)과 건수 + 검색 미리보기. 가운데: 문서 목록. 우: 조각 목록(펼치면 본문과 '이 조각이 쓰인 카피').
+   참고·관리 화면(그룹 입구의 '지식' 탭, 첫 화면이 아니다 — 00 정의서 v2.3). 좌: 층과 건수 + 검색 미리보기. 가운데: 문서 목록. 우: 조각(본문과 '이 조각이 쓰인 카피').
+   시안 만들기는 여기서 하지 않는다(3단계 메시지 입력의 '제품 고르기').
    브랜드·제품·캠페인 층은 상단에 브랜드 필터. 조회는 과금 없음, 검색 미리보기만 임베딩 1회. */
 
 const LAYERS = ['규제', '그룹', '브랜드', '제품', '캠페인'] as const
@@ -15,7 +16,7 @@ const LAYER_HINT: Record<string, string> = {
   캠페인: '이 앱에서 만든 카피·검수 결과를 다시 지식으로(예정)',
 }
 
-export default function KnowledgePage({ groupId, onOpenCampaign }: { groupId: number | null; onOpenCampaign?: (brandId: number, designId: number) => void }) {
+export default function KnowledgePage({ groupId }: { groupId: number | null }) {
   const [summary, setSummary] = useState<KnowledgeSummary | null>(null)
   const [layer, setLayer] = useState<string>('규제')
   const [brandId, setBrandId] = useState<number | null>(null)
@@ -136,10 +137,6 @@ export default function KnowledgePage({ groupId, onOpenCampaign }: { groupId: nu
                               <span className="muted">캠페인 #{u.design_id} · {u.status}</span>
                             </div>
                           ))}
-                        {layer === '제품' && c.product_name && (
-                          <CampaignCta docId={detail.doc.id} brandId={detail.doc.brand_id ?? docs.find((x) => x.id === detail.doc.id)?.brand_id ?? null}
-                            hasImage={!!detail.doc.image_asset_id} onOpen={onOpenCampaign} />
-                        )}
                       </div>
                     )}
                   </article>
@@ -249,30 +246,3 @@ function ImportPanel({ brandId, brandName, onDone }: { brandId: number; brandNam
   )
 }
 
-function CampaignCta({ docId, brandId, hasImage, onOpen }: { docId: number; brandId: number | null; hasImage: boolean; onOpen?: (brandId: number, designId: number) => void }) {
-  /* 이 제품으로 시안 만들기: 상품명·설명·제품 이미지는 제품 지식에서, 핵심 메시지·타깃만 받는다(비워도 된다). */
-  const [key, setKey] = useState('')
-  const [target, setTarget] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const go = () => {
-    setBusy(true); setErr('')
-    api.campaignFromProduct(docId, key.trim(), target.trim())
-      .then((r) => { if (onOpen) onOpen(r.brand_id, r.design_id) })
-      .catch((e) => setErr(e.message)).finally(() => setBusy(false))
-  }
-  return (
-    <div className="kb-cta">
-      <div>
-        <strong>이 제품으로 시안 만들기</strong>
-        <span className="muted">상품명·설명{hasImage ? '·제품 이미지' : ''}는 자동으로 채워집니다. 핵심 메시지와 타깃은 비워도 됩니다</span>
-        <div className="kb-cta-fields">
-          <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="핵심 메시지 (선택)" maxLength={200} aria-label="핵심 메시지" />
-          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="타깃 (선택)" maxLength={300} aria-label="타깃" />
-        </div>
-        {err && <p className="error">{err}</p>}
-      </div>
-      <button className="primary" disabled={busy || brandId === null || !onOpen} onClick={go}>{busy ? '만드는 중…' : '캠페인 만들기 →'}</button>
-    </div>
-  )
-}

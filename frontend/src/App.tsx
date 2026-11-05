@@ -24,9 +24,9 @@ export default function App() {
   const group = hash === '#/group'
   const scope = group ? 'group' : 'solo'
   const evolution = hash === '#/evolution'
-  // 그룹 입구(아모레퍼시픽 입장)는 지식 브라우저가 첫 화면, 단독 브랜드 입구(타 브랜드 생성)는 브랜드 등록이 첫 화면
-  const [tab, setTab] = useState<'knowledge' | 'brand' | 'preset' | 'design' | 'analysis'>(() => window.location.hash === '#/group' ? 'knowledge' : 'brand')
-  useEffect(() => { setTab(hash === '#/group' ? 'knowledge' : 'brand') }, [hash])
+  // 두 입구 모두 1단계 브랜드 탭이 첫 화면(00 정의서 v2.3: 지식은 단계 안에서 근거로 보이지, 단계 앞을 막는 화면이 아니다). 지식 브라우저는 그룹 입구의 "지식" 탭
+  const [tab, setTab] = useState<'knowledge' | 'brand' | 'preset' | 'design' | 'analysis'>('brand')
+  useEffect(() => { setTab('brand') }, [hash])
   // 시안 작업 브랜드 (새로고침해도 유지)
   const [workBrandId, setWorkBrandIdState] = useState<number | null>(() => {
     try { const v = localStorage.getItem('workBrandId'); return v ? Number(v) : null } catch { return null }
@@ -53,16 +53,16 @@ export default function App() {
       <header className="topbar">
         <a className="brandmark" href="#/"><span className="logo-mark">B</span>{group ? `${groupName || '그룹'} 스튜디오` : '브랜드 스튜디오'}</a>
         <nav className="tabs">
-          {group && <button className={tab === 'knowledge' ? 'on' : ''} onClick={() => setTab('knowledge')} title="등록된 규제·그룹·브랜드·제품 지식과 그 지식이 쓰인 카피">지식</button>}
           <button className={tab === 'brand' ? 'on' : ''} onClick={() => setTab('brand')}>브랜드</button>
           <button className={tab === 'design' ? 'on' : ''} onClick={() => setTab('design')}>규격·메시지·시안</button>
           <button className={tab === 'preset' ? 'on' : ''} onClick={() => setTab('preset')}>규격 라이브러리</button>
           <button className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')} title="학습·개발용: 입력↔결과 대조, 보낸 프롬프트, 비용">분석</button>
+          {group && <button className={tab === 'knowledge' ? 'on' : ''} onClick={() => setTab('knowledge')} title="참고·관리: 등록된 규제·그룹·브랜드·제품 지식과 그 지식이 쓰인 카피">지식</button>}
         </nav>
       </header>
       {tab === 'knowledge' && group
         ? (groupId === null ? <p className="muted" style={{ padding: 24 }}>지식을 불러오는 중…</p>
-           : <KnowledgePage groupId={groupId} onOpenCampaign={(brandId, designId) => { setWorkBrandId(brandId); setOpenDesign(designId); setTab('design') }} />)
+           : <KnowledgePage groupId={groupId} />)
         : tab === 'brand' || tab === 'knowledge'
         ? <BrandPage key={scope} scope={scope} onGoDesign={(id) => { setWorkBrandId(id); setTab('design') }} />
         : tab === 'preset' ? <PresetLibrary />
