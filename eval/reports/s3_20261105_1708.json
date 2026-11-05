@@ -1,0 +1,53 @@
+[
+  {
+    "brief": "워터 슬리핑 마스크",
+    "intent": "정상",
+    "side": "아모레(지식)",
+    "brand": "라네즈",
+    "design_id": 42,
+    "law": 22,
+    "law_core": 16,
+    "guide": 3,
+    "product_chunk": true,
+    "law_mode": "core+search",
+    "source_facts": [
+      "\\d+\\s?ml",
+      "sleeptox"
+    ],
+    "used_facts": [
+      "sleeptox"
+    ],
+    "facts_hit": 1,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "밤에 바르는 SLEEPTOX™ 마스크",
+      "만약에, 밤이 스킨케어 시간이라면",
+      "바르고, 눕고, 촉촉하게 가꾸는 밤"
+    ]
+  },
+  {
+    "brief": "워터 슬리핑 마스크",
+    "intent": "정상",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 43,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "자는 동안 수분을 채우는 마스크",
+      "아침 세안 전, 얼굴이 먼저 촉촉해요",
+      "밤사이 피부는 무엇으로 채워질까?"
+    ]
+  }
+]
