@@ -275,7 +275,7 @@ def test_alias_matches_product_and_drops_other_products(session):
     _add(session, layer="제품", source_id="yunjo", title="윤조", chunks=[("윤조에센스", "[윤조] 인삼 에센스")], brand_id=1,
          product_name="윤조에센스", functional=["주름 개선"])
     brief = {"product_name": "자음생크림 60 주년", "functional": ["주름 개선", "미백"]}
-    k = knowledge.for_copy(session, 1, None, brief, embedder=fake_embed)
+    k = knowledge.for_copy(session, 1, 7, brief, embedder=fake_embed)
     assert [r["source_id"] for r in k["guide"]] == ["rich"] and k["product_note"] is None
     assert "미백" in k["functional_mismatch"]
 
@@ -284,7 +284,7 @@ def test_unknown_product_name_gives_note(session):
     from app import knowledge
     _add(session, layer="제품", source_id="rich", title="리치", chunks=[("자음생크림 리치", "[리치] 인삼 크림")], brand_id=1,
          product_name="자음생크림 리치")
-    k = knowledge.for_copy(session, 1, None, {"product_name": "새 크림"}, embedder=fake_embed)
+    k = knowledge.for_copy(session, 1, 7, {"product_name": "새 크림"}, embedder=fake_embed)
     assert "이름이 같은 제품 자료가 없어" in k["product_note"] and k["guide"]
 
 
@@ -304,13 +304,13 @@ def test_visual_knowledge_reaches_background_prompt(session):
          visual={"directions": ["한지 위 낮은 좌탁, 부드러운 오전 빛"]})
     _add(session, layer="제품", source_id="rich", title="리치", chunks=[("리치", "[리치] 크림")], brand_id=1,
          product_name="리치", visual={"motifs": "인삼 뿌리, 한지 결"})
-    k = knowledge.for_copy(session, 1, None, {"product_name": "리치"}, embedder=fake_embed)
+    k = knowledge.for_copy(session, 1, 7, {"product_name": "리치"}, embedder=fake_embed)
     brief = {"product_name": "리치", "key_message": "메시지", "knowledge": knowledge.refs(k)}
     text = imagegen.build_prompt("브랜드", {}, brief, "정사각", "실사 제품·공간")
     assert "[제품의 소재]" in text and "인삼 뿌리, 한지 결" in text and "한지 위 낮은 좌탁" in text
     assert "청량한 여름" not in text and "김 서린 창가" not in text
     assert imagegen.pick_direction("플랫 일러스트", brief) != "한지 위 낮은 좌탁, 부드러운 오전 빛"
-    other = knowledge.for_copy(session, 1, None, {"product_name": "모르는 크림"}, embedder=fake_embed)
+    other = knowledge.for_copy(session, 1, 7, {"product_name": "모르는 크림"}, embedder=fake_embed)
     assert other["motifs"] is None and other["directions"], "다른 제품의 소재를 쓰지 않되 브랜드 연출은 쓴다"
     plain = imagegen.build_prompt("브랜드", {}, {"product_name": "리치"}, "정사각", "실사 제품·공간")
     assert "[제품의 소재]" not in plain
@@ -401,11 +401,11 @@ def test_for_copy_switches_law_to_search_when_many(session, monkeypatch):
              chunks=[(f"제{i}조", "의약품 오인 광고 금지" if i == 0 else f"영업 등록 신고 서류 {i}")])
     brief = {"product_name": "크림", "description": "아토피 치료 화장품 광고", "key_message": "의약품 오인"}
     monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 10)
-    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    k = knowledge.for_copy(session, None, 7, brief, embedder=fake_embed)
     assert k["law_mode"] == "all" and len(k["law"]) == 6 and k["law_total"] == 6
     monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 3)
     monkeypatch.setattr(knowledge, "LAW_K", 2)
-    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    k = knowledge.for_copy(session, None, 7, brief, embedder=fake_embed)
     assert k["law_mode"] == "core+search" and k["law_core"] == 0 and len(k["law"]) == 2 and k["law"][0]["source_id"] == "cos0", "핵심 규제가 없으면 검색 상위만"
     assert knowledge.refs(k)["law_mode"] == "core+search"
 
@@ -422,9 +422,21 @@ def test_core_law_always_injected_when_many(session, monkeypatch):
     brief = {"product_name": "크림", "description": "아토피 치료 화장품 광고 의약품 오인"}
     monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 3)
     monkeypatch.setattr(knowledge, "LAW_K", 2)
-    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    k = knowledge.for_copy(session, None, 7, brief, embedder=fake_embed)
     srcs = [r["source_id"] for r in k["law"]]
     assert k["law_mode"] == "core+search" and k["law_core"] == 3
     assert srcs[:3] == ["law13", "annex5", "annex5"], "핵심 규제가 유사도와 무관하게 맨 앞에 전부"
     assert len(srcs) == 5 and all(x.startswith("other") for x in srcs[3:]), "검색 상위 2개는 핵심 밖에서"
     assert knowledge.refs(k)["law_core"] == 3
+
+
+def test_control_brand_without_group_gets_no_knowledge_at_all(session):
+    """S3 대조군(2026-11-05 결정): 그룹 없는 타 브랜드는 규제를 포함해 어떤 지식도 받지 않는다. 임베딩 호출도 없다."""
+    from app import knowledge
+    _add(session, layer="규제", source_id="law13", title="제13조", industry="화장품", chunks=[("제13조", "의약품 오인 광고 금지")])
+    _add(session, layer="제품", source_id="p", title="크림", chunks=[("크림", "보습 크림")], brand_id=1, product_name="크림")
+    def boom(_): raise AssertionError("대조군은 검색하지 않는다")
+    k = knowledge.for_copy(session, 1, None, {"product_name": "크림", "description": "아토피 치료 화장품"}, embedder=boom)
+    assert k["law"] == [] and k["guide"] == [] and k["law_mode"] == "off" and "화장품" in k["industries"]
+    g = knowledge.for_copy(session, 1, 7, {"product_name": "크림", "description": "아토피 치료 화장품"}, embedder=fake_embed)
+    assert g["law"] and g["law_mode"] == "all", "같은 브랜드라도 그룹이 있으면 규제가 들어간다"

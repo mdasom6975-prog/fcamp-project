@@ -407,12 +407,18 @@ def brand_directions(db: Session, brand_id: int | None) -> list[str]:
 
 
 def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dict, embedder=embed) -> dict:
-    """카피 프롬프트에 붙일 지식. 반환: {industries, law: [조각], guide: [조각], error, functional_mismatch}.
-    - law: 품목 글에서 감지한 업종의 규제 조각 전부(legal.detect 와 같은 키워드)
+    """카피 프롬프트에 붙일 지식. 반환: {industries, law: [조각], guide: [조각], error, functional_mismatch, law_mode}.
+    - group_id 가 None(그룹 없는 타 브랜드 = 대조군)이면 규제까지 포함해 아무 지식도 넣지 않는다(law_mode=off)
+    - law: 품목 글에서 감지한 업종의 규제 조각(핵심은 항상, 나머지는 검색)
     - guide: 제품 2 · 브랜드 2 · 그룹 1 검색 결과. 이 브랜드·그룹에 지식이 없으면 빈 목록(임베딩 호출 없음)
     - 임베딩 호출이 실패하면 guide 없이 진행하고 error 에 오류 이름만 남긴다(카피 생성을 막지 않는다)"""
     from . import legal
     industries = legal.detect(legal.source_text(brief))
+    if group_id is None:
+        # 타 브랜드(그룹 없음) = 대조군: 규제를 포함한 지식을 전혀 넣지 않는다(00 정의서 v2.2, 2026-11-05 결정).
+        # 검수의 법적 표현 사전(legal.violations)은 공통이라 대조군 카피가 거기서 잡히는 것이 S3 비교다
+        return {"industries": industries, "law": [], "guide": [], "error": None, "functional_mismatch": functional_mismatch([], brief.get("functional")),
+                "product_note": None, "motifs": None, "directions": [], "law_mode": "off", "law_total": 0, "law_core": 0}
     law_all = law_rows(db, industries)
     # 규제: 업종의 조각이 LAW_ALL_MAX 이하면 전부(작을 때는 검색보다 확실). 그보다 많으면(3-B 법령 전문) 핵심 규제(CORE_LAW)는 **항상** 넣고,
     # 나머지 조문에서 검색 상위 LAW_K 만 보충한다(S4: 핵심 조문은 데이터 양과 상관없이 들어간다)
