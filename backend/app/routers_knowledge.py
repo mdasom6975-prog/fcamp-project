@@ -14,8 +14,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import knowledge
-from .models import Brand, BrandGroup, CopyVariant, Design, KnowledgeChunk, KnowledgeDoc
+from . import knowledge, products_import
+from .models import Asset, Brand, BrandGroup, CopyVariant, Design, KnowledgeChunk, KnowledgeDoc
 from .routers_assets import get_db
 
 router = APIRouter(prefix="/api/knowledge")
@@ -131,7 +131,9 @@ def chunks(doc_id: int, group_id: int | None = None, db: Session = Depends(get_d
     return {"doc": {"id": doc.id, "title": doc.title, "layer": doc.layer, "source_id": doc.source_id, "source_url": doc.source_url,
                     "fetched_at": doc.fetched_at, "industry": doc.industry, "status": doc.status,
                     "created_at": doc.created_at.date().isoformat() if doc.created_at else None,
-                    "motifs": visual.get("motifs"), "directions": visual.get("directions") or []},
+                    "motifs": visual.get("motifs"), "directions": visual.get("directions") or [],
+                    "image_asset_id": visual.get("image_asset_id"), "price": visual.get("price"), "quantity": visual.get("quantity"),
+                    "line": visual.get("line"), "brand_id": doc.brand_id},
             "chunks": [{"id": c.id, "seq": c.seq, "section": c.section, "text": c.text, "chars": len(c.text),
                         "product_name": c.product_name, "aliases": c.aliases or [], "functional": c.functional or [],
                         "embed_model": c.embed_model, "has_vector": c.vec is not None,
@@ -163,3 +165,78 @@ def search(body: SearchIn, db: Session = Depends(get_db)):
                 {k: r[k] for k in ("chunk_id", "doc_id", "source_id", "doc_title", "section", "score", "exact_product", "product_name")}
                 for r in rows]} for layer, rows in res.items()],
             "mode": knowledge.SEARCH_MODE, "hybrid": knowledge.HYBRID}
+
+
+# ---- 제품 가져오기 (공식 사이트 → 제품 지식 + 제품 이미지) ----
+
+@router.get("/products/discover")
+def products_discover(brand_id: int, db: Session = Depends(get_db)):
+    """브랜드 사이트의 제품 목록(과금 없음). 이미 가져온 제품은 doc_id 가 붙는다. 사이트 규칙이 없는 브랜드는 supported=false."""
+    brand = db.get(Brand, brand_id)
+    if not brand:
+        raise HTTPException(404, "브랜드가 없습니다")
+    cfg = products_import.SITES.get(brand.name)
+    if not cfg:
+        return {"supported": False, "brand": brand.name, "products": []}
+    try:
+        found = products_import.discover(brand.name)
+    except Exception as e:
+        raise HTTPException(502, f"제품 목록을 읽지 못했습니다: {type(e).__name__}")
+    have = products_import.imported(db, brand.id)
+    return {"supported": True, "brand": brand.name, "list_url": cfg["list_url"],
+            "products": [{"seq": f.seq, "name": f.name, "line": f.line, "price": f.price,
+                          "doc_id": have.get(f"{cfg['source_prefix']}_{f.seq}")} for f in found]}
+
+
+class ImportIn(BaseModel):
+    brand_id: int
+    seqs: list[str]          # 한 번에 몇 개씩(서버리스 시간 제한). 프론트가 나눠 부른다
+
+
+@router.post("/products/import")
+def products_import_run(body: ImportIn, db: Session = Depends(get_db)):
+    """seqs 의 제품을 가져와 제품 지식(조각 1개)과 제품 이미지 자산으로 등록한다(제품당 임베딩 1회). 제품별 성공·문제를 돌려준다."""
+    brand = db.get(Brand, body.brand_id)
+    if not brand:
+        raise HTTPException(404, "브랜드가 없습니다")
+    if brand.name not in products_import.SITES:
+        raise HTTPException(400, f"'{brand.name}' 은 제품 가져오기를 지원하지 않습니다")
+    if not body.seqs or len(body.seqs) > 10:
+        raise HTTPException(400, "한 번에 1~10개")
+    return {"results": products_import.import_products(db, brand, body.seqs, embedder=knowledge.embed)}
+
+
+class CampaignFromProductIn(BaseModel):
+    doc_id: int
+    key_message: str = ""
+    target: str = ""
+
+
+@router.post("/products/campaign")
+def campaign_from_product(body: CampaignFromProductIn, db: Session = Depends(get_db)):
+    """제품 조각 하나로 캠페인(광고 이미지 시안)을 만든다. 상품명·설명·제품 이미지·별칭은 제품 지식에서 채우고,
+    핵심 메시지·타깃만 받는다(비워도 된다). 반환: 새 시안 id 와 브랜드 id (프론트가 캠페인 화면으로 연다)."""
+    doc = db.get(KnowledgeDoc, body.doc_id)
+    if not doc or doc.layer != "제품" or doc.brand_id is None:
+        raise HTTPException(404, "제품 지식이 아닙니다")
+    brand = db.get(Brand, doc.brand_id)
+    if not brand or not brand.current_version_id:
+        raise HTTPException(400, "브랜드를 찾을 수 없습니다")
+    ch = db.scalar(select(KnowledgeChunk).where(KnowledgeChunk.doc_id == doc.id).order_by(KnowledgeChunk.seq))
+    visual = doc.visual or {}
+    asset_id = visual.get("image_asset_id")
+    if asset_id is not None:
+        a = db.get(Asset, asset_id)
+        if not a or a.kind != "product":
+            asset_id = None
+    text = (ch.text if ch else "").replace(f"[{doc.title}] ", "")
+    description = text.split("기능성 화장품 표시 여부")[0].strip()[:1000]
+    brief = {"product_name": (ch.product_name if ch else None) or doc.title.replace(" 제품 정보", ""),
+             "description": description, "key_message": body.key_message[:200], "target": body.target[:300],
+             "product_image_asset_id": asset_id, "image_style": "자동", "product_scale": "크게", "layout": "기본",
+             "required_phrases": [], "forbidden_phrases": [], "functional": None,
+             "from_product_doc": doc.id}
+    d = Design(brand_id=brand.id, brand_version_id=brand.current_version_id, preset_version_ids=[], brief=brief, kind="광고 이미지", status="미검수")
+    db.add(d)
+    db.commit()
+    return {"design_id": d.id, "brand_id": brand.id, "product_name": brief["product_name"], "product_image_asset_id": asset_id}

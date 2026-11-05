@@ -36,6 +36,7 @@ export default function App() {
     try { id === null ? localStorage.removeItem('workBrandId') : localStorage.setItem('workBrandId', String(id)) } catch { /* 저장 실패는 무시 */ }
   }, [])
   const [groupName, setGroupName] = useState('')
+  const [openDesign, setOpenDesign] = useState<number | null>(null)   // 지식 브라우저에서 만든 캠페인을 열어 둘 id
   const [groupId, setGroupId] = useState<number | null>(null)
   useEffect(() => {
     if (group) {
@@ -61,12 +62,12 @@ export default function App() {
       </header>
       {tab === 'knowledge' && group
         ? (groupId === null ? <p className="muted" style={{ padding: 24 }}>지식을 불러오는 중…</p>
-           : <KnowledgePage groupId={groupId} onMakeCampaign={(id) => { setWorkBrandId(id); setTab('design') }} />)
+           : <KnowledgePage groupId={groupId} onOpenCampaign={(brandId, designId) => { setWorkBrandId(brandId); setOpenDesign(designId); setTab('design') }} />)
         : tab === 'brand' || tab === 'knowledge'
         ? <BrandPage key={scope} scope={scope} onGoDesign={(id) => { setWorkBrandId(id); setTab('design') }} />
         : tab === 'preset' ? <PresetLibrary />
         : tab === 'analysis' ? <AnalysisPage key={scope} scope={scope} workBrandId={workBrandId} />
-        : <DesignPage key={scope} scope={scope} workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} />}
+        : <DesignPage key={scope} scope={scope} workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} openDesignId={openDesign} onOpened={() => setOpenDesign(null)} />}
       <footer className="site-footer"><strong>브랜드 스튜디오</strong><span>브랜드 규격 기반 광고 시안 도구</span></footer>
     </>
   )

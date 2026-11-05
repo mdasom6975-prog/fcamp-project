@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type KnowledgeChunk, type KnowledgeDoc, type KnowledgeDocDetail, type KnowledgeSearch, type KnowledgeSummary } from './api'
+import { api, type KnowledgeChunk, type KnowledgeDoc, type KnowledgeDocDetail, type KnowledgeSearch, type KnowledgeSummary, type ProductImportResult, type ProductsDiscover } from './api'
 
 /* 지식 브라우저 — 아모레퍼시픽 입장의 첫 화면(2026-11 재기획, docs/wireframes 아티팩트 2·3번).
    좌: 층(규제·그룹·브랜드·제품·캠페인)과 건수 + 검색 미리보기. 가운데: 문서 목록. 우: 조각 목록(펼치면 본문과 '이 조각이 쓰인 카피').
@@ -15,7 +15,7 @@ const LAYER_HINT: Record<string, string> = {
   캠페인: '이 앱에서 만든 카피·검수 결과를 다시 지식으로(예정)',
 }
 
-export default function KnowledgePage({ groupId, onMakeCampaign }: { groupId: number | null; onMakeCampaign?: (brandId: number, productName: string) => void }) {
+export default function KnowledgePage({ groupId, onOpenCampaign }: { groupId: number | null; onOpenCampaign?: (brandId: number, designId: number) => void }) {
   const [summary, setSummary] = useState<KnowledgeSummary | null>(null)
   const [layer, setLayer] = useState<string>('규제')
   const [brandId, setBrandId] = useState<number | null>(null)
@@ -26,10 +26,13 @@ export default function KnowledgePage({ groupId, onMakeCampaign }: { groupId: nu
   const [err, setErr] = useState('')
 
   useEffect(() => { api.knowledgeSummary(groupId).then(setSummary).catch((e) => setErr(e.message)) }, [groupId])
-  useEffect(() => {
-    setDocId(null); setDetail(null); setOpen(null)
-    api.knowledgeDocs(layer, groupId, BRAND_LAYERS.has(layer) ? brandId : null).then((d) => { setDocs(d); if (d.length) setDocId(d[0].id) }).catch((e) => setErr(e.message))
+  const reload = useCallback((keep?: number | null) => {
+    api.knowledgeDocs(layer, groupId, BRAND_LAYERS.has(layer) ? brandId : null)
+      .then((d) => { setDocs(d); setDocId(keep != null && d.some((x) => x.id === keep) ? keep : (d[0]?.id ?? null)) })
+      .catch((e) => setErr(e.message))
+    api.knowledgeSummary(groupId).then(setSummary).catch(() => undefined)
   }, [layer, brandId, groupId])
+  useEffect(() => { setDocId(null); setDetail(null); setOpen(null); reload() }, [reload])
   useEffect(() => {
     if (docId === null) return
     api.knowledgeChunks(docId, groupId).then((d) => { setDetail(d); setOpen(d.chunks.find((c) => c.used.length)?.id ?? d.chunks[0]?.id ?? null) }).catch((e) => setErr(e.message))
@@ -64,7 +67,8 @@ export default function KnowledgePage({ groupId, onMakeCampaign }: { groupId: nu
             <span className="muted">브랜드</span>
             <button className={brandId === null ? 'on' : ''} onClick={() => setBrandId(null)}>전체 {docs.length && brandId === null ? docs.length : ''}</button>
             {brands.map((b) => <button key={b.id} className={brandId === b.id ? 'on' : ''} onClick={() => setBrandId(b.id)}>{b.name}</button>)}
-            {layer === '제품' && <span className="muted kb-note">제품 등록은 brands/*/sources.json + 수동 요약 (화면 등록은 후순위)</span>}
+            {layer === '제품' && brandId !== null && <ImportPanel brandId={brandId} brandName={brands.find((b) => b.id === brandId)?.name ?? ''} onDone={(firstDoc) => reload(firstDoc)} />}
+            {layer === '제품' && brandId === null && <span className="muted kb-note">브랜드를 고르면 공식 사이트에서 제품을 가져올 수 있습니다</span>}
           </div>
         )}
         <div className="kb-cols">
@@ -91,6 +95,17 @@ export default function KnowledgePage({ groupId, onMakeCampaign }: { groupId: nu
                     {detail.doc.source_url ? <> · <a href={detail.doc.source_url} target="_blank" rel="noreferrer">출처</a></> : null}
                   </span>
                 </header>
+                {detail.doc.image_asset_id && (
+                  <div className="kb-product">
+                    <img src={`/api/assets/${detail.doc.image_asset_id}/file`} alt={`${detail.doc.title} 제품 사진`} />
+                    <div className="entry-chips">
+                      {detail.doc.line && <em>{detail.doc.line}</em>}
+                      {detail.doc.quantity && <em>{detail.doc.quantity}</em>}
+                      {detail.doc.price != null && <em>{detail.doc.price.toLocaleString()}원</em>}
+                      <em>공식 사이트에서 가져옴</em>
+                    </div>
+                  </div>
+                )}
                 {(detail.doc.motifs || detail.doc.directions.length > 0) && (
                   <p className="kb-visual muted">시각 소재: {detail.doc.motifs || '—'}{detail.doc.directions.length ? ` · 연출: ${detail.doc.directions.join(' / ')}` : ''}</p>
                 )}
@@ -122,16 +137,8 @@ export default function KnowledgePage({ groupId, onMakeCampaign }: { groupId: nu
                             </div>
                           ))}
                         {layer === '제품' && c.product_name && (
-                          <div className="kb-cta">
-                            <div>
-                              <strong>이 제품으로 시안 만들기</strong>
-                              <span className="muted">제품명·별칭·기능성이 브리프에 자동으로 들어가고 캠페인 화면으로 넘어갑니다 (후순위)</span>
-                            </div>
-                            <button disabled={!onMakeCampaign || !detail.doc} onClick={() => {
-                              const d = docs.find((x) => x.id === detail.doc.id)
-                              if (onMakeCampaign && d?.brand_id) onMakeCampaign(d.brand_id, c.product_name!)
-                            }}>캠페인 만들기 →</button>
-                          </div>
+                          <CampaignCta docId={detail.doc.id} brandId={detail.doc.brand_id ?? docs.find((x) => x.id === detail.doc.id)?.brand_id ?? null}
+                            hasImage={!!detail.doc.image_asset_id} onOpen={onOpenCampaign} />
                         )}
                       </div>
                     )}
@@ -187,6 +194,85 @@ function SearchProbe({ groupId, brands, onPick }: { groupId: number | null; bran
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+
+function ImportPanel({ brandId, brandName, onDone }: { brandId: number; brandName: string; onDone: (firstDoc?: number | null) => void }) {
+  /* 제품 가져오기: 목록 발견(과금 없음) → 아직 없는 제품을 4개씩 가져오기(제품당 임베딩 1회) → 진행·문제 표시. 사용자 입력은 버튼 두 번. */
+  const [open, setOpen] = useState(false)
+  const [disc, setDisc] = useState<ProductsDiscover | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<ProductImportResult[]>([])
+  const [err, setErr] = useState('')
+  const discover = () => { setBusy(true); setErr(''); api.productsDiscover(brandId).then(setDisc).catch((e) => setErr(e.message)).finally(() => setBusy(false)) }
+  const importAll = async () => {
+    if (!disc) return
+    const todo = disc.products.filter((p) => !p.doc_id).map((p) => p.seq)
+    setBusy(true); setErr(''); setDone([])
+    const acc: ProductImportResult[] = []
+    try {
+      for (let i = 0; i < todo.length; i += 4) {
+        const r = await api.productsImport(brandId, todo.slice(i, i + 4))
+        acc.push(...r.results); setDone([...acc])
+      }
+      const first = acc.find((r) => r.ok)?.doc_id ?? null
+      onDone(first)
+      setDisc(await api.productsDiscover(brandId))
+    } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  const missing = disc ? disc.products.filter((p) => !p.doc_id).length : 0
+  return (
+    <div className="kb-import">
+      <button className={open ? 'on' : ''} onClick={() => { setOpen(!open); if (!open && !disc) discover() }}>제품 가져오기</button>
+      {open && (
+        <div className="kb-import-panel">
+          {busy && !disc && <span className="muted">공식 사이트 목록을 읽는 중…</span>}
+          {err && <p className="error">{err}</p>}
+          {disc && !disc.supported && <span className="muted">{brandName} 은 아직 사이트 규칙이 없습니다 (products_import.SITES)</span>}
+          {disc && disc.supported && (
+            <>
+              <span>{brandName} 공식 사이트 제품 {disc.products.length}개 · 이미 가져온 것 {disc.products.length - missing} · 새로 {missing}</span>
+              <button className="dark" disabled={busy || missing === 0} onClick={importAll}>{busy ? `가져오는 중… ${done.length}/${missing}` : missing ? `새 제품 ${missing}개 가져오기` : '모두 가져왔습니다'}</button>
+              {done.length > 0 && (
+                <ul className="kb-import-log">
+                  {done.map((r) => <li key={r.seq} className={r.ok ? 'ok' : 'bad'}>{r.ok ? '완료' : '실패'} · {r.name || r.seq}{r.problems.length ? ` — ${r.problems.join(', ')}` : ''}</li>)}
+                </ul>
+              )}
+              <span className="muted">이미지는 제품 사진 큰 판을 받아 1024px WEBP 로 저장합니다. 기능성 표시 여부는 사이트에 없어 비워 둡니다.</span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CampaignCta({ docId, brandId, hasImage, onOpen }: { docId: number; brandId: number | null; hasImage: boolean; onOpen?: (brandId: number, designId: number) => void }) {
+  /* 이 제품으로 시안 만들기: 상품명·설명·제품 이미지는 제품 지식에서, 핵심 메시지·타깃만 받는다(비워도 된다). */
+  const [key, setKey] = useState('')
+  const [target, setTarget] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const go = () => {
+    setBusy(true); setErr('')
+    api.campaignFromProduct(docId, key.trim(), target.trim())
+      .then((r) => { if (onOpen) onOpen(r.brand_id, r.design_id) })
+      .catch((e) => setErr(e.message)).finally(() => setBusy(false))
+  }
+  return (
+    <div className="kb-cta">
+      <div>
+        <strong>이 제품으로 시안 만들기</strong>
+        <span className="muted">상품명·설명{hasImage ? '·제품 이미지' : ''}는 자동으로 채워집니다. 핵심 메시지와 타깃은 비워도 됩니다</span>
+        <div className="kb-cta-fields">
+          <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="핵심 메시지 (선택)" maxLength={200} aria-label="핵심 메시지" />
+          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="타깃 (선택)" maxLength={300} aria-label="타깃" />
+        </div>
+        {err && <p className="error">{err}</p>}
+      </div>
+      <button className="primary" disabled={busy || brandId === null || !onOpen} onClick={go}>{busy ? '만드는 중…' : '캠페인 만들기 →'}</button>
     </div>
   )
 }

@@ -87,7 +87,19 @@ export const api = {
     fetch(`/api/knowledge/docs/${docId}/chunks${groupId ? `?group_id=${groupId}` : ''}`).then((r) => j<{ doc: KnowledgeDocDetail; chunks: KnowledgeChunk[] }>(r)),
   knowledgeSearch: (body: { group_id: number | null; brand_id: number | null; product_name: string; description: string; key_message: string; target: string }) =>
     fetch('/api/knowledge/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => j<KnowledgeSearch>(r)),
+  // 제품 가져오기(공식 사이트 → 제품 지식 + 제품 이미지). discover 는 과금 없음, import 는 제품당 임베딩 1회
+  productsDiscover: (brandId: number) =>
+    fetch(`/api/knowledge/products/discover?brand_id=${brandId}`).then((r) => j<ProductsDiscover>(r)),
+  productsImport: (brandId: number, seqs: string[]) =>
+    fetch('/api/knowledge/products/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brand_id: brandId, seqs }) })
+      .then((r) => j<{ results: ProductImportResult[] }>(r)),
+  campaignFromProduct: (docId: number, keyMessage: string, target: string) =>
+    fetch('/api/knowledge/products/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_id: docId, key_message: keyMessage, target }) })
+      .then((r) => j<{ design_id: number; brand_id: number; product_name: string; product_image_asset_id: number | null }>(r)),
 }
+
+export type ProductsDiscover = { supported: boolean; brand: string; list_url?: string; products: { seq: string; name: string; line: string; price: number | null; doc_id: number | null }[] }
+export type ProductImportResult = { seq: string; name: string; ok: boolean; doc_id?: number; asset_id?: number | null; problems: string[] }
 
 export type KnowledgeSummary = {
   group: { id: number; name: string } | null
@@ -102,6 +114,7 @@ export type KnowledgeDoc = {
 export type KnowledgeDocDetail = {
   id: number; title: string; layer: string; source_id: string; source_url: string; fetched_at: string; industry: string | null; status: string
   created_at: string | null; motifs: string | null; directions: string[]
+  image_asset_id?: number | null; price?: number | null; quantity?: string | null; line?: string | null; brand_id?: number | null
 }
 export type KnowledgeUse = {
   design_id: number; brand: string; product_name: string; status: string; created_at: string | null

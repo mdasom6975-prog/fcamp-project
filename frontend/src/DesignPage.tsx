@@ -1274,8 +1274,9 @@ function LayoutPicker({ value, options, onChange }: { value: string; options: La
   )
 }
 
-export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand }: {
+export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand, openDesignId, onOpened }: {
   scope: BrandScope; workBrandId: number | null; onWorkBrand: (id: number | null) => void; onGoBrand?: () => void
+  openDesignId?: number | null; onOpened?: () => void      // 지식 브라우저 '이 제품으로 시안 만들기' 가 만든 캠페인을 바로 연다
 }) {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [platforms, setPlatforms] = useState<PlatformLite[]>([])
@@ -1331,7 +1332,13 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand 
     fetch('/api/presets').then((r) => r.json()).then(setPlatforms)
   }, [loadBrands, workBrandId, onWorkBrand])
 
-  useEffect(() => { setActiveId(null); setEditing(false); setBrandPanel(false); loadDesigns() }, [loadDesigns])
+  useEffect(() => {
+    setActiveId(null); setEditing(false); setBrandPanel(false)
+    loadDesigns().then((l) => {
+      const d = openDesignId != null ? l.find((x) => x.id === openDesignId) : null
+      if (d) { openCampaign(d); onOpened?.() }
+    })
+  }, [loadDesigns])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = designs.find((d) => d.id === activeId) ?? null
   // 이 시안의 생성 작업을 기다리는 동안 덮개에 브랜드 퀴즈를 띄운다(덮개를 띄울 때마다 새로 받음, 비용 없음)
