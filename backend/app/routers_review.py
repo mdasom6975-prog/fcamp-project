@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import imagegen, legal, phrases, review
+from . import copyfix, imagegen, legal, phrases, review
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, Element, GeneratedImage, IconAsset,
                      PresetVersion, ReviewResult)
 from .routers_assets import get_db, latest_image
@@ -120,6 +120,8 @@ def _collect(db: Session, d: Design) -> dict:
                            "summary": _summary(items), "export_ready": bool(items) and not bl})
     reviewed = bool(rows)
     return {"reviewed": reviewed, "stale": not reviewed, "groups": out_groups, "blockers": blockers,
+            "fix_enabled": copyfix.ENABLED, "fix_max": copyfix.MAX_ROUNDS,      # 6단계 "고쳐 보기" (copyfix)
+            "fix_rounds": {str(k): len(v) for k, v in ((d.brief or {}).get("fix_rounds") or {}).items()},
             "export_ready": reviewed and all(g["export_ready"] for g in out_groups)}
 
 

@@ -24,7 +24,7 @@ class ChatRefused(RuntimeError):
 
 # 종류별 기본 모델: 짧은 구조화 생성은 Haiku(Sonnet 과 같은 시험 통과율, 비용 약 1/8 — CHANGELOG 참조). judge 등 나머지는 CLAUDE_MODEL
 # copy 는 글의 품질이 결과물이라 Sonnet(시험 통과율은 같아도 근거를 살린 문장은 작은 모델로는 부족했다). 아이콘 후보·추가 문구는 copy_extras
-KIND_DEFAULTS = {"copy": "claude-sonnet-5-5", "copy_fit": "claude-haiku-5-5", "copy_extras": "claude-haiku-5-5",
+KIND_DEFAULTS = {"copy": "claude-sonnet-5-5", "copy_fit": "claude-haiku-5-5", "copy_fix": "claude-haiku-5-5", "copy_extras": "claude-haiku-5-5",
                  "icon_names": "claude-haiku-5-5"}
 
 

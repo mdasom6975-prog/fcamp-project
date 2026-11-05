@@ -8,12 +8,12 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import calllog, compose, copywriter, editing, phrases, storage
+from . import calllog, compose, copyfix, copywriter, editing, phrases, storage
 from .models import (Asset, Brand, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      GeneratedImage, PresetVersion, ReviewResult)
 from .routers_assets import FONT_DIR, PROVIDED_FONTS, get_db, get_design, latest_image
 from .routers_copy import select_variant
-from .routers_review import ensure_unlocked
+from .routers_review import _brand_dict, ensure_unlocked, gather, invalidate_reviews, run_review
 from .routers_images import (_color, _edit_saved, _img_out, compose_preset, create_shared_background, make_image,
                              prewarm_thumbs)
 
@@ -537,3 +537,76 @@ def apply_variant(design_id: int, variant_no: int = Body(..., embed=True), overw
             skipped.append({"preset_id": pid, "name": name, "reason": str(e.detail)})
     db.commit()
     return {"variant_no": variant_no, "recomposed": recomposed, "kept_custom": kept_custom, "skipped": skipped}
+
+
+# ---------- 6단계 "고쳐 보기" ----------
+@router.post("/designs/{design_id}/presets/{preset_id}/copy/fix")
+def fix_copy_violations(design_id: int, preset_id: int, db: Session = Depends(get_db)):
+    """검수가 차단한 법적·기능성·브랜드 금지 표현이 든 필드만 모델(채팅 1회)에 고치게 하고, 코드로 다시 검사해 차단 수가 줄었을 때만
+    받아들인다(copyfix). 제목은 편집 요소에 써서 다시 합성, 본문·CTA 는 선택 카피에. 그 지면의 검수를 무효화하고 검수를 바로 다시 실행해 돌려준다.
+    최대 copyfix.MAX_ROUNDS 회, 회차는 brief["fix_rounds"][preset_id] 에 남는다. COPY_AGENT=0 이면 503."""
+    if not copyfix.ENABLED:
+        raise HTTPException(503, "고쳐 보기가 꺼져 있습니다 (COPY_AGENT=0)")
+    d = get_design(db, design_id, ad_only=True)
+    ensure_unlocked(d)
+    if preset_id not in d.preset_version_ids:
+        raise HTTPException(404, "이 시안에 포함된 규격이 아닙니다")
+    pv = db.get(PresetVersion, preset_id)
+    rounds_all = dict((d.brief or {}).get("fix_rounds") or {})
+    rounds = list(rounds_all.get(str(preset_id)) or [])
+    if len(rounds) >= copyfix.MAX_ROUNDS:
+        raise HTTPException(400, f"못 고침: 고쳐 보기를 {copyfix.MAX_ROUNDS}회 모두 썼습니다 ({len(rounds)}/{copyfix.MAX_ROUNDS}). 직접 편집해 주세요")
+    bv = db.get(BrandVersion, d.brand_version_id)
+    cur = db.get(Brand, d.brand_id)
+    brand = _brand_dict(bv, cur.name if cur else "", d.brief)
+    g = gather(db, d, pv, brand)
+    sel, texts = g["sel"], g["texts"]
+    if sel is None:
+        raise HTTPException(400, "이 지면에 선택된 카피가 없습니다")
+    if not copyfix.blocking_violations(texts, brand):
+        raise HTTPException(400, "이 지면에 고칠 차단 위반(법적·기능성·금지 표현)이 없습니다")
+    r = copyfix.attempt(cur.name if cur else "", brand, pv.placement.platform.name, pv.placement.name, texts, len(rounds) + 1)
+    changed = [s for s in r["fields"] if r["texts"].get(s) != texts.get(s)] if r["adopted"] else []
+    if r["adopted"]:
+        new = r["texts"]
+        if "headline" in changed:
+            try:        # 합성본이 있으면 편집 요소(없으면 기본 요소를 만들어)에 쓴다 — 검수가 보는 제목이 그것이다
+                rows = _els(db, d.id, preset_id) or _bootstrap(db, d, preset_id, bv)
+            except HTTPException:
+                rows = []
+            t = next((x for x in rows if x.type == "text"), None)
+            if t is not None and not t.locked:         # 편집 요소가 있으면 거기(검수가 보는 제목)에 쓰고 다시 합성
+                t.props = {**t.props, "text": new["headline"]}
+                _save_render(db, d, pv, rows, _bg_row(db, d.id, preset_id), latest_image(db, d.id, preset_id, "composite"))
+            else:
+                sel.headline = new["headline"]
+        if "body" in changed:
+            if sel.long_body:
+                sel.long_body = new["body"]
+            else:
+                sel.body = new["body"]
+        if "cta" in changed:
+            sel.cta = new["cta"]
+        rules = phrases.rules(bv, d.brief)
+        sel.violations = copywriter.check({"headline": sel.headline, "body": sel.body, "cta": sel.cta, "long_body": sel.long_body},
+                                          copywriter.limits_for(pv.text_limits or []), rules)
+        invalidate_reviews(db, d.id, preset_id)
+    rounds.append({"round": len(rounds) + 1, "adopted": r["adopted"], "fields": changed,
+                   "before": {k: texts.get(k) for k in copyfix.SLOTS}, "after": {k: r["texts"].get(k) for k in copyfix.SLOTS},
+                   "candidate": {k: r["candidate"].get(k) for k in copyfix.SLOTS},
+                   "blocking_before": r["blocking_before"], "blocking_after": r["blocking_after"],
+                   "phrases": [v["phrase"] for v in r["before"]], "model": r["model"], "error": r["error"]})
+    rounds_all[str(preset_id)] = rounds
+    d.brief = {**(d.brief or {}), "fix_rounds": rounds_all}
+    db.commit()
+    rv = run_review(d.id, db)       # 검수는 모델 없이 코드만 — 바로 다시 돌려 새 결과를 보여 준다
+    left = copyfix.MAX_ROUNDS - len(rounds)
+    if r["adopted"]:
+        note = (f"{', '.join(changed)} 을(를) 고쳤습니다: 차단 {r['blocking_before']} → {r['blocking_after']} ({len(rounds)}/{copyfix.MAX_ROUNDS}회)"
+                + ("" if r["blocking_after"] == 0 else f". 남은 차단 {r['blocking_after']}건" + (" — 다시 누를 수 있습니다" if left else "")))
+    else:
+        why = "모델 호출 실패" if r["error"] else "고쳐도 차단이 줄지 않아" if r["candidate"] != texts else "모델이 문구를 바꾸지 않아"
+        note = f"고치지 못했습니다 ({why}, 이전 문구 유지) · {len(rounds)}/{copyfix.MAX_ROUNDS}회" + ("" if left else " — 더는 시도할 수 없습니다. 직접 편집해 주세요")
+    return {"preset_id": preset_id, "round": len(rounds), "max": copyfix.MAX_ROUNDS, "adopted": r["adopted"], "changed": changed,
+            "blocking_before": r["blocking_before"], "blocking_after": r["blocking_after"], "texts": r["texts"],
+            "model": r["model"], "note": note, "review": rv}

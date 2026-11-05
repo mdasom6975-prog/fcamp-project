@@ -14,6 +14,7 @@ type Exp = {
 type Review = {
   reviewed: boolean; stale: boolean; groups: Group[]; export_ready: boolean
   blockers: { preset: string | null; item: string; status: string; message: string }[]
+  fix_enabled?: boolean; fix_max?: number; fix_rounds?: Record<string, number>   // 6단계 "고쳐 보기"(copyfix): 켜짐 여부·최대 회차·지면별 쓴 회차
 }
 
 const cls = (s: string) => (s === '통과' ? 'b-ok' : s === '경고' ? 'b-warn' : 'b-need')
@@ -55,6 +56,20 @@ export default function ReviewPanel({ designId }: { designId: number }) {
       await load()
     } catch (e) { setFitMsg((e as Error).message) } finally { setFitting(null) }
   }
+  // 6단계 "고쳐 보기": 차단된 법적·기능성·금지 표현이 든 필드만 Claude 1회로 고치고 코드로 재검사, 줄었을 때만 채택. 검수는 서버가 바로 다시 돌린다
+  const [fixing, setFixing] = useState<number | null>(null)
+  const [fixMsg, setFixMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const fix = async (presetId: number) => {
+    setFixing(presetId); setFixMsg(null)
+    try {
+      const j = await call('POST', `/api/designs/${designId}/presets/${presetId}/copy/fix`)
+      setFixMsg({ ok: !!j.adopted, text: j.note })
+      setRv(j.review); setOpen(true)
+      await loadImgs()
+    } catch (e) { setFixMsg({ ok: false, text: (e as Error).message }) } finally { setFixing(null) }
+  }
+  const fixable = (g: Group) => g.preset_id !== null && g.items.some((i) => i.blocking && (i.category === '법적' || (i.category === '브랜드' && i.item === '금지 표현')))
+  const fixUsed = (pid: number) => rv?.fix_rounds?.[String(pid)] ?? 0
   const loadExps = useCallback(() => call('GET', `/api/designs/${designId}/exports`).then(setExps).catch(() => undefined), [designId])
   const loadImgs = useCallback(() => Promise.all([
     call('GET', `/api/designs/${designId}`).then((d: { presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[] }) =>
@@ -119,6 +134,7 @@ export default function ReviewPanel({ designId }: { designId: number }) {
         )}
         {rv && !rv.reviewed && <span className="muted">검수 결과가 없습니다. 시안이 바뀌면 다시 검수해야 합니다.</span>}
         {fitMsg && <span className="notice ok">{fitMsg}</span>}
+        {fixMsg && <span className={`notice ${fixMsg.ok ? 'ok' : 'err'}`}>{fixMsg.text}</span>}
         <span className="muted">실제로 내려받을 파일(인코딩 결과)과 편집 원본을 기준으로 검사합니다. 광고 심사 통과를 보장하지 않습니다.</span>
       </div>
       {err && <div className="notice err">{err}</div>}
@@ -143,6 +159,17 @@ export default function ReviewPanel({ designId }: { designId: number }) {
             {(['수정 필요', '확인 필요', '경고', '통과'] as const).map((k) => g.summary[k] ? (
               <span key={k} className={`badge ${cls(k)}`} style={{ marginRight: 4 }}>{k} {g.summary[k]}</span>
             ) : null)}
+            {g.preset_id !== null && fixUsed(g.preset_id) > 0 && (
+              <span className="badge b-warn" style={{ marginRight: 4 }}>고쳐 보기 {fixUsed(g.preset_id)}/{rv?.fix_max ?? 3}회</span>
+            )}
+            {rv?.fix_enabled && fixable(g) && (
+              <button type="button" className="fix-btn" disabled={fixing !== null || busy || fixUsed(g.preset_id as number) >= (rv.fix_max ?? 3)}
+                onClick={() => fix(g.preset_id as number)}
+                title="차단된 법적·기능성·금지 표현이 든 필드만 근거 조문·수정 제안을 붙여 고쳐 쓰게 하고, 코드로 다시 검사해 차단이 줄었을 때만 받아들입니다">
+                {fixing === g.preset_id ? '고치는 중…' : fixUsed(g.preset_id as number) >= (rv.fix_max ?? 3)
+                  ? '못 고침 — 직접 편집' : `고쳐 보기 (${fixUsed(g.preset_id as number) + 1}/${rv.fix_max ?? 3}회 · 채팅 1회)`}
+              </button>
+            )}
           </h4>
           {g.items.length === 0 && <p className="muted">이 지면은 아직 검수 결과가 없습니다 (수정 후 무효화됨). 다시 검수해 주세요.</p>}
           <table className="rtable">
