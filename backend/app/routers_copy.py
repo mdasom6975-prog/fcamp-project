@@ -47,7 +47,7 @@ def _group(design: Design, db: Session) -> list[dict]:
 def _knowledge(d: Design, db: Session) -> dict:
     """카피 프롬프트에 붙일 규제 원문·브랜드 지식(knowledge.for_copy). 브랜드의 그룹으로 그룹 공통 자료를 찾는다."""
     brand = db.get(Brand, d.brand_id)
-    return knowledge.for_copy(db, d.brand_id, brand.group_id if brand else None, d.brief or {})
+    return knowledge.for_copy(db, d.brand_id, brand.group_id if brand else None, d.brief or {}, embedder=knowledge.embed)   # 호출 시점의 embed(테스트는 가짜로 바꾼다)
 
 
 def _knowledge_summary(k: dict) -> dict:

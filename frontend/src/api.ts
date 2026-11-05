@@ -93,6 +93,13 @@ export const api = {
   productsImport: (brandId: number, seqs: string[]) =>
     fetch('/api/knowledge/products/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brand_id: brandId, seqs }) })
       .then((r) => j<{ results: ProductImportResult[] }>(r)),
+  // 제품에서 시작: preview 는 제안(Haiku 1회) + 기본 지면, quickstart 는 캠페인 생성 + 카피 1회 + 1안 선택
+  quickstartPreview: (docId: number) =>
+    fetch('/api/knowledge/products/quickstart/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_id: docId }) })
+      .then((r) => j<QuickstartPreview>(r)),
+  quickstart: (body: { doc_id: number; key_message: string; target: string; preset_version_ids: number[] }) =>
+    fetch('/api/knowledge/products/quickstart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then((r) => j<{ design_id: number; brand_id: number; product_name: string; has_copy: boolean; selected_variant: number | null; copy_failures: string[] }>(r)),
   campaignFromProduct: (docId: number, keyMessage: string, target: string) =>
     fetch('/api/knowledge/products/campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc_id: docId, key_message: keyMessage, target }) })
       .then((r) => j<{ design_id: number; brand_id: number; product_name: string; product_image_asset_id: number | null }>(r)),
@@ -110,6 +117,12 @@ export type KnowledgeSummary = {
 export type KnowledgeDoc = {
   id: number; source_id: string; title: string; layer: string; brand_id: number | null; brand: string | null; industry: string | null
   status: string; source_url: string; fetched_at: string; created_at: string | null; chunks: number; archived: number; used_designs: number
+  image_asset_id?: number | null; line?: string | null; quantity?: string | null     // 제품 층: 브랜드 탭 "제품에서 시작" 카드
+}
+export type QuickstartPreview = {
+  doc_id: number; brand_id: number; brand_name: string; product_name: string; description: string; product_image_asset_id: number | null
+  key_message: string; target: string; suggested: boolean; suggest_error: string | null; suggest_model: string
+  presets: { id: number; platform: string; name: string; width: number | null; height: number | null }[]; presets_source: string
 }
 export type KnowledgeDocDetail = {
   id: number; title: string; layer: string; source_id: string; source_url: string; fetched_at: string; industry: string | null; status: string

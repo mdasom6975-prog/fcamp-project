@@ -73,7 +73,8 @@ const orderPreview = (designId: number, presetId?: number): Promise<Order | null
   fetch(`/api/designs/${designId}/background/prompt-preview${presetId != null ? `?preset_id=${presetId}` : ''}`)
     .then((r) => (r.ok ? r.json() : null)).catch(() => null)
 
-function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages }: {
+function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSettings, textAssets, assetFields, inImage: inImageProp, view, onDesignChange, onEdit, onReview, onGoImages, autoImages, onAutoDone }: {
+  autoImages?: boolean; onAutoDone?: () => void    // "제품에서 시작": 카피가 있고 합성본이 없으면 열자마자 모든 지면 이미지 생성을 한 번 돌린다
   designId: number; brandName: string; versionNo: number | null; imageStyle: string
   locked: boolean    // 검수 완료된 캠페인: 이미지 재생성·생성 설정 변경 불가
   inImage: Record<number, InImage | undefined>    // 지면별 '이미지 안 문구' 설정(서버가 계산한 현재값·기본 여부)
@@ -110,6 +111,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [imgs, setImgs] = useState<Record<number, ImgRow>>({})
+  const [imgsLoaded, setImgsLoaded] = useState(false)
   const [imgBusy, setImgBusy] = useState<number | null>(null)
   const [usage, setUsage] = useState<ImgUsage | null>(null)
   const [imgTab, setImgTab] = useState<number | null>(null)
@@ -125,7 +127,7 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
 
   const loadImgs = useCallback(() =>
     getJson<ImgRow[]>(`/api/designs/${designId}/images`).then((rows) => {
-      if (Array.isArray(rows)) setImgs(Object.fromEntries(rows.map((x) => [x.preset_id, x])))
+      if (Array.isArray(rows)) { setImgs(Object.fromEntries(rows.map((x) => [x.preset_id, x]))); setImgsLoaded(true) }
     }), [designId])
 
   const loadUsage = useCallback(() =>
@@ -287,6 +289,17 @@ function CopyPanel({ designId, brandName, versionNo, locked, imageStyle, genSett
 
   const lim = (l: Limit) => (l ? `${l.field} ${l.min != null ? `${l.min}~` : ''}${l.max ?? ''}자` : '제한 정보 없음')
   const withCopy = groups.filter((g) => g.variants.length > 0)
+  // "제품에서 시작"으로 열린 캠페인: 카피(1안 선택됨)는 있고 합성본은 없으니 ④ 로 넘어가 모든 지면 이미지 생성을 한 번만 자동으로 돌린다
+  const autoRan = useRef(false)
+  useEffect(() => {
+    if (!autoImages || autoRan.current || !imgsLoaded || withCopy.length === 0) return
+    autoRan.current = true
+    onAutoDone?.()
+    const made = withCopy.filter((x) => imgs[x.preset_id]?.composite).length
+    const first = withCopy.find((x) => x.content_kind !== '완성형' || x.variants.some((v) => v.selected))?.preset_id ?? null
+    if (made === 0 && first !== null && !locked) { onGoImages(); makeImage(first, false) }
+  }, [autoImages, imgsLoaded, withCopy])  // eslint-disable-line react-hooks/exhaustive-deps
+
   const has = withCopy.length > 0
   const preview = withCopy[0]
   const count = preview ? preview.variants.length : 0
@@ -1276,9 +1289,10 @@ function LayoutPicker({ value, options, onChange }: { value: string; options: La
   )
 }
 
-export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand, openDesignId, onOpened }: {
+export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand, openDesignId, onOpened, autoImages, onAutoDone }: {
   scope: BrandScope; workBrandId: number | null; onWorkBrand: (id: number | null) => void; onGoBrand?: () => void
-  openDesignId?: number | null; onOpened?: () => void      // 지식 브라우저 '이 제품으로 시안 만들기' 가 만든 캠페인을 바로 연다
+  openDesignId?: number | null; onOpened?: () => void      // 브랜드 탭 "제품에서 시작"이 만든 캠페인을 바로 연다
+  autoImages?: boolean; onAutoDone?: () => void            // 열자마자 ④ 모든 지면 이미지 생성을 이어서(카피는 이미 있음)
 }) {
   const [brands, setBrands] = useState<BrandLite[]>([])
   const [platforms, setPlatforms] = useState<PlatformLite[]>([])
@@ -1307,6 +1321,10 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand,
   const [view, setView] = useState<View>('master')
   const [wsTick, setWsTick] = useState(0)        // 레일·메뉴 상태 다시 불러오기
   const goView = (v: View) => { setView(v); setScreen(v === 'edit' ? 'edit' : v === 'review' ? 'review' : 'design'); window.scrollTo(0, 0) }
+  // "제품에서 시작"으로 열린 캠페인: 카피 패널은 ④ 이미지 화면에서만 마운트되므로 카피가 확인되면 거기로 넘긴다(그 패널이 이미지 생성을 자동으로 돌린다)
+  useEffect(() => {
+    if (autoImages && activeId !== null && hasCopy === true && view !== 'images') goView('images')
+  }, [autoImages, activeId, hasCopy])  // eslint-disable-line react-hooks/exhaustive-deps
   const goEdit = (presetId: number | null = null) => { setEditPreset(presetId); goView('edit') }
   const goScreen = (s: Screen) => goView(s === 'edit' ? 'edit' : s === 'review' ? 'review' : 'copy')
   const [platTab, setPlatTab] = useState<string | null>(null)
@@ -1898,7 +1916,8 @@ export default function DesignPage({ scope, workBrandId, onWorkBrand, onGoBrand,
                 textAssets={d.brief.text_assets} assetFields={d.text_asset_fields} view={view as PanelView}
                 inImage={inImageMap}
                 onDesignChange={() => { loadDesigns(); setWsTick((t) => t + 1) }}
-                onEdit={goEdit} onReview={() => goView('review')} onGoImages={() => goView('images')} />
+                onEdit={goEdit} onReview={() => goView('review')} onGoImages={() => goView('images')}
+                autoImages={autoImages} onAutoDone={onAutoDone} />
             </section>
           ) : setupSteps
           return (

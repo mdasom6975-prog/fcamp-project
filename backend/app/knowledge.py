@@ -432,8 +432,9 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
         try:
             layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {})}
             skip = (lambda ch: _test_result(ch) or ch.doc_id in core_docs) if core_docs else _test_result
-            res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=layer_k,
-                         product_name=brief.get("product_name"), embedder=embedder, skip=skip, industries=industries or None)
+            with db.begin_nested():     # SQL 이 실패해도(차원 불일치 등) 트랜잭션이 깨지지 않게 SAVEPOINT 안에서 검색한다
+                res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=layer_k,
+                             product_name=brief.get("product_name"), embedder=embedder, skip=skip, industries=industries or None)
             if law_search:
                 out["law"] = core + res.get("규제", [])
             products = res.get("제품", [])

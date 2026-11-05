@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, inScope, ITEM_LABELS, type BrandForm, type BrandScope, type ColorRow, type FontRow, type Level, LOGO_POSITIONS, type LogoPosition, type KnowledgeSummary } from './api'
 import ColorPicker from './ColorPicker'
+import ProductStart from './ProductStart'
 
 const LEVELS: Level[] = ['필수', '권장']
 
@@ -88,7 +89,10 @@ export function PhraseBox({ label, hint, tone, items, onChange }:
   )
 }
 
-export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; onGoDesign?: (brandId: number) => void }) {
+export default function BrandPage({ scope, onGoDesign, onStartDesign }: {
+  scope: BrandScope; onGoDesign?: (brandId: number) => void
+  onStartDesign?: (designId: number, brandId: number, withImages: boolean) => void   // "제품에서 시작"이 만든 캠페인을 시안 탭에서 연다
+}) {
   const [defaults, setDefaults] = useState<{ levels: Record<string, Level>; color_roles: string[] } | null>(null)
   const [provided, setProvided] = useState<{ name: string; label: string }[]>([])
   const [brands, setBrands] = useState<{ id: number; name: string; group_id: number | null; group_name: string | null }[]>([])
@@ -289,6 +293,11 @@ export default function BrandPage({ scope, onGoDesign }: { scope: BrandScope; on
           )}
         </div>
       ))}
+
+      {scope === 'group' && onStartDesign && selected !== null && brands.find((b) => b.id === selected)?.group_id != null && (
+        <ProductStart brandId={selected} brandName={brands.find((b) => b.id === selected)?.name ?? ''}
+          groupId={brands.find((b) => b.id === selected)?.group_id ?? null} onStart={onStartDesign} />
+      )}
 
       <div className="bp-tabs">
         <h1>{selected ? '브랜드 수정' : '브랜드 등록'}</h1>

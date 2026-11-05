@@ -36,7 +36,8 @@ export default function App() {
     try { id === null ? localStorage.removeItem('workBrandId') : localStorage.setItem('workBrandId', String(id)) } catch { /* 저장 실패는 무시 */ }
   }, [])
   const [groupName, setGroupName] = useState('')
-  const [openDesign, setOpenDesign] = useState<number | null>(null)   // 지식 브라우저에서 만든 캠페인을 열어 둘 id
+  const [openDesign, setOpenDesign] = useState<number | null>(null)   // "제품에서 시작"이 만든 캠페인을 열어 둘 id
+  const [autoImages, setAutoImages] = useState(false)                  // 열자마자 ④ 이미지 생성을 이어서 돌릴지
   const [groupId, setGroupId] = useState<number | null>(null)
   useEffect(() => {
     if (group) {
@@ -64,10 +65,11 @@ export default function App() {
         ? (groupId === null ? <p className="muted" style={{ padding: 24 }}>지식을 불러오는 중…</p>
            : <KnowledgePage groupId={groupId} />)
         : tab === 'brand' || tab === 'knowledge'
-        ? <BrandPage key={scope} scope={scope} onGoDesign={(id) => { setWorkBrandId(id); setTab('design') }} />
+        ? <BrandPage key={scope} scope={scope} onGoDesign={(id) => { setWorkBrandId(id); setTab('design') }}
+            onStartDesign={(did, bid, withImages) => { setWorkBrandId(bid); setOpenDesign(did); setAutoImages(withImages); setTab('design') }} />
         : tab === 'preset' ? <PresetLibrary />
         : tab === 'analysis' ? <AnalysisPage key={scope} scope={scope} workBrandId={workBrandId} />
-        : <DesignPage key={scope} scope={scope} workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} openDesignId={openDesign} onOpened={() => setOpenDesign(null)} />}
+        : <DesignPage key={scope} scope={scope} workBrandId={workBrandId} onWorkBrand={setWorkBrandId} onGoBrand={() => setTab('brand')} openDesignId={openDesign} onOpened={() => setOpenDesign(null)} autoImages={autoImages} onAutoDone={() => setAutoImages(false)} />}
       <footer className="site-footer"><strong>브랜드 스튜디오</strong><span>브랜드 규격 기반 광고 시안 도구</span></footer>
     </>
   )

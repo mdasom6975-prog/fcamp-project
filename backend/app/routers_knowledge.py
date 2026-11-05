@@ -115,7 +115,9 @@ def docs(layer: str, group_id: int | None = None, brand_id: int | None = None, d
     return [{"id": d.id, "source_id": d.source_id, "title": d.title, "layer": d.layer, "brand_id": d.brand_id,
              "brand": names.get(d.brand_id), "industry": d.industry, "status": d.status, "source_url": d.source_url,
              "fetched_at": d.fetched_at, "created_at": d.created_at.date().isoformat() if d.created_at else None,
-             "chunks": chunk_counts.get(d.id, 0), "archived": archived.get(d.source_id, 0), "used_designs": len(used.get(d.id, ()))}
+             "chunks": chunk_counts.get(d.id, 0), "archived": archived.get(d.source_id, 0), "used_designs": len(used.get(d.id, ())),
+             # 제품 층: 브랜드 탭 "제품에서 시작" 카드가 쓰는 메타(제품 이미지·라인·용량)
+             "image_asset_id": (d.visual or {}).get("image_asset_id"), "line": (d.visual or {}).get("line"), "quantity": (d.visual or {}).get("quantity")}
             for d in active]
 
 
@@ -212,16 +214,18 @@ class CampaignFromProductIn(BaseModel):
     target: str = ""
 
 
-@router.post("/products/campaign")
-def campaign_from_product(body: CampaignFromProductIn, db: Session = Depends(get_db)):
-    """제품 조각 하나로 캠페인(광고 이미지 시안)을 만든다. 상품명·설명·제품 이미지·별칭은 제품 지식에서 채우고,
-    핵심 메시지·타깃만 받는다(비워도 된다). 반환: 새 시안 id 와 브랜드 id (프론트가 캠페인 화면으로 연다)."""
-    doc = db.get(KnowledgeDoc, body.doc_id)
+def _product_doc(db: Session, doc_id: int) -> tuple[KnowledgeDoc, Brand]:
+    doc = db.get(KnowledgeDoc, doc_id)
     if not doc or doc.layer != "제품" or doc.brand_id is None:
         raise HTTPException(404, "제품 지식이 아닙니다")
     brand = db.get(Brand, doc.brand_id)
     if not brand or not brand.current_version_id:
         raise HTTPException(400, "브랜드를 찾을 수 없습니다")
+    return doc, brand
+
+
+def _product_brief(db: Session, doc: KnowledgeDoc, key_message: str = "", target: str = "") -> dict:
+    """제품 조각 하나로 브리프를 채운다: 상품명·설명·제품 이미지는 제품 지식에서, 핵심 메시지·타깃은 받은 값."""
     ch = db.scalar(select(KnowledgeChunk).where(KnowledgeChunk.doc_id == doc.id).order_by(KnowledgeChunk.seq))
     visual = doc.visual or {}
     asset_id = visual.get("image_asset_id")
@@ -231,11 +235,114 @@ def campaign_from_product(body: CampaignFromProductIn, db: Session = Depends(get
             asset_id = None
     text = (ch.text if ch else "").replace(f"[{doc.title}] ", "")
     description = text.split("기능성 화장품 표시 여부")[0].strip()[:1000]
-    brief = {"product_name": (ch.product_name if ch else None) or doc.title.replace(" 제품 정보", ""),
-             "description": description, "key_message": body.key_message[:200], "target": body.target[:300],
-             "product_image_asset_id": asset_id, "image_style": "자동", "product_scale": "크게", "layout": "기본",
-             "required_phrases": [], "forbidden_phrases": [], "functional": None,
-             "from_product_doc": doc.id}
+    return {"product_name": (ch.product_name if ch else None) or doc.title.replace(" 제품 정보", ""),
+            "description": description, "key_message": key_message[:200], "target": target[:300],
+            "product_image_asset_id": asset_id, "image_style": "자동", "product_scale": "크게", "layout": "기본",
+            "required_phrases": [], "forbidden_phrases": [], "functional": None,
+            "from_product_doc": doc.id}
+
+
+def _default_presets(db: Session, brand: Brand) -> tuple[list[int], str]:
+    """제품에서 시작할 때의 지면: 이 브랜드의 마지막 캠페인 지면 → 같은 그룹 브랜드의 마지막 캠페인 지면 → 없음. 반환: (id 목록, 출처 설명)."""
+    from .models import PresetVersion
+    def pick(brand_ids: list[int]) -> list[int]:
+        for d in db.scalars(select(Design).where(Design.brand_id.in_(brand_ids), Design.kind == "광고 이미지").order_by(Design.id.desc())):
+            ids = [pid for pid in (d.preset_version_ids or []) if (pv := db.get(PresetVersion, pid)) and pv.active and pv.status != "확인 필요"]
+            if ids:
+                return ids
+        return []
+    ids = pick([brand.id])
+    if ids:
+        return ids, "이 브랜드의 마지막 캠페인 지면"
+    if brand.group_id is not None:
+        ids = pick([b.id for b in _group_brands(db, brand.group_id)])
+        if ids:
+            return ids, "같은 그룹 브랜드의 마지막 캠페인 지면"
+    return [], "없음"
+
+
+def _brand_intro(db: Session, brand: Brand) -> str:
+    rows = db.execute(select(KnowledgeChunk.text).join(KnowledgeDoc, KnowledgeDoc.id == KnowledgeChunk.doc_id)
+                      .where(KnowledgeDoc.brand_id == brand.id, KnowledgeDoc.layer == "브랜드", KnowledgeDoc.status == "사용")
+                      .order_by(KnowledgeChunk.id)).all()
+    return " ".join(r[0] for r in rows)[:1200]
+
+
+class QuickstartPreviewIn(BaseModel):
+    doc_id: int
+
+
+@router.post("/products/quickstart/preview")
+def quickstart_preview(body: QuickstartPreviewIn, db: Session = Depends(get_db)):
+    """제품에서 시작 · 확인 시트의 내용: 제품 자료로 채운 브리프 + 핵심 메시지·타깃 제안(Haiku 1회, 실패하면 빈 값) + 기본 지면.
+    캠페인은 아직 만들지 않는다."""
+    from . import llm, prompts
+    from .models import PresetVersion
+    doc, brand = _product_doc(db, body.doc_id)
+    brief = _product_brief(db, doc)
+    suggested, error = False, None
+    try:
+        data = llm.chat_json(prompts.render("copy/brief_system"),
+                             prompts.render("copy/brief_user", brand_name=brand.name, brand_intro=_brand_intro(db, brand) or "(브랜드 소개 없음)",
+                                            product_name=brief["product_name"], product_text=brief["description"]),
+                             "copy_brief", llm._obj({"key_message": llm.STR, "target": llm.STR}))
+        brief["key_message"] = str(data.get("key_message") or "").strip()[:200]
+        brief["target"] = str(data.get("target") or "").strip()[:300]
+        suggested = bool(brief["key_message"])
+    except Exception as e:
+        error = f"제안 실패: {type(e).__name__}"
+    ids, source = _default_presets(db, brand)
+    presets = []
+    for pid in ids:
+        pv = db.get(PresetVersion, pid)
+        presets.append({"id": pv.id, "platform": pv.placement.platform.name, "name": pv.placement.name,
+                        "width": pv.production_width, "height": pv.production_height})
+    return {"doc_id": doc.id, "brand_id": brand.id, "brand_name": brand.name, "product_name": brief["product_name"],
+            "description": brief["description"], "product_image_asset_id": brief["product_image_asset_id"],
+            "key_message": brief["key_message"], "target": brief["target"], "suggested": suggested, "suggest_error": error,
+            "suggest_model": llm.chat_model("copy_brief"), "presets": presets, "presets_source": source}
+
+
+class QuickstartIn(BaseModel):
+    doc_id: int
+    key_message: str = ""
+    target: str = ""
+    preset_version_ids: list[int] = []
+
+
+@router.post("/products/quickstart")
+def quickstart(body: QuickstartIn, db: Session = Depends(get_db)):
+    """제품에서 시작: 캠페인 생성(제품 브리프 + 지면) → 카피 3안 생성(기존 create_copy) → 1안을 모든 지면에 선택.
+    이미지는 프론트가 기존 ④ 흐름("모든 지면 이미지 생성")으로 이어서 만든다. 반환: 시안 id 와 카피 결과."""
+    from .routers_copy import create_copy, select_variant
+    from .routers_designs import _check_presets
+    doc, brand = _product_doc(db, body.doc_id)
+    ids = list(dict.fromkeys(body.preset_version_ids))
+    if not ids:
+        raise HTTPException(400, "지면이 없습니다. 규격·메시지·시안 탭에서 지면을 고른 캠페인이 하나 있으면 그 지면을 기본으로 씁니다")
+    _check_presets(ids, db)
+    brief = {**_product_brief(db, doc, body.key_message, body.target), "quickstart": True}
+    d = Design(brand_id=brand.id, brand_version_id=brand.current_version_id, preset_version_ids=ids, brief=brief, kind="광고 이미지", status="미검수")
+    db.add(d)
+    db.commit()
+    copy = create_copy(d.id, db)
+    has = any(g.get("variants") for g in copy.get("groups", []))
+    selected = False
+    if has:
+        select_variant(d.id, 1, db)
+        selected = True
+    return {"design_id": d.id, "brand_id": brand.id, "product_name": brief["product_name"], "preset_version_ids": ids,
+            "copy_failures": copy.get("failures", []), "has_copy": has, "selected_variant": 1 if selected else None,
+            "knowledge": copy.get("knowledge")}
+
+
+@router.post("/products/campaign")
+def campaign_from_product(body: CampaignFromProductIn, db: Session = Depends(get_db)):
+    """제품 조각 하나로 캠페인(광고 이미지 시안)을 만든다. 상품명·설명·제품 이미지·별칭은 제품 지식에서 채우고,
+    핵심 메시지·타깃만 받는다(비워도 된다). 반환: 새 시안 id 와 브랜드 id (프론트가 캠페인 화면으로 연다)."""
+    doc, brand = _product_doc(db, body.doc_id)
+    brief = _product_brief(db, doc, body.key_message, body.target)
+    asset_id = brief["product_image_asset_id"]
     d = Design(brand_id=brand.id, brand_version_id=brand.current_version_id, preset_version_ids=[], brief=brief, kind="광고 이미지", status="미검수")
     db.add(d)
     db.commit()
