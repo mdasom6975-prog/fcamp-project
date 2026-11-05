@@ -406,5 +406,25 @@ def test_for_copy_switches_law_to_search_when_many(session, monkeypatch):
     monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 3)
     monkeypatch.setattr(knowledge, "LAW_K", 2)
     k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
-    assert k["law_mode"] == "search" and len(k["law"]) == 2 and k["law"][0]["source_id"] == "cos0", "검색 상위가 들어간다"
-    assert knowledge.refs(k)["law_mode"] == "search"
+    assert k["law_mode"] == "core+search" and k["law_core"] == 0 and len(k["law"]) == 2 and k["law"][0]["source_id"] == "cos0", "핵심 규제가 없으면 검색 상위만"
+    assert knowledge.refs(k)["law_mode"] == "core+search"
+
+
+def test_core_law_always_injected_when_many(session, monkeypatch):
+    """S4: 규제 조각이 많아 검색 모드여도 핵심 규제(CORE_LAW)는 유사도와 무관하게 전부 들어가고, 검색은 핵심 밖에서만 보충한다."""
+    from app import knowledge
+    monkeypatch.setattr(knowledge, "CORE_LAW", {"화장품": ("law13", "annex5")})
+    _add(session, layer="규제", source_id="law13", title="제13조", industry="화장품", chunks=[("제13조", "포장재 종이 재활용 보고")])   # 브리프와 멀다
+    _add(session, layer="규제", source_id="annex5", title="별표 5", industry="화장품", chunks=[("가목", "창고 등록 서류"), ("나목", "영업 신고 양식")])
+    for i in range(8):
+        _add(session, layer="규제", source_id=f"other{i}", title=f"기타 {i}", industry="화장품",
+             chunks=[(f"제{i}조", "의약품 오인 광고 금지 치료 표현" if i < 3 else f"수입 통관 서류 {i}")])
+    brief = {"product_name": "크림", "description": "아토피 치료 화장품 광고 의약품 오인"}
+    monkeypatch.setattr(knowledge, "LAW_ALL_MAX", 3)
+    monkeypatch.setattr(knowledge, "LAW_K", 2)
+    k = knowledge.for_copy(session, None, None, brief, embedder=fake_embed)
+    srcs = [r["source_id"] for r in k["law"]]
+    assert k["law_mode"] == "core+search" and k["law_core"] == 3
+    assert srcs[:3] == ["law13", "annex5", "annex5"], "핵심 규제가 유사도와 무관하게 맨 앞에 전부"
+    assert len(srcs) == 5 and all(x.startswith("other") for x in srcs[3:]), "검색 상위 2개는 핵심 밖에서"
+    assert knowledge.refs(k)["law_core"] == 3

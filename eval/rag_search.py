@@ -69,7 +69,7 @@ def main() -> int:
     with db.SessionLocal() as s0:
         law_total = len(knowledge.law_rows(s0, ["화장품"]))
     layer_k = {**knowledge.LAYER_K, **({"규제": knowledge.LAW_K} if law_total > knowledge.LAW_ALL_MAX else {})}
-    print(f"규제 조각 {law_total}개 → 규제 k={layer_k['규제']} ({'검색 상위' if law_total > knowledge.LAW_ALL_MAX else '전부 투입 규모'})")
+    print(f"규제 조각 {law_total}개 → {'핵심 규제 항상 + 검색 상위 ' + str(layer_k['규제']) if law_total > knowledge.LAW_ALL_MAX else '전부 투입 규모'}")
     rows, hit_total, want_total, leaks, times = [], 0, 0, 0, []
     with db.SessionLocal() as s:
         brands = {b.name: b for b in s.scalars(select(Brand)).all()}
@@ -82,8 +82,14 @@ def main() -> int:
             qv = cached_embed(q)                       # 같은 질의 텍스트는 같은 벡터(재현성, eval/cache). 검색 시간만 잰다(네트워크 제외)
             t0 = time.perf_counter()
             inds = legal.detect(legal.source_text(c)) or None      # 카피 생성과 같은 업종 필터(3-B: 규제가 여러 업종으로 늘어난 뒤)
+            # 카피 생성과 같은 구성: 규제가 많으면 핵심 규제(CORE_LAW)는 항상 넣고 검색은 핵심 밖에서 보충(S4)
+            core = knowledge.core_law_rows(s, inds or []) if law_total > knowledge.LAW_ALL_MAX else []
+            core_docs = {r["doc_id"] for r in core}
             res = knowledge.search(s, q, brand_id=b.id, group_id=b.group_id, product_name=c["product_name"] or None,
-                                   embedder=lambda _t, _v=qv: [_v], industries=inds, layer_k=layer_k)
+                                   embedder=lambda _t, _v=qv: [_v], industries=inds, layer_k=layer_k,
+                                   skip=(lambda ch: ch.doc_id in core_docs) if core_docs else None)
+            if core:
+                res["규제"] = core + res.get("규제", [])
             ms = (time.perf_counter() - t0) * 1000
             times.append(ms)
             hit, want, missed = grade(c["expect"], res)

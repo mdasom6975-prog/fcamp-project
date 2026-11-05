@@ -346,6 +346,24 @@ def _row(ch: KnowledgeChunk, doc: KnowledgeDoc, score: float | None = None) -> d
             "motifs": (doc.visual or {}).get("motifs")}
 
 
+# 핵심 규제: 데이터 양과 상관없이 카피 생성에 항상 들어가는 조문(00 정의서 v2 S4). 업종 → sources.json 의 출처 id.
+# 광고 표현을 직접 다루는 조문만: 부당 표시·광고 금지(제13조), 별표 5(준수사항), 기능성 범위(시행규칙 2조), 표시·광고 범위(시행규칙 22조)
+CORE_LAW: dict[str, tuple[str, ...]] = {
+    "화장품": ("law_cosmetics_13", "law_cosmetics_rule_annex5", "law_cosmetics_rule_2", "law_cosmetics_rule_22"),
+}
+
+
+def core_law_rows(db: Session, industries: list[str]) -> list[dict]:
+    """감지된 업종의 핵심 규제 조각 전부(출처 id 로 고른다). 검색·임베딩 호출 없음."""
+    ids = [sid for ind in industries for sid in CORE_LAW.get(ind, ())]
+    if not ids:
+        return []
+    q = (select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+         .where(KnowledgeDoc.layer == "규제", KnowledgeDoc.status == "사용", KnowledgeDoc.source_id.in_(ids))
+         .order_by(KnowledgeDoc.id, KnowledgeChunk.seq))
+    return [_row(ch, doc) for ch, doc in db.execute(q).all()]
+
+
 def law_rows(db: Session, industries: list[str]) -> list[dict]:
     """감지된 업종으로 표시한 규제 문서의 조각 전부(문서·조각 순서대로). 검색·임베딩 호출 없음."""
     if not industries:
@@ -396,18 +414,22 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     from . import legal
     industries = legal.detect(legal.source_text(brief))
     law_all = law_rows(db, industries)
-    # 규제: 업종의 조각이 LAW_ALL_MAX 이하면 전부(작을 때는 검색보다 확실), 그보다 많으면 검색 상위 LAW_K (3-B 에서 법령 전문을 넣자 수백 조각)
+    # 규제: 업종의 조각이 LAW_ALL_MAX 이하면 전부(작을 때는 검색보다 확실). 그보다 많으면(3-B 법령 전문) 핵심 규제(CORE_LAW)는 **항상** 넣고,
+    # 나머지 조문에서 검색 상위 LAW_K 만 보충한다(S4: 핵심 조문은 데이터 양과 상관없이 들어간다)
     law_search = len(law_all) > LAW_ALL_MAX
-    out = {"industries": industries, "law": [] if law_search else law_all, "guide": [], "error": None, "functional_mismatch": None,
+    core = core_law_rows(db, industries) if law_search else []
+    core_docs = {r["doc_id"] for r in core}
+    out = {"industries": industries, "law": core if law_search else law_all, "guide": [], "error": None, "functional_mismatch": None,
            "product_note": None, "motifs": None, "directions": brand_directions(db, brand_id),
-           "law_mode": "search" if law_search else "all", "law_total": len(law_all)}
+           "law_mode": "core+search" if law_search else "all", "law_total": len(law_all), "law_core": len(core)}
     if has_guide(db, brand_id, group_id) or law_search:
         try:
             layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {})}
+            skip = (lambda ch: _test_result(ch) or ch.doc_id in core_docs) if core_docs else _test_result
             res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=layer_k,
-                         product_name=brief.get("product_name"), embedder=embedder, skip=_test_result, industries=industries or None)
+                         product_name=brief.get("product_name"), embedder=embedder, skip=skip, industries=industries or None)
             if law_search:
-                out["law"] = res.get("규제", [])
+                out["law"] = core + res.get("규제", [])
             products = res.get("제품", [])
             if any(r["exact_product"] for r in products):      # 제품을 특정했으면 비슷한 다른 제품 이야기를 섞지 않는다
                 products = [r for r in products if r["exact_product"]]
@@ -429,7 +451,7 @@ def refs(k: dict) -> dict:
             "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
             "product_note": k.get("product_note"), "embed_model": EMBED_MODEL,
             "motifs": k.get("motifs"), "directions": k.get("directions") or [],
-            "law_mode": k.get("law_mode"), "law_total": k.get("law_total")}
+            "law_mode": k.get("law_mode"), "law_total": k.get("law_total"), "law_core": k.get("law_core")}
 
 
 def from_refs(db: Session, saved: dict | None) -> dict | None:
