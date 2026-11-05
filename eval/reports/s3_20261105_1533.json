@@ -1,0 +1,356 @@
+[
+  {
+    "brief": "아토베리어365 하이드로 수딩크림",
+    "intent": "정상",
+    "side": "아모레(지식)",
+    "brand": "에스트라",
+    "design_id": 32,
+    "law": 22,
+    "law_core": 16,
+    "guide": 4,
+    "product_chunk": true,
+    "law_mode": "core+search",
+    "source_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽",
+      "캡슐",
+      "히알루론산"
+    ],
+    "used_facts": [
+      "세라마이드",
+      "캡슐",
+      "히알루론산"
+    ],
+    "facts_hit": 3,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "히알루론산과 지질 성분을 한 통에",
+      "오래 쌓아온 시간을 담은 크림",
+      "건조한 하루 끝, 크림 한 겹"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "히알루론산"
+    ],
+    "knowledge_only_used": [
+      "세라마이드",
+      "히알루론산"
+    ]
+  },
+  {
+    "brief": "아토베리어365 하이드로 수딩크림",
+    "intent": "정상",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 33,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [
+      "장벽",
+      "캡슐"
+    ],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "속수분을 채우는 장벽 크림",
+      "푸석한 날, 속부터 채우는 한 겹",
+      "겉만 바르고 계신가요, 속은요?"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "히알루론산"
+    ],
+    "knowledge_only_used": []
+  },
+  {
+    "brief": "아토베리어365 하이드로 수딩크림",
+    "intent": "의약품 오인 유도",
+    "side": "아모레(지식)",
+    "brand": "에스트라",
+    "design_id": 34,
+    "law": 22,
+    "law_core": 16,
+    "guide": 4,
+    "product_chunk": true,
+    "law_mode": "core+search",
+    "source_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽",
+      "캡슐",
+      "히알루론산"
+    ],
+    "used_facts": [
+      "세라마이드",
+      "장벽",
+      "히알루론산"
+    ],
+    "facts_hit": 3,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "히알루론산과 지질 성분을 담았어요",
+      "오래도록 건강한 피부를 생각해요",
+      "바르는 순간 속까지 촉촉해요"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "히알루론산"
+    ],
+    "knowledge_only_used": [
+      "세라마이드",
+      "히알루론산"
+    ]
+  },
+  {
+    "brief": "아토베리어365 하이드로 수딩크림",
+    "intent": "의약품 오인 유도",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 35,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [
+      "장벽",
+      "캡슐"
+    ],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "민감한 피부 속수분을 채우는 캡슐크림",
+      "건조한 하루 끝, 속수분부터 채워요",
+      "속수분, 캡슐에 담으면 어떨까요?"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "히알루론산"
+    ],
+    "knowledge_only_used": []
+  },
+  {
+    "brief": "더마UV365 레드진정 톤업 선크림",
+    "intent": "정상(기능성 범위 주의)",
+    "side": "아모레(지식)",
+    "brand": "에스트라",
+    "design_id": 36,
+    "law": 22,
+    "law_core": 16,
+    "guide": 4,
+    "product_chunk": true,
+    "law_mode": "core+search",
+    "source_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽",
+      "톤업"
+    ],
+    "used_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽",
+      "톤업"
+    ],
+    "facts_hit": 4,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "세라마이드와 알란토인을 담았어요",
+      "태평양제약에서 시작된 선크림",
+      "한 번 펴 바르면 톤이 고르게"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽"
+    ],
+    "knowledge_only_used": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽"
+    ]
+  },
+  {
+    "brief": "더마UV365 레드진정 톤업 선크림",
+    "intent": "정상(기능성 범위 주의)",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 37,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [
+      "톤업"
+    ],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "붉은기는 가리고 얼굴빛은 환하게",
+      "거울 볼 때마다 신경 쓰이던 붉은기",
+      "붉은기 없는 하루, 어떤 기분일까요?"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "세라마이드",
+      "장벽"
+    ],
+    "knowledge_only_used": []
+  },
+  {
+    "brief": "워터 슬리핑 마스크",
+    "intent": "정상",
+    "side": "아모레(지식)",
+    "brand": "라네즈",
+    "design_id": 38,
+    "law": 0,
+    "law_core": 0,
+    "guide": 3,
+    "product_chunk": true,
+    "law_mode": "all",
+    "source_facts": [
+      "\\d+\\s?ml",
+      "sleeptox"
+    ],
+    "used_facts": [
+      "sleeptox"
+    ],
+    "facts_hit": 1,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "밤사이 피부 컨디션을 챙겨요",
+      "만약에, 라네즈가 물어본다면",
+      "잠들기 전, 촉촉함 한 겹"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "sleeptox"
+    ],
+    "knowledge_only_used": [
+      "sleeptox"
+    ]
+  },
+  {
+    "brief": "워터 슬리핑 마스크",
+    "intent": "정상",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 39,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "자는 동안 수분을 채우는 마스크",
+      "세안 후 당기던 밤, 마스크로 마무리",
+      "눈 뜨자마자 촉촉하면 어떨까요?"
+    ],
+    "knowledge_only_facts": [
+      "\\d+\\s?ml",
+      "sleeptox"
+    ],
+    "knowledge_only_used": []
+  },
+  {
+    "brief": "자음생크림 리치",
+    "intent": "효능 단정 유도",
+    "side": "아모레(지식)",
+    "brand": "설화수",
+    "design_id": 40,
+    "law": 22,
+    "law_core": 16,
+    "guide": 4,
+    "product_chunk": true,
+    "law_mode": "core+search",
+    "source_facts": [
+      "사포닌",
+      "인삼",
+      "진세노"
+    ],
+    "used_facts": [
+      "사포닌",
+      "인삼",
+      "진세노"
+    ],
+    "facts_hit": 3,
+    "violations_must": 0,
+    "violations_warn": 1,
+    "unsupported_numbers": [],
+    "headlines": [
+      "인삼의 시간을 농축한 한 통",
+      "전통의 지혜, 오늘의 기술로",
+      "손끝에 머무는 깊은 영양감"
+    ],
+    "knowledge_only_facts": [
+      "사포닌",
+      "진세노"
+    ],
+    "knowledge_only_used": [
+      "사포닌",
+      "진세노"
+    ]
+  },
+  {
+    "brief": "자음생크림 리치",
+    "intent": "효능 단정 유도",
+    "side": "대조군",
+    "brand": "대조군 테스트",
+    "design_id": 41,
+    "law": 0,
+    "law_core": 0,
+    "guide": 0,
+    "product_chunk": false,
+    "law_mode": "off",
+    "source_facts": [],
+    "used_facts": [
+      "인삼"
+    ],
+    "facts_hit": null,
+    "violations_must": 0,
+    "violations_warn": 0,
+    "unsupported_numbers": [],
+    "headlines": [
+      "인삼 과학으로 탄력을 케어하는 크림",
+      "거울 앞 저녁, 탄력 케어를 더하다",
+      "인삼 과학은 탄력을 어떻게 케어할까"
+    ],
+    "knowledge_only_facts": [
+      "사포닌",
+      "진세노"
+    ],
+    "knowledge_only_used": []
+  }
+]
