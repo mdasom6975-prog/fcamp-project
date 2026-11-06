@@ -6,7 +6,7 @@ import { api, type KnowledgeChunk, type KnowledgeDoc, type KnowledgeDocDetail, t
    시안 만들기는 여기서 하지 않는다(3단계 메시지 입력의 '제품 고르기').
    브랜드·제품·캠페인 층은 상단에 브랜드 필터. 조회는 과금 없음, 검색 미리보기만 임베딩 1회. */
 
-const LAYERS = ['규제', '그룹', '브랜드', '제품', '캠페인'] as const
+const LAYERS = ['규제', '그룹', '브랜드', '제품', '캠페인', '트렌드'] as const   // 트렌드: 화장품 검색 트렌드(주 1회 수집, 브랜드 무관)
 const BRAND_LAYERS = new Set(['브랜드', '제품', '캠페인'])
 const LAYER_HINT: Record<string, string> = {
   규제: '화장품법·시행규칙·별표. 업종이 감지되면 검색 없이 전부 프롬프트에 들어간다',

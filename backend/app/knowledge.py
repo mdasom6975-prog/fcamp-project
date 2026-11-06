@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from . import calllog
 from .models import KnowledgeChunk, KnowledgeDoc
 
-LAYERS = ("규제", "그룹", "브랜드", "제품", "캠페인")
+LAYERS = ("규제", "그룹", "브랜드", "제품", "캠페인", "트렌드")   # 트렌드: 화장품 검색 트렌드(app/trends.py, 주 1회, 브랜드·그룹 무관)
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
 LAYER_K = {"규제": 3, "제품": 2, "브랜드": 2, "그룹": 1}     # 검색할 때 층마다 가져올 개수
 SEARCH_MODE = os.getenv("KNOWLEDGE_SEARCH", "sql").strip().lower()   # sql(pgvector) | python(JSON 코사인, 되돌리기용)

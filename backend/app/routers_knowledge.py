@@ -69,7 +69,7 @@ def summary(group_id: int | None = None, db: Session = Depends(get_db)):
     bids = [b.id for b in brands]
     # 이 그룹이 보는 문서: 규제(공통) + 그룹 자료 + 소속 브랜드의 브랜드·제품·캠페인
     docs = list(db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.status == "사용")))
-    docs = [d for d in docs if d.layer == "규제" or (d.layer == "그룹" and d.group_id == group_id) or (d.brand_id in bids)]
+    docs = [d for d in docs if d.layer in ("규제", "트렌드") or (d.layer == "그룹" and d.group_id == group_id) or (d.brand_id in bids)]
     chunk_counts = dict(db.execute(select(KnowledgeChunk.doc_id, func.count()).where(
         KnowledgeChunk.doc_id.in_([d.id for d in docs]) if docs else False).group_by(KnowledgeChunk.doc_id)).all())
     layers = []
@@ -93,7 +93,7 @@ def docs(layer: str, group_id: int | None = None, brand_id: int | None = None, d
     q = select(KnowledgeDoc).where(KnowledgeDoc.layer == layer).order_by(KnowledgeDoc.id)
     if layer == "그룹":
         q = q.where(KnowledgeDoc.group_id == group_id)
-    elif layer != "규제":
+    elif layer not in ("규제", "트렌드"):      # 규제·트렌드는 브랜드·그룹과 무관한 공통 층
         q = q.where(KnowledgeDoc.brand_id.in_(bids) if bids else False)
         if brand_id is not None:
             q = q.where(KnowledgeDoc.brand_id == brand_id)
