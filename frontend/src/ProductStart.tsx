@@ -3,6 +3,11 @@ import { api, type KnowledgeDoc, type QuickstartPreview } from './api'
 import { ImportPanel } from './KnowledgePage'
 import { busy as overlay } from './Busy'
 
+type PresetLite = { id: number; name: string; status: string; production_width: number | null; production_height: number | null }
+type PlatformLite = { name: string; media_only: boolean; ad_types: { name: string; presets: PresetLite[] }[] }
+// 시연 기본 세트(05 시연 시나리오 · 서버 DEFAULT_PLACEMENTS 와 같은 이름)
+const DEMO_NAMES = ['Instagram 피드', 'Instagram 스토리', 'Facebook 피드', '디스플레이 네이티브 2:1', '디스플레이 네이티브 1:1', 'PMax 가로 1.91:1']
+
 /* 브랜드 탭 "제품에서 시작": 등록된 제품 조각이 카드로 보이고, 카드의 버튼 하나로 캠페인·지면·메시지를 자동으로 채워 카피까지 만든다(사용자 입력 0개).
    흐름: 카드 버튼 → 미리보기(Haiku 1회: 핵심 메시지·타깃 제안, 기본 지면) → 확인 시트(모두 채워져 있음) → 바로 만들기(캠페인 생성 + 카피 1회 + 1안 선택)
    → 규격·메시지·시안 탭의 그 캠페인이 열리고 ④ 이미지 생성이 자동으로 이어진다. 목록에 없는 제품은 "제품 가져오기"(지식 탭과 같은 것). */
@@ -15,6 +20,14 @@ export default function ProductStart({ brandId, brandName, groupId, onStart }: {
   const [preview, setPreview] = useState<QuickstartPreview | null>(null)
   const [key, setKey] = useState('')
   const [target, setTarget] = useState('')
+  // 시트 안 지면 고르기: 기본은 미리보기가 준 지면, "바꾸기"를 펼치면 규격 라이브러리와 같은 구조(플랫폼 > 광고 유형 > 지면)에서 체크
+  const [sel, setSel] = useState<number[]>([])
+  const [pickOpen, setPickOpen] = useState(false)
+  const [plats, setPlats] = useState<PlatformLite[] | null>(null)
+  const allPresets = (plats ?? []).filter((pl) => !pl.media_only).flatMap((pl) => pl.ad_types.flatMap((a) => a.presets.map((x) => ({ ...x, platform: pl.name }))))
+  const toggle = (id: number) => setSel((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]))
+  const demoSet = () => setSel(allPresets.filter((x) => DEMO_NAMES.includes(x.name) && x.status !== '확인 필요').map((x) => x.id))
+  const openPicker = () => { setPickOpen((v) => !v); if (!plats) fetch('/api/presets').then((r) => r.json()).then(setPlats).catch(() => setPlats([])) }
   const [err, setErr] = useState<string | null>(null)
   const load = useCallback(() => api.knowledgeDocs('제품', groupId, brandId).then(setDocs).catch(() => setDocs([])), [groupId, brandId])
   useEffect(() => { setShowAll(false); load() }, [load])
@@ -23,7 +36,7 @@ export default function ProductStart({ brandId, brandName, groupId, onStart }: {
     setErr(null)
     try {
       const p = await api.quickstartPreview(doc.id)
-      setPreview(p); setKey(p.key_message); setTarget(p.target)
+      setPreview(p); setKey(p.key_message); setTarget(p.target); setSel(p.presets.map((x) => x.id)); setPickOpen(false)
     } catch (e) { setErr((e as Error).message) }
   })
   const start = (withImages: boolean) => {
@@ -32,7 +45,7 @@ export default function ProductStart({ brandId, brandName, groupId, onStart }: {
     overlay.run('캠페인을 만들고 카피 3안을 쓰는 중… (10~20초)', async () => {
       setErr(null)
       try {
-        const r = await api.quickstart({ doc_id: p.doc_id, key_message: key, target, preset_version_ids: p.presets.map((x) => x.id) })
+        const r = await api.quickstart({ doc_id: p.doc_id, key_message: key, target, preset_version_ids: sel })
         setPreview(null)
         onStart(r.design_id, r.brand_id, withImages && r.has_copy)
       } catch (e) { setErr((e as Error).message) }
@@ -100,17 +113,45 @@ export default function ProductStart({ brandId, brandName, groupId, onStart }: {
               </div>
             </div>
             <div className="ps-presets">
-              <span><b>지면 {preview.presets.length}개</b> <span className="ps-auto">자동 · {preview.presets_source}</span></span>
-              {preview.presets.length === 0
-                ? <span className="notice err">지면을 고른 캠페인이 아직 없습니다. 규격·메시지·시안 탭에서 캠페인을 하나 만들어 지면을 고르면 그 지면을 기본으로 씁니다.</span>
-                : <div className="ps-chips">{preview.presets.map((p) => <span key={p.id} className="chip">{p.platform} {p.name}</span>)}</div>}
+              <div className="ps-presets-head">
+                <span><b>지면 {sel.length}개</b> <span className="ps-auto">{sel.length === preview.presets.length && sel.every((id) => preview.presets.some((p) => p.id === id)) ? `자동 · ${preview.presets_source}` : '직접 고름'}</span></span>
+                <button type="button" className="link" onClick={openPicker}>{pickOpen ? '접기' : '바꾸기'}</button>
+              </div>
+              {!pickOpen && (sel.length === 0
+                ? <span className="notice err">지면이 없습니다. "바꾸기"에서 고르세요.</span>
+                : <div className="ps-chips">{sel.map((id) => { const p = preview.presets.find((x) => x.id === id) ?? allPresets.find((x) => x.id === id); return p ? <span key={id} className="chip">{p.platform} {p.name}</span> : null })}</div>)}
+              {pickOpen && (
+                <div className="ps-picker">
+                  <div className="row">
+                    <button type="button" onClick={demoSet} disabled={!plats}>시연 기본 6개</button>
+                    <button type="button" onClick={() => setSel([])}>모두 해제</button>
+                    <span className="muted">'확인 필요' 지면은 공식 규격이 확인되지 않아 고를 수 없습니다</span>
+                  </div>
+                  {plats === null ? <p className="muted">지면 목록을 불러오는 중…</p> : plats.filter((pl) => !pl.media_only).map((pl) => (
+                    <div key={pl.name} className="ps-plat">
+                      <strong>{pl.name}</strong>
+                      {pl.ad_types.map((a) => (
+                        <div key={a.name} className="ps-adtype">
+                          <span className="muted">{a.name}</span>
+                          {a.presets.map((x) => (
+                            <label key={x.id} className={x.status === '확인 필요' ? 'off' : ''}>
+                              <input type="checkbox" disabled={x.status === '확인 필요'} checked={sel.includes(x.id)} onChange={() => toggle(x.id)} />
+                              {x.name}{x.production_width ? ` ${x.production_width}×${x.production_height}` : ''}{x.status === '확인 필요' ? ' · 확인 필요' : ''}
+                            </label>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <p className="muted">상품명·설명·제품 이미지는 제품 조각에서 · 규제 핵심 16 항상 + 검색 · 브랜드·그룹 근거 자동</p>
             <div className="ps-sheet-foot">
-              <span className="muted">과금: 카피 1회(Sonnet) + 이미지 {preview.presets.length}회 · 지금 캠페인 1개와 같음</span>
+              <span className="muted">과금: 카피 1회(Sonnet) + 이미지 {sel.length}회 · 지금 캠페인 1개와 같음</span>
               <div className="row">
-                <button type="button" disabled={preview.presets.length === 0} onClick={() => start(false)}>카피까지만</button>
-                <button type="button" className="primary" disabled={preview.presets.length === 0} onClick={() => start(true)}>바로 만들기 → 카피 + 이미지 {preview.presets.length}</button>
+                <button type="button" disabled={sel.length === 0} onClick={() => start(false)}>카피까지만</button>
+                <button type="button" className="primary" disabled={sel.length === 0} onClick={() => start(true)}>바로 만들기 → 카피 + 이미지 {sel.length}</button>
               </div>
             </div>
           </div>

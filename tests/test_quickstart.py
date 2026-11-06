@@ -53,7 +53,7 @@ def test_preview_fills_brief_suggests_and_picks_default_presets(client, product,
     assert j["suggested"] and j["key_message"] == "속수분을 채우는 장벽 크림" and j["target"] == "건조하고 민감한 30대" and j["suggest_error"] is None
     kind, user = seen[0]
     assert kind == "copy_brief" and "민감 피부를 위한 더마 브랜드" in user and "80ml" in user     # 브랜드 소개 + 제품 자료가 프롬프트에
-    assert j["presets"] == [] and j["presets_source"] == "없음"          # 아직 캠페인이 없다
+    assert j["presets"] == [] and j["presets_source"] == "없음"          # 아직 캠페인이 없고 시연 기본 세트 이름의 지면도 없다
     # 이 브랜드에 지면 있는 캠페인이 생기면 그 지면이 기본
     with sessionmaker(bind=pg_engine)() as s:
         b = s.get(models.Brand, product["brand_id"])
@@ -106,3 +106,20 @@ def test_quickstart_reports_copy_failure_but_keeps_campaign(client, product, pg_
     assert not j["has_copy"] and j["selected_variant"] is None and j["copy_failures"] and "RuntimeError" in j["copy_failures"][0]
     with sessionmaker(bind=pg_engine)() as s:
         assert s.get(models.Design, j["design_id"]) is not None      # 캠페인은 남아 기존 7단계로 이어서 할 수 있다
+
+
+def test_preview_falls_back_to_demo_set_by_placement_name(client, product, pg_engine, monkeypatch):
+    """캠페인이 없으면 시연 기본 세트(DEFAULT_PLACEMENTS)를 지면 이름으로 찾아 채운다. '확인 필요' 지면은 빼고, 마지막 캠페인이 생기면 그쪽이 우선."""
+    from app import routers_knowledge
+    monkeypatch.setattr(llm, "chat_json", lambda *a, **k: {"key_message": "k", "target": "t"})
+    with sessionmaker(bind=pg_engine)() as s:
+        plat = models.Platform(name="Meta"); s.add(plat); s.flush()
+        ids = {}
+        for name, st in (("Instagram 피드", "확인됨"), ("Facebook 피드", "확인됨"), ("PMax 가로 1.91:1", "확인 필요")):
+            pl = models.Placement(platform_id=plat.id, name=name, ad_type="피드", content_kind="완성형"); s.add(pl); s.flush()
+            pv = models.PresetVersion(placement_id=pl.id, production_width=1080, production_height=1080, status=st); s.add(pv); s.flush()
+            ids[name] = pv.id
+        s.commit()
+    j = client.post("/api/knowledge/products/quickstart/preview", json={"doc_id": product["doc_id"]}).json()
+    assert [p["id"] for p in j["presets"]] == [ids["Instagram 피드"], ids["Facebook 피드"]] and j["presets_source"] == "시연 기본 세트 2개"
+    assert len(routers_knowledge.DEFAULT_PLACEMENTS) == 6

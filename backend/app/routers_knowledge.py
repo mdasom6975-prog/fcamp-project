@@ -242,8 +242,26 @@ def _product_brief(db: Session, doc: KnowledgeDoc, key_message: str = "", target
             "from_product_doc": doc.id}
 
 
+# 시연 기본 세트(05 시연 시나리오의 지면 6개): 캠페인이 하나도 없을 때 지면 이름으로 찾아 채운다
+DEFAULT_PLACEMENTS = ("Instagram 피드", "Instagram 스토리", "Facebook 피드", "디스플레이 네이티브 2:1", "디스플레이 네이티브 1:1", "PMax 가로 1.91:1")
+
+
+def _demo_set(db: Session) -> list[int]:
+    from .models import Placement, PresetVersion
+    ids = []
+    for name in DEFAULT_PLACEMENTS:
+        pl = db.scalar(select(Placement).where(Placement.name == name).order_by(Placement.id))
+        if not pl:
+            continue
+        vs = [v for v in pl.versions if v.active and v.status != "확인 필요"]
+        if vs:
+            ids.append(max(vs, key=lambda x: x.version_no).id)
+    return ids
+
+
 def _default_presets(db: Session, brand: Brand) -> tuple[list[int], str]:
-    """제품에서 시작할 때의 지면: 이 브랜드의 마지막 캠페인 지면 → 같은 그룹 브랜드의 마지막 캠페인 지면 → 없음. 반환: (id 목록, 출처 설명)."""
+    """제품에서 시작할 때의 지면: 이 브랜드의 마지막 캠페인 지면 → 같은 그룹 브랜드의 마지막 캠페인 지면 → 시연 기본 세트(DEFAULT_PLACEMENTS) → 없음.
+    반환: (id 목록, 출처 설명)."""
     from .models import PresetVersion
     def pick(brand_ids: list[int]) -> list[int]:
         for d in db.scalars(select(Design).where(Design.brand_id.in_(brand_ids), Design.kind == "광고 이미지").order_by(Design.id.desc())):
@@ -258,6 +276,9 @@ def _default_presets(db: Session, brand: Brand) -> tuple[list[int], str]:
         ids = pick([b.id for b in _group_brands(db, brand.group_id)])
         if ids:
             return ids, "같은 그룹 브랜드의 마지막 캠페인 지면"
+    ids = _demo_set(db)
+    if ids:
+        return ids, f"시연 기본 세트 {len(ids)}개"
     return [], "없음"
 
 
