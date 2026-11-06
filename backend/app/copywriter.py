@@ -162,7 +162,11 @@ def knowledge_vars(knowledge: dict | None, brief: dict) -> dict[str, str]:
     if k.get("guide"):
         lines = "\n".join(f"- ({r['layer']} · {r['section']}) {_strip_title(r['text'])}" for r in k["guide"])
         guide = "\n" + prompts.render("copy/_guide", items=lines)
-    return {"functional": functional, "law": law, "guide": guide}
+    trend = ""
+    if k.get("trend"):      # 이번 주 검색 트렌드(knowledge.TREND_K 조각). 규제·브랜드 지식 다음에 온다
+        lines = "\n".join(f"- {_strip_title(r['text'])}" for r in k["trend"])
+        trend = "\n" + prompts.render("copy/_trend", items=lines)
+    return {"functional": functional, "law": law, "guide": guide, "trend": trend}
 
 
 def _shared_vars(brand_name: str, brand: dict, brief: dict, knowledge: dict | None) -> dict:

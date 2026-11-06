@@ -232,6 +232,8 @@ def _candidates_sql(db: Session, qv: list[float], query: str, brand_id: int | No
     dist = KnowledgeChunk.vec.cosine_distance(qv)
     law_ok = _industry_ok(industries)
     scope = or_(layer == "규제" if law_ok is None else and_(layer == "규제", law_ok),
+                layer == "트렌드",       # 검색 트렌드: 브랜드·그룹 무관 공통 층
+
                 and_(layer.in_(("브랜드", "제품", "캠페인")), KnowledgeDoc.brand_id == brand_id) if brand_id is not None else false(),
                 and_(layer == "그룹", KnowledgeDoc.group_id == group_id) if group_id is not None else false())
     cols = [KnowledgeChunk.id.label("cid"), dist.label("dist"),
@@ -329,6 +331,8 @@ def search(db: Session, query: str, *, brand_id: int | None, group_id: int | Non
 # ── 카피 생성에 붙이기 ────────────────────────────────────────────────────
 
 GUIDE_K = {k: v for k, v in LAYER_K.items() if k != "규제"}    # 카피에서 검색하는 층(규제는 아래 LAW_* 규칙)
+TREND_K = int(os.getenv("KNOWLEDGE_TREND_K", "3"))           # 카피에 넣을 이번 주 검색 트렌드 조각 수(요약 조각 제외, 브리프와 가까운 순)
+COPY_TREND = os.getenv("COPY_TREND", "1").strip() != "0"     # 0 이면 트렌드를 카피에 넣지 않는다(있음/없음 비교·되돌리기용)
 LAW_K = int(os.getenv("KNOWLEDGE_LAW_K", "6"))               # 규제가 많을 때 카피에 넣을 조각 수(검색 상위)
 LAW_ALL_MAX = int(os.getenv("KNOWLEDGE_LAW_ALL_MAX", "24"))  # 업종의 규제 조각이 이 수 이하면 검색 없이 전부 넣는다(작을 때는 전부가 더 확실하다)
 _TEST_NUMBER = re.compile(r"\d+(?:\.\d+)?\s*%")
@@ -406,6 +410,16 @@ def brand_directions(db: Session, brand_id: int | None) -> list[str]:
     return next(((d.visual or {}).get("directions") for d in docs if (d.visual or {}).get("directions")), [])
 
 
+def has_trend(db: Session) -> bool:
+    """'사용' 상태의 트렌드 문서가 있는가(없으면 트렌드 검색을 건너뛴다)."""
+    return db.scalar(select(func.count()).select_from(KnowledgeDoc).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용")) > 0
+
+
+def trend_on(db: Session, brief: dict) -> bool:
+    """브리프 use_trend(기본 켬)와 COPY_TREND 가 둘 다 켜져 있고 트렌드 문서가 있을 때."""
+    return COPY_TREND and bool((brief or {}).get("use_trend", True)) and has_trend(db)
+
+
 def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dict, embedder=embed) -> dict:
     """카피 프롬프트에 붙일 지식. 반환: {industries, law: [조각], guide: [조각], error, functional_mismatch, law_mode}.
     - group_id 가 None(그룹 없는 타 브랜드 = 대조군)이면 규제까지 포함해 아무 지식도 넣지 않는다(law_mode=off)
@@ -417,7 +431,8 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     if group_id is None:
         # 타 브랜드(그룹 없음) = 대조군: 규제를 포함한 지식을 전혀 넣지 않는다(00 정의서 v2.2, 2026-11-05 결정).
         # 검수의 법적 표현 사전(legal.violations)은 공통이라 대조군 카피가 거기서 잡히는 것이 S3 비교다
-        return {"industries": industries, "law": [], "guide": [], "error": None, "functional_mismatch": functional_mismatch([], brief.get("functional")),
+        return {"industries": industries, "law": [], "guide": [], "trend": [], "trend_mode": "off", "error": None,
+                "functional_mismatch": functional_mismatch([], brief.get("functional")),
                 "product_note": None, "motifs": None, "directions": [], "law_mode": "off", "law_total": 0, "law_core": 0}
     law_all = law_rows(db, industries)
     # 규제: 업종의 조각이 LAW_ALL_MAX 이하면 전부(작을 때는 검색보다 확실). 그보다 많으면(3-B 법령 전문) 핵심 규제(CORE_LAW)는 **항상** 넣고,
@@ -425,13 +440,18 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     law_search = len(law_all) > LAW_ALL_MAX
     core = core_law_rows(db, industries) if law_search else []
     core_docs = {r["doc_id"] for r in core}
-    out = {"industries": industries, "law": core if law_search else law_all, "guide": [], "error": None, "functional_mismatch": None,
+    use_trend = trend_on(db, brief)
+    out = {"industries": industries, "law": core if law_search else law_all, "guide": [], "trend": [], "trend_mode": "on" if use_trend else "off",
+           "error": None, "functional_mismatch": None,
            "product_note": None, "motifs": None, "directions": brand_directions(db, brand_id),
            "law_mode": "core+search" if law_search else "all", "law_total": len(law_all), "law_core": len(core)}
-    if has_guide(db, brand_id, group_id) or law_search:
+    if has_guide(db, brand_id, group_id) or law_search or use_trend:
         try:
-            layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {})}
-            skip = (lambda ch: _test_result(ch) or ch.doc_id in core_docs) if core_docs else _test_result
+            # 트렌드는 요약 조각을 빼고 TREND_K 개: 요약이 섞여 올 수 있어 하나 더 받는다
+            layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {}), **({"트렌드": TREND_K + 1} if use_trend else {})}
+            # 트렌드 조각은 수치(+27%)가 들어 있어 _test_result(시험 수치 조각 제외)에 걸리므로 트렌드 문서는 그 검사에서 뺀다
+            trend_docs = set(db.scalars(select(KnowledgeDoc.id).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용"))) if use_trend else set()
+            skip = lambda ch: ch.doc_id in core_docs or (ch.doc_id not in trend_docs and _test_result(ch))
             with db.begin_nested():     # SQL 이 실패해도(차원 불일치 등) 트랜잭션이 깨지지 않게 SAVEPOINT 안에서 검색한다
                 res = search(db, query_text(brief), brand_id=brand_id, group_id=group_id, layer_k=layer_k,
                              product_name=brief.get("product_name"), embedder=embedder, skip=skip, industries=industries or None)
@@ -445,6 +465,8 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
                 out["product_note"] = (f"'{brief.get('product_name')}' 과 이름이 같은 제품 자료가 없어 비슷한 자료({products[0]['product_name']})를 "
                                        "참고했습니다. 같은 제품이면 sources.json 의 aliases 에 이 이름을 추가하세요")
             out["guide"] = products + [r for layer in ("브랜드", "그룹") for r in res.get(layer, [])]
+            if use_trend:
+                out["trend"] = [r for r in res.get("트렌드", []) if r["section"] != "요약"][:TREND_K]
         except Exception as e:      # 키·네트워크 오류 등. 메시지에 민감 정보가 있을 수 있어 이름만 남긴다
             out["error"] = type(e).__name__
     out["functional_mismatch"] = functional_mismatch(out["guide"], brief.get("functional"))
@@ -458,14 +480,16 @@ def refs(k: dict) -> dict:
             "industries": k["industries"], "error": k["error"], "functional_mismatch": k["functional_mismatch"],
             "product_note": k.get("product_note"), "embed_model": EMBED_MODEL,
             "motifs": k.get("motifs"), "directions": k.get("directions") or [],
-            "law_mode": k.get("law_mode"), "law_total": k.get("law_total"), "law_core": k.get("law_core")}
+            "law_mode": k.get("law_mode"), "law_total": k.get("law_total"), "law_core": k.get("law_core"),
+            "trend": [{x: r[x] for x in ("chunk_id", "source_id", "section", "score")} for r in k.get("trend", [])],
+            "trend_mode": k.get("trend_mode")}
 
 
 def from_refs(db: Session, saved: dict | None) -> dict | None:
     """refs() 로 남긴 기록 → for_copy 와 같은 모양(임베딩 호출 없음). 지워진 조각은 빠진다. 기록이 없으면 None."""
     if not saved:
         return None
-    ids = saved.get("law_chunk_ids", []) + [g["chunk_id"] for g in saved.get("guide", [])]
+    ids = saved.get("law_chunk_ids", []) + [g["chunk_id"] for g in saved.get("guide", [])] + [t["chunk_id"] for t in saved.get("trend", [])]
     rows = {ch.id: _row(ch, doc) for ch, doc in db.execute(
         select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
         .where(KnowledgeChunk.id.in_(ids))).all()} if ids else {}
@@ -473,6 +497,8 @@ def from_refs(db: Session, saved: dict | None) -> dict | None:
     for g in saved.get("guide", []):
         if g["chunk_id"] in rows:
             guide.append({**rows[g["chunk_id"]], "score": g.get("score")})
+    trend = [{**rows[t["chunk_id"]], "score": t.get("score")} for t in saved.get("trend", []) if t["chunk_id"] in rows]
     return {"industries": saved.get("industries", []), "law": [rows[i] for i in saved.get("law_chunk_ids", []) if i in rows],
-            "guide": guide, "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch"),
+            "guide": guide, "trend": trend, "trend_mode": saved.get("trend_mode"),
+            "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch"),
             "product_note": saved.get("product_note"), "motifs": saved.get("motifs"), "directions": saved.get("directions") or []}

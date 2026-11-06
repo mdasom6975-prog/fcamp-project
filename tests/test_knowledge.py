@@ -440,3 +440,49 @@ def test_control_brand_without_group_gets_no_knowledge_at_all(session):
     assert k["law"] == [] and k["guide"] == [] and k["law_mode"] == "off" and "화장품" in k["industries"]
     g = knowledge.for_copy(session, 1, 7, {"product_name": "크림", "description": "아토피 치료 화장품"}, embedder=fake_embed)
     assert g["law"] and g["law_mode"] == "all", "같은 브랜드라도 그룹이 있으면 규제가 들어간다"
+
+
+def _trend_doc(session):
+    """이번 주 트렌드 문서(요약 1 + 키워드 3)."""
+    from app import knowledge
+    return knowledge.add_document(session, layer="트렌드", source_id="trend_2026-W45", title="화장품 검색 트렌드 2026-11-06 기준 주",
+                                  chunks=[("요약", "[화장품 검색 트렌드 요약] 네이버 검색 상승 상위 3개: 수분크림(+27%), 핸드크림(+58%), 보습(+22%)"),
+                                          ("수분크림", "[화장품 검색 트렌드] '수분크림' (품목 키워드) — 네이버 검색 관심 +27%, 쇼핑 클릭 -19%"),
+                                          ("핸드크림", "[화장품 검색 트렌드] '핸드크림' (품목 키워드) — 네이버 검색 관심 +58%, 쇼핑 클릭 +35%"),
+                                          ("보습", "[화장품 검색 트렌드] '보습' (효능·상황 키워드) — 네이버 검색 관심 +22%, 쇼핑 클릭 +92%")],
+                                  industry="화장품", embedder=fake_embed)
+
+
+def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, monkeypatch):
+    from app import copywriter, knowledge
+    _add(session, layer="브랜드", source_id="brand_x", title="브랜드 소개", chunks=[("소개", "민감 피부를 위한 더마 브랜드")], group_id=7, brand_id=1)
+    _trend_doc(session)
+    monkeypatch.setattr(knowledge, "COPY_TREND", True)
+    brief = {"product_name": "수분크림", "description": "보습 장벽 크림", "key_message": "속건조"}
+    k = knowledge.for_copy(session, 1, 7, brief, embedder=fake_embed)
+    assert k["trend_mode"] == "on" and 1 <= len(k["trend"]) <= knowledge.TREND_K
+    assert all(r["layer"] == "트렌드" and r["section"] != "요약" for r in k["trend"])
+    assert "수분크림" in [r["section"] for r in k["trend"]]
+    # 프롬프트에 문단이 붙고 규제·브랜드 문단 뒤에 온다
+    v = copywriter.knowledge_vars(k, brief)
+    assert "[이번 주 검색 트렌드 — 참고]" in v["trend"] and "'수분크림'" in v["trend"]
+    _, user = copywriter._prompt("에스트라", {"voice": {}, "required_phrases": [], "forbidden_phrases": []}, brief,
+                                 {"platform": "Meta", "name": "Instagram 피드"}, copywriter.limits_for([]), k)
+    assert user.index("[이번 주 검색 트렌드") > user.index("[브랜드 지식")
+    # refs → from_refs 로 되살아난다
+    refs = knowledge.refs(k)
+    assert refs["trend_mode"] == "on" and [t["section"] for t in refs["trend"]] == [r["section"] for r in k["trend"]]
+    back = knowledge.from_refs(session, refs)
+    assert [r["chunk_id"] for r in back["trend"]] == [r["chunk_id"] for r in k["trend"]] and back["trend_mode"] == "on"
+
+
+def test_for_copy_trend_is_off_for_control_brand_brief_switch_and_env(session, monkeypatch):
+    from app import knowledge
+    _trend_doc(session)
+    monkeypatch.setattr(knowledge, "COPY_TREND", True)
+    brief = {"product_name": "수분크림", "description": "보습"}
+    assert knowledge.for_copy(session, 99, None, brief, embedder=fake_embed)["trend_mode"] == "off"          # 대조군: 지식 전부 없음
+    k = knowledge.for_copy(session, 1, 7, {**brief, "use_trend": False}, embedder=fake_embed)
+    assert k["trend_mode"] == "off" and k["trend"] == []                                                        # 브리프 스위치
+    monkeypatch.setattr(knowledge, "COPY_TREND", False)
+    assert knowledge.for_copy(session, 1, 7, brief, embedder=fake_embed)["trend_mode"] == "off"                # 환경변수

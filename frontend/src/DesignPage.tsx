@@ -2020,6 +2020,7 @@ function ProductPicker({ brandId, brandName, onPick }: { brandId: number; brandN
    GET /api/designs/{id}/evidence — 브리프에 남은 참조로 재구성하므로 과금 없음. 대조군(law_mode=off)은 "지식 없이 만든 카피"로 표시. */
 type EvidenceRow = { chunk_id: number; source_id: string; doc_title: string; layer: string; section: string; text: string; score: number | null; product_name: string | null; core?: boolean }
 type Evidence = { has: boolean; industries?: string[]; law_mode?: string | null; law_total?: number | null; law?: EvidenceRow[]; guide?: EvidenceRow[]
+  trend?: EvidenceRow[]; trend_mode?: string | null     // 이번 주 검색 트렌드 조각(knowledge.TREND_K, 요약 제외). use_trend=false 또는 COPY_TREND=0 이면 off
   variants?: { variant_no: number; angle: string; evidence: string }[]; error?: string | null; functional_mismatch?: string | null; product_note?: string | null }
 function EvidencePanel({ designId, refreshKey }: { designId: number; refreshKey: string }) {
   const [ev, setEv] = useState<Evidence | null>(null)
@@ -2060,6 +2061,11 @@ function EvidencePanel({ designId, refreshKey }: { designId: number; refreshKey:
           <h5>제품 · 브랜드 · 그룹</h5>
           <ul>{[...byLayer('제품'), ...byLayer('브랜드'), ...byLayer('그룹')].map((r) => row(r, r.layer))}</ul>
           {(ev.guide ?? []).length === 0 && <p className="muted">이 브랜드에 등록된 제품·브랜드·그룹 자료가 없습니다</p>}
+        </div>
+        <div>
+          <h5>트렌드 {ev.trend_mode === 'on' ? '(이번 주 검색 상승, 브리프와 가까운 순)' : ev.trend_mode === 'off' ? '(끔)' : ''}</h5>
+          <ul>{(ev.trend ?? []).map((r) => row(r, '트렌드'))}</ul>
+          {(ev.trend ?? []).length === 0 && <p className="muted">{ev.trend_mode === 'off' ? '이 카피는 트렌드 없이 만들었습니다' : '등록된 트렌드 조각이 없습니다 (tools/fetch_trends.py)'}</p>}
         </div>
       </div>
       {(ev.variants ?? []).length > 0 && (

@@ -262,5 +262,6 @@ def copy_evidence(design_id: int, db: Session = Depends(get_db)):
     for r in k["law"]:
         r["core"] = r["source_id"] in core_ids
     return {"has": True, "industries": k["industries"], "law_mode": refs.get("law_mode"), "law_total": refs.get("law_total"),
-            "law": k["law"], "guide": k["guide"], "variants": k["variants"], "error": k["error"],
+            "law": k["law"], "guide": k["guide"], "trend": k.get("trend", []), "trend_mode": k.get("trend_mode"),
+            "variants": k["variants"], "error": k["error"],
             "functional_mismatch": k["functional_mismatch"], "product_note": k["product_note"], "embed_model": k["embed_model"]}
