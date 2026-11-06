@@ -410,6 +410,43 @@ def brand_directions(db: Session, brand_id: int | None) -> list[str]:
     return next(((d.visual or {}).get("directions") for d in docs if (d.visual or {}).get("directions")), [])
 
 
+TREND_GROUP_PRIORITY = {"효능·상황": 0, "성분": 1, "품목": 2}     # 새 정보가 되는 순서(품목명은 브리프에 이미 있기 쉽다)
+TREND_CANDIDATES = 3                                              # 후보 = TREND_K × 이 배수(브리프와 가까운 순)
+
+
+def pick_trend(rows: list[dict], brief: dict, metas: dict[str, dict], k: int = TREND_K) -> list[dict]:
+    """트렌드 조각 선택 규칙(05 비교표의 원인 → 11/06 개선):
+    ① 브리프(상품명·설명·핵심 메시지)에 이미 있는 키워드는 뺀다(새 정보가 아니다)
+    ② 묶음 우선순위 효능·상황 > 성분 > 품목, 같은 묶음에서는 쇼핑 클릭도 함께 오른 키워드가 앞, 그다음 브리프 유사도
+    ③ 상위 k. 걸러져 k 가 안 되면 있는 만큼. 각 조각에 why(고른 이유)를 붙인다."""
+    norm = lambda t: re.sub(r"\s+", "", t or "").lower()
+    brief_text = norm(" ".join(str(brief.get(x) or "") for x in ("product_name", "description", "key_message")))
+    cands = []
+    for r in rows:
+        kw = r["section"]
+        if kw == "요약" or norm(kw) in brief_text:
+            continue
+        m = metas.get(kw) or {}
+        shop_up = (m.get("shopping") or 0) > 0
+        cands.append((TREND_GROUP_PRIORITY.get(m.get("group"), 3), 0 if shop_up else 1, -(r.get("score") or 0), r, m, shop_up))
+    cands.sort(key=lambda x: x[:3])
+    out = []
+    for pri, _, _, r, m, shop_up in cands[:k]:
+        why = [m.get("group") or "묶음 없음"]
+        if shop_up:
+            why.append(f"쇼핑 클릭도 +{round(m['shopping'] * 100):d}%")
+        out.append({**r, "trend_group": m.get("group"), "trend_shopping": m.get("shopping"), "trend_naver": m.get("naver"), "why": " · ".join(why)})
+    return out
+
+
+def trend_metas(db: Session) -> dict[str, dict]:
+    """'사용' 트렌드 문서의 키워드별 메타(visual.rows)."""
+    out: dict[str, dict] = {}
+    for doc in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용")):
+        out.update(((doc.visual or {}).get("rows") or {}))
+    return out
+
+
 def has_trend(db: Session) -> bool:
     """'사용' 상태의 트렌드 문서가 있는가(없으면 트렌드 검색을 건너뛴다)."""
     return db.scalar(select(func.count()).select_from(KnowledgeDoc).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용")) > 0
@@ -448,7 +485,7 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     if has_guide(db, brand_id, group_id) or law_search or use_trend:
         try:
             # 트렌드는 요약 조각을 빼고 TREND_K 개: 요약이 섞여 올 수 있어 하나 더 받는다
-            layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {}), **({"트렌드": TREND_K + 1} if use_trend else {})}
+            layer_k = {**GUIDE_K, **({"규제": LAW_K} if law_search else {}), **({"트렌드": TREND_K * TREND_CANDIDATES + 1} if use_trend else {})}
             # 트렌드 조각은 수치(+27%)가 들어 있어 _test_result(시험 수치 조각 제외)에 걸리므로 트렌드 문서는 그 검사에서 뺀다
             trend_docs = set(db.scalars(select(KnowledgeDoc.id).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용"))) if use_trend else set()
             skip = lambda ch: ch.doc_id in core_docs or (ch.doc_id not in trend_docs and _test_result(ch))
@@ -466,7 +503,7 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
                                        "참고했습니다. 같은 제품이면 sources.json 의 aliases 에 이 이름을 추가하세요")
             out["guide"] = products + [r for layer in ("브랜드", "그룹") for r in res.get(layer, [])]
             if use_trend:
-                out["trend"] = [r for r in res.get("트렌드", []) if r["section"] != "요약"][:TREND_K]
+                out["trend"] = pick_trend(res.get("트렌드", []), brief, trend_metas(db))
         except Exception as e:      # 키·네트워크 오류 등. 메시지에 민감 정보가 있을 수 있어 이름만 남긴다
             out["error"] = type(e).__name__
     out["functional_mismatch"] = functional_mismatch(out["guide"], brief.get("functional"))
@@ -481,7 +518,7 @@ def refs(k: dict) -> dict:
             "product_note": k.get("product_note"), "embed_model": EMBED_MODEL,
             "motifs": k.get("motifs"), "directions": k.get("directions") or [],
             "law_mode": k.get("law_mode"), "law_total": k.get("law_total"), "law_core": k.get("law_core"),
-            "trend": [{x: r[x] for x in ("chunk_id", "source_id", "section", "score")} for r in k.get("trend", [])],
+            "trend": [{x: r.get(x) for x in ("chunk_id", "source_id", "section", "score", "why")} for r in k.get("trend", [])],
             "trend_mode": k.get("trend_mode")}
 
 
@@ -497,7 +534,7 @@ def from_refs(db: Session, saved: dict | None) -> dict | None:
     for g in saved.get("guide", []):
         if g["chunk_id"] in rows:
             guide.append({**rows[g["chunk_id"]], "score": g.get("score")})
-    trend = [{**rows[t["chunk_id"]], "score": t.get("score")} for t in saved.get("trend", []) if t["chunk_id"] in rows]
+    trend = [{**rows[t["chunk_id"]], "score": t.get("score"), "why": t.get("why")} for t in saved.get("trend", []) if t["chunk_id"] in rows]
     return {"industries": saved.get("industries", []), "law": [rows[i] for i in saved.get("law_chunk_ids", []) if i in rows],
             "guide": guide, "trend": trend, "trend_mode": saved.get("trend_mode"),
             "error": saved.get("error"), "functional_mismatch": saved.get("functional_mismatch"),

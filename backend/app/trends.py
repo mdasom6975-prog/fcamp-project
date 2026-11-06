@@ -232,6 +232,11 @@ def collect(client: httpx.Client, cfg: dict, today: date | None = None, use_goog
             "source_id": sid, "label": label, "keywords": len(names)}
 
 
+def trend_meta(row: dict) -> dict:
+    """문서 메타(visual.rows)에 남길 키워드별 요약: 묶음·상승률. 선택 규칙이 조각 본문을 파싱하지 않게."""
+    return {"group": row.get("group"), "naver": row.get("naver_search"), "shopping": row.get("naver_shopping"), "google": row.get("google")}
+
+
 def register(db, result: dict, embedder=None) -> tuple[int, int]:
     """결과를 '트렌드' 층 문서 하나로 등록하고 이전 주 트렌드 문서를 보관한다. 반환 (문서 id, 조각 수)."""
     from sqlalchemy import select
@@ -244,7 +249,8 @@ def register(db, result: dict, embedder=None) -> tuple[int, int]:
         old.status = "보관"
     doc = knowledge.add_document(db, layer="트렌드", source_id=result["source_id"], title=f"화장품 검색 트렌드 {label}", chunks=chunks,
                                  source_url="https://datalab.naver.com/", fetched_at=result["period"][1], industry="화장품",
-                                 visual={"period": result["period"], "google": result["google_error"] is None, "top": [r["keyword"] for r in rows]},
+                                 visual={"period": result["period"], "google": result["google_error"] is None, "top": [r["keyword"] for r in rows],
+                                         "rows": {r["keyword"]: trend_meta(r) for r in rows}},     # 카피의 선택 규칙(knowledge.pick_trend)이 읽는다
                                  embedder=embedder or knowledge.embed)
     db.commit()
     return doc.id, len(chunks)

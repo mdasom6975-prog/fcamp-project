@@ -450,7 +450,24 @@ def _trend_doc(session):
                                           ("수분크림", "[화장품 검색 트렌드] '수분크림' (품목 키워드) — 네이버 검색 관심 +27%, 쇼핑 클릭 -19%"),
                                           ("핸드크림", "[화장품 검색 트렌드] '핸드크림' (품목 키워드) — 네이버 검색 관심 +58%, 쇼핑 클릭 +35%"),
                                           ("보습", "[화장품 검색 트렌드] '보습' (효능·상황 키워드) — 네이버 검색 관심 +22%, 쇼핑 클릭 +92%")],
-                                  industry="화장품", embedder=fake_embed)
+                                  industry="화장품", embedder=fake_embed,
+                                  visual={"rows": {"수분크림": {"group": "품목", "naver": 0.27, "shopping": -0.19},
+                                                   "핸드크림": {"group": "품목", "naver": 0.58, "shopping": 0.35},
+                                                   "보습": {"group": "효능·상황", "naver": 0.22, "shopping": 0.92}}})
+
+
+def test_pick_trend_drops_brief_keywords_and_prefers_situation_and_shopping():
+    from app import knowledge
+    rows = [{"section": "요약", "score": 0.9}, {"section": "수분크림", "score": 0.8}, {"section": "핸드크림", "score": 0.5},
+            {"section": "보습", "score": 0.4}, {"section": "바쿠치올", "score": 0.3}, {"section": "아이크림", "score": 0.6}]
+    metas = {"수분크림": {"group": "품목", "shopping": -0.19}, "핸드크림": {"group": "품목", "shopping": 0.35},
+             "보습": {"group": "효능·상황", "shopping": 0.92}, "바쿠치올": {"group": "성분", "shopping": 0.36}, "아이크림": {"group": "품목", "shopping": -0.09}}
+    brief = {"product_name": "아토베리어365 하이드로 수분 크림", "description": "장벽 캡슐크림", "key_message": "속수분"}
+    out = knowledge.pick_trend(rows, brief, metas, k=3)
+    assert [r["section"] for r in out] == ["보습", "바쿠치올", "핸드크림"]      # 요약·브리프에 있는 '수분크림' 제외, 효능 > 성분 > 품목(쇼핑 상승 우선)
+    assert out[0]["why"] == "효능·상황 · 쇼핑 클릭도 +92%" and out[2]["why"] == "품목 · 쇼핑 클릭도 +35%"
+    assert knowledge.pick_trend(rows, brief, metas, k=1)[0]["section"] == "보습"
+    assert knowledge.pick_trend([{"section": "수분크림", "score": 0.8}], brief, metas) == []     # 억지로 채우지 않는다
 
 
 def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, monkeypatch):
@@ -458,14 +475,14 @@ def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, mo
     _add(session, layer="브랜드", source_id="brand_x", title="브랜드 소개", chunks=[("소개", "민감 피부를 위한 더마 브랜드")], group_id=7, brand_id=1)
     _trend_doc(session)
     monkeypatch.setattr(knowledge, "COPY_TREND", True)
-    brief = {"product_name": "수분크림", "description": "보습 장벽 크림", "key_message": "속건조"}
+    brief = {"product_name": "수분크림", "description": "장벽 캡슐 크림", "key_message": "속건조"}   # 브리프에 없는 효능·상황(보습)이 올라와야 한다
     k = knowledge.for_copy(session, 1, 7, brief, embedder=fake_embed)
     assert k["trend_mode"] == "on" and 1 <= len(k["trend"]) <= knowledge.TREND_K
     assert all(r["layer"] == "트렌드" and r["section"] != "요약" for r in k["trend"])
-    assert "수분크림" in [r["section"] for r in k["trend"]]
+    assert "수분크림" not in [r["section"] for r in k["trend"]] and k["trend"][0]["section"] == "보습" and k["trend"][0]["why"].startswith("효능·상황")   # 브리프에 있는 품목은 빠지고 효능·상황이 앞
     # 프롬프트에 문단이 붙고 규제·브랜드 문단 뒤에 온다
     v = copywriter.knowledge_vars(k, brief)
-    assert "[이번 주 검색 트렌드 — 참고]" in v["trend"] and "'수분크림'" in v["trend"]
+    assert "[이번 주 검색 트렌드 — 참고]" in v["trend"] and "'보습'" in v["trend"] and "'수분크림'" not in v["trend"]
     _, user = copywriter._prompt("에스트라", {"voice": {}, "required_phrases": [], "forbidden_phrases": []}, brief,
                                  {"platform": "Meta", "name": "Instagram 피드"}, copywriter.limits_for([]), k)
     assert user.index("[이번 주 검색 트렌드") > user.index("[브랜드 지식")
@@ -473,7 +490,7 @@ def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, mo
     refs = knowledge.refs(k)
     assert refs["trend_mode"] == "on" and [t["section"] for t in refs["trend"]] == [r["section"] for r in k["trend"]]
     back = knowledge.from_refs(session, refs)
-    assert [r["chunk_id"] for r in back["trend"]] == [r["chunk_id"] for r in k["trend"]] and back["trend_mode"] == "on"
+    assert [r["chunk_id"] for r in back["trend"]] == [r["chunk_id"] for r in k["trend"]] and back["trend_mode"] == "on" and back["trend"][0]["why"] == k["trend"][0]["why"]
 
 
 def test_for_copy_trend_is_off_for_control_brand_brief_switch_and_env(session, monkeypatch):

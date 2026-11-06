@@ -175,7 +175,7 @@ def _knowledge_out(db: Session, brief: dict) -> dict | None:
         return None
     pick = lambda r: {x: r[x] for x in ("chunk_id", "source_id", "doc_title", "layer", "section", "text", "score", "product_name", "functional")}
     return {"industries": k["industries"], "law": [pick(r) for r in k["law"]], "guide": [pick(r) for r in k["guide"]],
-            "trend": [pick(r) for r in k.get("trend", [])], "trend_mode": k.get("trend_mode"),
+            "trend": [{**pick(r), "why": r.get("why")} for r in k.get("trend", [])], "trend_mode": k.get("trend_mode"),
             "error": k["error"], "functional_mismatch": k["functional_mismatch"], "product_note": k.get("product_note"),
             "variants": (brief.get("knowledge") or {}).get("variants") or [],
             "motifs": k.get("motifs"), "directions": k.get("directions") or [],
