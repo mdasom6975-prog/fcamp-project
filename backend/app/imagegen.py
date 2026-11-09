@@ -234,12 +234,19 @@ def tone_text(style: str, description: str | None) -> str:
     return " ".join(kept).rstrip(". ") or "지정 없음"
 
 
+SMALLBIZ_DIRECTION = "아래 [브랜드 톤]이 정한 장소·빛·분위기를 그대로 따른다"
+
+
 def pick_direction(style: str, brief: dict) -> str:
     """[연출] 후보(prompts/image/style/<형태>.md 의 meta directions, ' | ' 로 구분) 중 이 캠페인의 것 하나.
     상품명·핵심 메시지·타깃의 해시로 정해 같은 캠페인은 다시 만들어도 같은 연출이고, 캠페인마다 고르게 갈린다. 후보가 없으면 빈 문자열.
     사진 형태(실사)에서 브랜드 연출 후보(카피 생성 때 brief.knowledge 에 남긴 값)가 있으면 공통 후보 대신 그것을 쓴다
     (공통 후보는 브랜드를 모르고 고르므로 설화수에 '청량한 여름 아침'이 나오곤 했다)."""
     options = [o.strip() for o in prompts.load(f"image/style/{STYLES[style]}").meta.get("directions", "").split("|") if o.strip()]
+    if options and brief.get("smallbiz"):
+        # 소상공인 톤 프리셋은 장소·빛까지 톤 문장에 정해 두었다. 공통 후보('저녁 스탠드 불빛')가 톤('창가의 밝은 자연광')과
+        # 부딪혀 비전 채점 톤 2점이 나왔다(11/09 실측) → 연출은 톤을 그대로 따르게 한다
+        return SMALLBIZ_DIRECTION
     brand_options = (brief.get("knowledge") or {}).get("directions") or []
     if options and brand_options and style.startswith("실사"):
         options = brand_options

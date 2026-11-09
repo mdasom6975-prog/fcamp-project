@@ -326,9 +326,11 @@ def pick_best(brand_name: str, brand: dict, brief: dict, variants: list[dict], k
             if 1 <= no <= len(pool):
                 pool[no - 1]["score"] = sum(int(s.get(k) or 0) for k in JUDGE_KEYS)
                 pool[no - 1]["judge"] = str(s.get("reason") or "").strip()
+                pool[no - 1]["fact"] = int(s.get("fact") or 0)
     except Exception:
         return pool[:keep]
-    ranked = sorted(pool, key=lambda v: (bool(v.get("violations")), -v.get("score", 0)))
+    # 사실 근거 2점 이하(입력에 없는 효능·사연을 지어냄)는 합계가 높아도 뒤로 — 합계만 보면 장면이 생생한 안이 이겼다
+    ranked = sorted(pool, key=lambda v: (bool(v.get("violations")), 0 < v.get("fact", 5) <= 2, -v.get("score", 0)))
     return ranked[:keep]
 
 

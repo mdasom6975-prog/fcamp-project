@@ -365,3 +365,21 @@ def test_image_judge_looks_at_background_before_product_paste(monkeypatch):
     bg, extra, j = routers_images._judge_and_retry(DB(), type("D", (), {"brand_id": 1, "brief": {}})(), None, "실사 제품·공간",
                                                    final, {}, plain, lambda: (_ for _ in ()).throw(AssertionError("재생성 없음")))
     assert seen == [plain] and bg is final and extra["judge"]["overall"] == 4
+
+
+def test_pick_best_puts_low_fact_after_higher_total(monkeypatch):
+    """사실 근거 2점 이하(지어낸 사연)는 합계가 높아도 뒤로 간다."""
+    from app import copywriter
+    monkeypatch.setattr("app.llm.chat_json", lambda *a, **k: {"scores": [
+        {"no": 1, "brand": 5, "fact": 2, "concrete": 5, "trend": 5, "feed": 5, "reason": "입력에 없음"},
+        {"no": 2, "brand": 4, "fact": 4, "concrete": 3, "trend": 3, "feed": 3, "reason": "ok"},
+        {"no": 3, "brand": 3, "fact": 4, "concrete": 3, "trend": 3, "feed": 3, "reason": "ok"}]})
+    out = copywriter.pick_best("b", {}, {"product_name": "p"}, _cands(3))
+    assert [v["headline"] for v in out] == ["제목2", "제목3", "제목1"]
+
+
+def test_smallbiz_image_direction_follows_tone_not_common_options():
+    from app import imagegen
+    b = {"product_name": "수분 장벽 크림 50ml", "key_message": "겨울 건조함에 맞서는 보습"}
+    assert imagegen.pick_direction("실사 제품·공간", b) != imagegen.SMALLBIZ_DIRECTION
+    assert imagegen.pick_direction("실사 제품·공간", {**b, "smallbiz": {"preset_id": "x"}}) == imagegen.SMALLBIZ_DIRECTION
