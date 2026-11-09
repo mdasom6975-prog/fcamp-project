@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import smallbiz, storage
-from .models import (ApiCall, ArchivedImage, Asset, Brand, BrandGroup, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
+from .models import (ApiCall, FeedBrand, ArchivedImage, Asset, Brand, BrandGroup, BrandVersion, CopyVariant, Design, DesignSnapshot, Element,
                      Export, GeneratedImage, IconAsset, Judgment, PinSheet, ReviewResult)
 from .routers_assets import PROVIDED_FONTS, get_db
 from .schemas import DEFAULT_COLOR_ROLES, DEFAULT_LEVELS, BrandGroupIn, BrandIn
@@ -120,8 +120,9 @@ def _group_name(db: Session, group_id: int | None) -> str | None:
 
 @router.get("/brands")
 def list_brands(db: Session = Depends(get_db)):
+    feed = set(db.scalars(select(FeedBrand.brand_id)).all())      # 피드 세트 생성기(새 흐름)의 브랜드는 이전 버전 목록에 섞지 않는다
     brands = [b for b in db.scalars(select(Brand).order_by(Brand.id)).all()
-              if not b.name.startswith(smallbiz.BRAND_PREFIX)]     # 소상공인 스타일 프리셋의 숨은 브랜드는 목록에서 뺀다
+              if not b.name.startswith(smallbiz.BRAND_PREFIX) and b.id not in feed]     # 소상공인 스타일 프리셋의 숨은 브랜드는 목록에서 뺀다
     groups = {g.id: g.name for g in db.scalars(select(BrandGroup)).all()}
     out = []
     for b in brands:

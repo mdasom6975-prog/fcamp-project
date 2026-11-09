@@ -320,6 +320,27 @@ class Judgment(Base):
     result: Mapped[dict] = mapped_column(JSON)
 
 
+class FeedBrand(Base):
+    """피드 세트 생성기(2026-11 개편)의 브랜드. 규칙은 기존 brands/brand_versions 를 쓰고 여기에는 톤 프리셋만 둔다."""
+    __tablename__ = "feed_brands"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    brand_id: Mapped[int] = mapped_column(ForeignKey("brands.id"), index=True)
+    tone: Mapped[str] = mapped_column(String(40))          # smallbiz 화장품 톤 프리셋 id
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class VirtualModel(Base):
+    """브랜드 전속 가상 모델. 기준 얼굴 사진(asset)이 이후 모든 장면의 얼굴 참조가 된다. 성별마다 '선택' 은 하나."""
+    __tablename__ = "virtual_models"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    brand_id: Mapped[int] = mapped_column(ForeignKey("brands.id"), index=True)
+    gender: Mapped[str] = mapped_column(String(2))          # 여 | 남
+    asset_id: Mapped[int] = mapped_column(Integer)
+    appearance: Mapped[str] = mapped_column(String(200))   # 장면 프롬프트에 다시 넣는 외모 설명
+    status: Mapped[str] = mapped_column(String(10), default="후보")   # 후보 | 선택
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class KnowledgeDoc(Base):
     """RAG 로 찾아 쓸 문서 하나(법령 조문 묶음·그룹 페이지·브랜드 소개·제품 정보). knowledge.py 가 조각으로 나눠 저장한다.
     layer: 규제 | 그룹 | 브랜드 | 제품 | 캠페인. 규제는 group_id·brand_id 를 비워 어느 브랜드에나 적용한다."""
