@@ -29,7 +29,7 @@ type Entry = {
 }
 type Agg = { count: number; failed: number; ms_total: number; ms_avg: number; tokens_in: number; tokens_out: number; cost_usd: number; cost_krw: number | null; unpriced: number; estimated: boolean }
 type Row = { ts: string; api: string; kind: string; provider: string; model: string; ok: boolean; ms: number | null; size?: string; quality?: string; tokens_in?: number; tokens_out?: number; error?: string; cost_usd: number | null; cost_krw: number | null; estimated: boolean; prompt_id?: string; served_by?: string }
-type Judgment = { ts: string; background_id: number; file: string; template: string | null; style: string; model: string; scores: { item: string; score: number; reason: string }[]; overall: number; summary: string; cost_usd: number | null; tokens_in: number | null; tokens_out: number | null }
+type Judgment = { ts: string; background_id: number | null; file: string; template: string | null; style: string; model: string; scores: { item: string; score: number; reason: string }[]; overall: number; summary: string; cost_usd: number | null; tokens_in: number | null; tokens_out: number | null }
 type Mapping = { key: string; item: string; value: string; stages: Record<'copy' | 'background' | 'icon' | 'compose' | 'review', string | null> }
 type KChunk = { chunk_id: number; source_id: string; doc_title: string; layer: string; section: string; text: string; score: number | null; product_name: string | null; functional: string[] }
 type Knowledge = { industries: string[]; law: KChunk[]; guide: KChunk[]; error: string | null; functional_mismatch: string | null; functional: string[] | null; embed_model: string | null; product_note: string | null; motifs: string | null; directions: string[]; variants: { variant_no: number; angle: string; evidence: string }[] }
@@ -332,7 +332,7 @@ export default function AnalysisPage({ scope, workBrandId }: { scope: BrandScope
                 <h4>결과</h4>
                 {!data.results.backgrounds.length && <p className="muted">아직 생성한 배경이 없습니다.</p>}
                 {data.results.backgrounds.map((bg) => {
-                  const js = data.judgments.filter((j) => j.background_id === bg.id)
+                  const js = data.judgments.filter((j) => j.background_id === bg.id || (j.background_id == null && j.file === bg.file))   // 자동 채점(소상공인)은 파일 이름으로 짝짓는다
                   return (
                     <div key={bg.id} className="an-bg">
                       <div className="an-bg-row">

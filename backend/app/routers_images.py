@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -351,24 +352,32 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     bp = _bg_prompt(db, d, template, force_ratio=force_ratio, variant=ref_img is not None)
     prompt, style, reason, single = bp["prompt"], bp["style"], bp["reason"], bp["single"]
     product_img, product_id, pmode, composite, bv = bp["product_img"], bp["product_id"], bp["pmode"], bp["composite"], bp["bv"]
-    try:
-        if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
-            bg = (imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"]) if ref_img is not None
-                  else imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider))
-        elif ref_img is not None or product_img is not None:
-            bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"], product=product_img)
-        else:
-            bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider)
-    except imagegen.QuotaExceeded as e:
-        raise HTTPException(429, str(e))
-    except Exception as e:
-        raise HTTPException(502, _gen_error(e))
-    extra: dict = {}
-    if composite:
+    def make() -> tuple[Image.Image, dict]:
+        try:
+            if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
+                bg = (imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"]) if ref_img is not None
+                      else imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider))
+            elif ref_img is not None or product_img is not None:
+                bg = imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"], product=product_img)
+            else:
+                bg = imagegen.generate_background(prompt, gw, gh, quality, model=st["model"], provider=provider)
+        except imagegen.QuotaExceeded as e:
+            raise HTTPException(429, str(e))
+        except Exception as e:
+            raise HTTPException(502, _gen_error(e))
+        if not composite:
+            return bg, {}
         clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
         bg, placed = compose.paste_product(bg, product_img, template, product_scale(d), layout_name(d))
-        extra = {"clean_file": clean_key, "product_placed": placed}
+        return bg, {"clean_file": clean_key, "product_placed": placed}
+
+    bg, extra = make()
+    judged = None
+    if image_judging(d):      # 소상공인: 비전 채점 → 기준 미달이면 1회 다시 만들어 overall 이 높은 쪽을 쓴다
+        bg, extra, judged = _judge_and_retry(db, d, bv, style, bg, extra, make)
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
+    if judged is not None:
+        _save_judgment(d, style, path, template, judged)
     layout = {"template": template, "size": [bg.width, bg.height], "style": style, "style_reason": reason,
               "quality": quality, "mode": st["bg_mode"], "provider": provider,
               **({"single_extra": True} if force_ratio else {}),
@@ -383,6 +392,63 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         layout["reference"] = {"background_id": reference.id, "file": Path(reference.file_path).name,
                                "template": (reference.layout or {}).get("template")}
     return path, bg, prompt, layout
+
+
+JUDGE_MIN = 2         # 이 점수 이하면 기준 미달(글자·로고 없음 항목 또는 overall)
+
+
+def image_judging(d: Design) -> bool:
+    """배경 비전 심사+재생성을 쓰는가: 소상공인 캠페인이고 IMAGE_JUDGE 가 0 이 아닐 때."""
+    return bool((d.brief or {}).get("smallbiz")) and os.getenv("IMAGE_JUDGE", "1") != "0"
+
+
+def _judge(d: Design, bv: BrandVersion, brand: Brand, style: str, im: Image.Image) -> dict | None:
+    from . import analysis
+    try:
+        return analysis.judge_image(im, analysis.judge_vars(brand, bv, d.brief or {}, style))
+    except Exception as e:      # 채점 실패는 생성을 막지 않는다
+        log.warning("배경 비전 채점 실패: %s", type(e).__name__)
+        return None
+
+
+def _bad(j: dict | None) -> bool:
+    if j is None:
+        return False
+    text = next((s["score"] for s in j["scores"] if s["item"] == "글자·로고 없음"), 5)
+    return j["overall"] <= JUDGE_MIN or text <= JUDGE_MIN
+
+
+def _judge_and_retry(db: Session, d: Design, bv: BrandVersion, style: str, bg: Image.Image, extra: dict, make):
+    """채점하고 기준 미달이면 1회 재생성. 반환: (이미지, layout 추가분(judge 요약 포함), 고른 쪽 채점)."""
+    brand = db.get(Brand, d.brand_id)
+    j = _judge(d, bv, brand, style, bg)
+    tries = [(bg, extra, j)]
+    if _bad(j):
+        try:
+            bg2, extra2 = make()
+            tries.append((bg2, extra2, _judge(d, bv, brand, style, bg2)))
+        except HTTPException as e:       # 재생성이 실패하면 첫 이미지를 쓴다
+            log.warning("배경 재생성 실패: %s", e.detail)
+    bg, extra, j = max(tries, key=lambda t: (not _bad(t[2]), (t[2] or {}).get("overall", 0)))   # 기준 통과 우선, 같으면 먼저 만든 것
+    if j is not None:
+        extra = {**extra, "judge": {"overall": j["overall"], "summary": j["summary"], "tries": len(tries),
+                                    "first_overall": (tries[0][2] or {}).get("overall")}}
+    return bg, extra, j
+
+
+def _save_judgment(d: Design, style: str, path: str, template: str, j: dict) -> None:
+    """자동 채점 결과를 judgments 테이블에 남긴다(분석 화면이 파일 이름으로 배경과 짝짓는다)."""
+    from . import analysis
+    from . import db as db_module
+    try:
+        with db_module.SessionLocal() as s:
+            s.add(analysis.Judgment(design_id=d.id, result={
+                "ts": datetime.now().isoformat(timespec="seconds"), "auto": True, "background_id": None,
+                "file": Path(path).stem, "template": template, "style": style, "model": analysis.llm.model_for("judge"),
+                **j, "cost_usd": None, "tokens_in": None, "tokens_out": None}))
+            s.commit()
+    except Exception:
+        pass
 
 
 def _bg_row(d: Design, pid: int, path: Path | str, bg_w: int, bg_h: int, prompt: str | None, bv_id: int,

@@ -282,3 +282,70 @@ def test_generate_checked_asks_six_for_smallbiz_and_three_otherwise(monkeypatch)
     assert len(copywriter.generate_checked("b", {}, {"smallbiz": True}, {}, lim)[0]) == 3
     assert len(copywriter.generate_checked("b", {}, {}, {}, lim)[0]) == 3
     assert asked == [6, 3]
+
+
+def test_image_prompt_gets_trend_mood_only_when_angles_chosen():
+    from app import imagegen
+    tone = {"description": "맑은 자연광"}
+    base = {"product_name": "수분 크림", "description": "보습", "key_message": "겨울 보습"}
+    plain = imagegen.build_prompt("b", tone, base, "정사각", "실사 제품·공간")
+    withs = imagegen.build_prompt("b", tone, {**base, "trend_angles": ["속광", "홈케어"]}, "정사각", "실사 제품·공간")
+    assert "[이번 주 분위기]" not in plain and "속광, 홈케어" in withs and "[이번 주 분위기]" in withs
+    assert imagegen.build_prompt("b", tone, {**base, "trend_angles": []}, "정사각", "실사 제품·공간") == plain
+
+
+# ---- 3.7 배경 비전 심사 + 재생성 ----
+from tests.test_image_fit import env as img_env  # noqa: E402,F401  (픽스처: 임시 Postgres·가짜 이미지 생성)
+
+
+def _judged(overall, text=5):
+    items = ["톤 일치", "내용 일치", "표현 방식 일치", "금지 요소 없음", "글자·로고 없음"]
+    return {"scores": [{"item": i, "score": text if i == "글자·로고 없음" else 4, "reason": ""} for i in items],
+            "overall": overall, "summary": f"o{overall}"}
+
+
+def _smallbiz_image(img_env, monkeypatch, answers):
+    from app import analysis
+    c, ids, M = img_env["client"], img_env["ids"], img_env["models"]
+    with img_env["Local"]() as db:
+        d = db.get(M.Design, ids["design"]); d.brief = {**d.brief, "smallbiz": {"preset_id": "x"}}
+        db.add(M.CopyVariant(design_id=d.id, preset_version_id=ids["presets"]["피드 4:5"], variant_no=1, headline="제목",
+                             body="본문", cta="보기", selected=True, batch_no=1))
+        db.commit()
+    seen = []
+    def fake(im, vars):
+        seen.append(1)
+        a = answers[len(seen) - 1]
+        if isinstance(a, Exception): raise a
+        return a
+    monkeypatch.setattr(analysis, "judge_image", fake)
+    pid = ids["presets"]["피드 4:5"]
+    assert c.post(f"/api/designs/{ids['design']}/presets/{pid}/image", json={"regenerate_background": True}).status_code == 200
+    with img_env["Local"]() as db:
+        g = db.query(M.GeneratedImage).filter_by(kind="background", preset_version_id=pid).order_by(M.GeneratedImage.id.desc()).first()
+        js = [j.result for j in db.query(M.Judgment).filter_by(design_id=ids["design"]).all()]
+    return seen, g.layout, js
+
+
+def test_image_judge_passes_without_retry(img_env, monkeypatch):
+    seen, lay, js = _smallbiz_image(img_env, monkeypatch, [_judged(4)])
+    assert len(seen) == 1 and len(img_env["calls"]) == 1
+    assert lay["judge"]["overall"] == 4 and lay["judge"]["tries"] == 1
+    assert len(js) == 1 and js[0]["auto"] and js[0]["background_id"] is None and js[0]["overall"] == 4
+
+
+def test_image_judge_retries_once_when_text_drawn_and_keeps_better(img_env, monkeypatch):
+    seen, lay, js = _smallbiz_image(img_env, monkeypatch, [_judged(4, text=1), _judged(3)])
+    assert len(seen) == 2 and len(img_env["calls"]) == 2, "글자가 그려진 첫 장은 기준 미달 → 1회 재생성"
+    assert lay["judge"] == {"overall": 3, "summary": "o3", "tries": 2, "first_overall": 4}
+
+
+def test_image_judge_failure_keeps_image(img_env, monkeypatch):
+    seen, lay, js = _smallbiz_image(img_env, monkeypatch, [RuntimeError("x")])
+    assert len(img_env["calls"]) == 1 and "judge" not in lay and not js
+
+
+def test_image_judge_off_by_switch(img_env, monkeypatch):
+    monkeypatch.setenv("IMAGE_JUDGE", "0")
+    seen, lay, js = _smallbiz_image(img_env, monkeypatch, [_judged(1)])
+    assert not seen and len(img_env["calls"]) == 1

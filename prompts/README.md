@@ -35,6 +35,7 @@
 | `image/product_slot.md` | 제품 누끼를 합성 방식(`IMAGE_PRODUCT_MODE=composite`)으로 쓸 때 배경 프롬프트 앞에 붙는 문장: 제품을 그리지 않고 제품 구역을 비워 둔다 (`{{slot}}`, `{{base}}`). 누끼는 생성 뒤 `compose.paste_product` 가 붙인다 | `imagegen.build_prompt(composite=True)` |
 | `image/same_scene.md` | 비율군 변형 배경. 첫 비율군 배경을 참조 이미지로 붙여 같은 장면을 다른 비율 구도로 (`{{base}}` 는 그 비율군의 background 프롬프트) | `imagegen.build_variant_prompt` |
 | `image/_visual.md` | 배경의 제품 시각 소재 블록 (partial): 카피 생성 때 찾은 제품 자료의 motifs. 없으면 붙지 않는다 | `imagegen.build_prompt` |
+| `image/_trend.md` | 배경의 이번 주 분위기 문단(partial): 사용자가 고른 트렌드 각도를 소품·재질·빛으로 은은하게. 각도를 고른 때만 붙는다 | `imagegen.build_prompt` |
 | `image/_common.md` | 모든 템플릿 공통 구도 규칙 (partial) | — |
 | `legal/_copy_common.md` | 모든 카피에 붙는 공통 법적 준수 규칙(표시·광고의 공정화에 관한 법률 기준: 거짓·과장·기만·부당 비교·추천 보증·건전성). `copy/system.md` 가 include | `copywriter._prompt` |
 | `legal/_image_common.md` | 모든 배경에 붙는 공통 법적 준수 규칙(전후 비교·전문가 가운·보증 장식·실존 인물·상표 금지). `image/background.md` 가 include | `imagegen.build_prompt` |

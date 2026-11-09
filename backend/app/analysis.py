@@ -302,26 +302,32 @@ def judge_vars(brand: Brand, bv: BrandVersion, brief: dict, style: str | None) -
             "style": style or imagegen.pick_style(bv.image_tone or {}, brief)[0]}
 
 
+def judge_image(im: Image.Image, vars: dict) -> dict:
+    """이미지 1장을 비전 채점(채팅 1회). 반환: {scores:[{item,score,reason}], overall, summary}. 저장은 하지 않는다."""
+    im = im.convert("RGB")
+    im.thumbnail((1024, 1024))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    data = llm.vision_json(prompts.render("analysis/judge_system"), prompts.render("analysis/judge_user", **vars),
+                           [buf.getvalue()], "judge", JUDGE_SCHEMA)
+    scores = [{"item": str(s.get("item") or ""), "score": int(s.get("score") or 0), "reason": str(s.get("reason") or "")}
+              for s in (data.get("scores") or []) if isinstance(s, dict)]
+    return {"scores": scores, "overall": int(data.get("overall") or 0), "summary": str(data.get("summary") or "")}
+
+
 def judge_background(db: Session, d: Design, bv: BrandVersion, brand: Brand, g: GeneratedImage) -> dict:
     """배경 1장을 Claude 에 보여 주고 항목별 점수를 받는다(채팅 1회). 결과는 judgments 테이블에 쌓는다."""
     im = _open(g.file_path)
     if im is None:
         raise FileNotFoundError("배경 파일이 없습니다")
-    im = im.convert("RGB")
-    im.thumbnail((1024, 1024))
-    buf = io.BytesIO()
-    im.save(buf, format="PNG")
     vars = judge_vars(brand, bv, d.brief or {}, (g.layout or {}).get("style"))
-    system = prompts.render("analysis/judge_system")
-    user = prompts.render("analysis/judge_user", **vars)
-    data = llm.vision_json(system, user, [buf.getvalue()], "judge", JUDGE_SCHEMA)
-    scores = [{"item": str(s.get("item") or ""), "score": int(s.get("score") or 0), "reason": str(s.get("reason") or "")}
-              for s in (data.get("scores") or []) if isinstance(s, dict)]
+    data = judge_image(im, vars)
+    scores = data["scores"]
     last = next((r for r in reversed(calllog.calls(d.id)) if r.get("kind") == "judge"), None)
     result = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "background_id": g.id,
               "file": Path(g.file_path).stem, "template": (g.layout or {}).get("template"), "style": vars["style"],
-              "model": llm.model_for("judge"), "scores": scores, "overall": int(data.get("overall") or 0),
-              "summary": str(data.get("summary") or ""), "prompt_refs": [prompts.ref("analysis/judge_system"), prompts.ref("analysis/judge_user")],
+              "model": llm.model_for("judge"), "scores": scores, "overall": data["overall"],
+              "summary": data["summary"], "prompt_refs": [prompts.ref("analysis/judge_system"), prompts.ref("analysis/judge_user")],
               "cost_usd": (last or {}).get("cost_usd"), "tokens_in": (last or {}).get("tokens_in"), "tokens_out": (last or {}).get("tokens_out")}
     try:
         with db_module.SessionLocal() as s:

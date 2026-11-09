@@ -282,6 +282,9 @@ def build_prompt(brand_name: str, tone: dict, brief: dict, template: str, style:
                            key_message=brief.get("key_message") or "지정 없음", target=target, target_label=pv["target_label"])
     motifs = (brief.get("knowledge") or {}).get("motifs")
     visual = "\n" + prompts.render("image/_visual", motifs=motifs) if motifs else ""
+    angles = [a for a in (brief.get("trend_angles") or []) if a]
+    if angles:        # 사용자가 고른 이번 주 각도(소상공인 경로). 고르지 않았으면 프롬프트가 그대로다
+        visual += "\n" + prompts.render("image/_trend", angles=", ".join(angles))
     text = prompts.render("image/background", scene=scene, visual=visual, tone=tone_text(style, tone.get("description")),
                           composition=composition, style=style_text, brand_colors=brand_color_line(colors), **pv)
     if composite:
