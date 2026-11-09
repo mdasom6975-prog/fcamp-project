@@ -4,9 +4,12 @@
 - 구글은 429 차단이 잦아 실패하면 건너뛴다(조각에 '구글 -' 로 남김)
 - 한 주 = 문서 하나(source_id trend_<ISO 주>), 조각 = 요약 1 + 키워드별 1. 등록하면 이전 주 트렌드 문서는 '보관'
 필요: backend/.env 의 NAVER_CLIENT_ID · NAVER_CLIENT_SECRET (개발자센터 > 데이터랩 검색어 트렌드·쇼핑인사이트)."""
+import html
 import json
 import os
-from datetime import date, timedelta
+import re
+import xml.etree.ElementTree as ET
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -241,12 +244,117 @@ def register(db, result: dict, embedder=None) -> tuple[int, int]:
     from .models import KnowledgeDoc
     rows, label = result["rows"], result["label"]
     chunks = [("요약", summary_text(label, rows))] + [(r["keyword"], chunk_text(label, r)) for r in rows]
-    for old in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용")):
-        old.status = "보관"
+    _archive(db, news=False)
     doc = knowledge.add_document(db, layer="트렌드", source_id=result["source_id"], title=f"화장품 검색 트렌드 {label}", chunks=chunks,
                                  source_url="https://datalab.naver.com/", fetched_at=result["period"][1], industry="화장품",
                                  visual={"period": result["period"], "google": result["google_error"] is None, "top": [r["keyword"] for r in rows],
                                          "rows": {r["keyword"]: trend_meta(r) for r in rows}},     # 카피의 선택 규칙(knowledge.pick_trend)이 읽는다
+                                 embedder=embedder or knowledge.embed)
+    db.commit()
+    return doc.id, len(chunks)
+
+
+def _archive(db, news: bool) -> None:
+    """같은 갈래(검색 키워드 / 업계 기사)의 이전 '사용' 트렌드 문서를 보관한다. 다른 갈래는 그대로 둔다."""
+    from sqlalchemy import select
+
+    from .models import KnowledgeDoc
+    for old in db.scalars(select(KnowledgeDoc).where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용")):
+        if (old.source_id or "").startswith(NEWS_PREFIX) == news:
+            old.status = "보관"
+
+
+# ---- 뷰티 업계 매체 RSS (A2, 11/09) ----
+# 매체가 신디케이션용으로 공개한 RSS 만 읽는다. 원문은 저장하지 않고 제목·첫 문장(120자)·링크만 조각으로 남긴다.
+NEWS_FEEDS = {"코스인코리아": "https://www.cosinkorea.com/data/rss/news.xml",
+              "코스모닝": "https://www.cosmorning.com/data/rss/news.xml"}
+NEWS_PREFIX = "trend_news_"
+NEWS_DAYS = 7                  # 최근 이 기간의 기사만
+NEWS_MAX = 10                  # 한 주 최대 조각 수
+NEWS_SNIPPET = 120
+# 매출·인사·수출 같은 업계 기사는 카피 소재가 아니라서, 소비자 쪽 말이 든 기사만 남긴다(키워드 시드 + 아래 단어)
+NEWS_WORDS = ["트렌드", "인기", "출시", "신제품", "유행", "루틴", "MZ", "Z세대", "품절", "리뉴얼", "팝업", "선물"]
+
+
+def _text(raw: str | None) -> str:
+    t = html.unescape(re.sub(r"<[^>]+>", " ", raw or ""))
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _date(raw: str | None) -> date | None:
+    raw = (raw or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def parse_feed(xml_text: str, source: str) -> list[dict]:
+    """RSS 2.0 → [{title, summary, link, date, source}]. 깨진 항목은 건너뛴다."""
+    out = []
+    for it in ET.fromstring(xml_text).iter("item"):
+        title = _text(it.findtext("title"))
+        if not title:
+            continue
+        desc = _text(it.findtext("description"))
+        desc = re.sub(r"^\[[^\]]*기자\]\s*", "", desc)          # '[매체 ○○○ 기자]' 머리말
+        first = re.split(r"(?<=[.!?다])\s", desc, maxsplit=1)[0]
+        out.append({"title": title, "summary": first[:NEWS_SNIPPET], "link": (it.findtext("link") or "").strip(),
+                    "date": _date(it.findtext("pubDate") or it.findtext("{http://purl.org/dc/elements/1.1/}date")),
+                    "source": source})     # 국내 매체는 pubDate 대신 dc:date 를 쓰기도 한다
+    return out
+
+
+def pick_news(items: list[dict], cfg: dict, today: date | None = None) -> list[dict]:
+    """최근 NEWS_DAYS 일, 제목·첫 문장에 소비자 쪽 말(키워드 시드·NEWS_WORDS)이 든 기사만, 같은 제목은 하나, 최신순 NEWS_MAX 개."""
+    d0 = (today or date.today()) - timedelta(days=NEWS_DAYS)
+    words = [k for k, _ in all_keywords(cfg)] + NEWS_WORDS
+    seen, out = set(), []
+    for it in sorted(items, key=lambda x: x["date"] or date.min, reverse=True):
+        text = f"{it['title']} {it['summary']}"
+        if it["date"] and it["date"] < d0 or it["title"] in seen:
+            continue
+        hit = [w for w in words if w in text]
+        if not hit:
+            continue
+        seen.add(it["title"])
+        out.append({**it, "matched": hit[:3]})
+    return out[:NEWS_MAX]
+
+
+def news_chunk_text(label: str, it: dict) -> str:
+    return f"[뷰티 업계 기사 {label}] {it['title']}. {it['summary']} (출처: {it['source']}, {it['date'] or '날짜 없음'})"
+
+
+def collect_news(client: httpx.Client, cfg: dict, today: date | None = None) -> dict:
+    """매체별 RSS 를 읽어 고른 기사와 매체별 오류를 돌려준다. 한 매체가 실패해도 나머지는 쓴다."""
+    items, errors = [], {}
+    for name, url in NEWS_FEEDS.items():
+        try:
+            r = client.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (compatible; brand-studio-trend/1.0)"}, follow_redirects=True)
+            r.raise_for_status()
+            items += parse_feed(r.text, name)
+        except Exception as e:
+            errors[name] = type(e).__name__
+    sid, label = week_label(today)
+    return {"items": pick_news(items, cfg, today), "fetched": len(items), "errors": errors,
+            "source_id": sid.replace("trend_", NEWS_PREFIX, 1), "label": label}
+
+
+def register_news(db, result: dict, embedder=None) -> tuple[int | None, int]:
+    """고른 기사를 '트렌드' 층 문서 하나(기사마다 조각 하나, 섹션은 제목)로 등록하고 이전 주 기사 문서를 보관한다.
+    고른 기사가 없으면 등록하지 않는다(이전 주 문서도 그대로)."""
+    from . import knowledge
+    items = result["items"]
+    if not items:
+        return None, 0
+    _archive(db, news=True)
+    chunks = [(it["title"][:200], news_chunk_text(result["label"], it)) for it in items]
+    doc = knowledge.add_document(db, layer="트렌드", source_id=result["source_id"], title=f"뷰티 업계 기사 {result['label']}",
+                                 chunks=chunks, source_url=", ".join(NEWS_FEEDS.values()), fetched_at=str(date.today()),
+                                 industry="화장품", visual={"news": [{k: str(it[k]) for k in ("title", "link", "source", "date")} for it in items]},
                                  embedder=embedder or knowledge.embed)
     db.commit()
     return doc.id, len(chunks)

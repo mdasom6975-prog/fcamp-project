@@ -122,3 +122,37 @@ def test_collect_skips_shopping_when_api_hub_has_no_subscription(monkeypatch):
     monkeypatch.setattr(trends, "google_series", lambda *a, **k: {})
     r = trends.collect(httpx.Client(transport=httpx.MockTransport(handler)), CFG, today=date(2026, 11, 6))
     assert r["shopping_error"] == "HTTP 404" and r["rows"][0]["naver_shopping"] is None and "profile" not in r["rows"][0]
+
+
+# ---- 뷰티 업계 매체 RSS (A2) ----
+FEED = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel>
+<item><title>수분크림 품절 대란, 겨울 루틴 바꾼 2030</title><link>https://ex.com/1</link>
+<description><![CDATA[[매체 홍길동 기자] 올겨울 <b>수분크림</b>이 품절됐다. 둘째 문장.]]></description><dc:date>2026-11-08 10:00:00</dc:date></item>
+<item><title>○○화장품 3분기 매출 공시</title><link>https://ex.com/2</link><description>매출이 늘었다.</description><dc:date>2026-11-08 09:00:00</dc:date></item>
+<item><title>오래된 출시 소식</title><link>https://ex.com/3</link><description>예전 기사.</description><pubDate>Mon, 20 Oct 2026 09:00:00 +0900</pubDate></item>
+</channel></rss>"""
+
+
+def test_parse_feed_strips_html_byline_and_reads_dc_date():
+    items = trends.parse_feed(FEED, "테스트매체")
+    assert items[0]["summary"].startswith("올겨울 수분크림")
+    assert "기자]" not in items[0]["summary"] and "둘째" not in items[0]["summary"]
+    assert items[0]["date"] == date(2026, 11, 8) and items[2]["date"] == date(2026, 10, 20)
+
+
+def test_pick_news_keeps_recent_consumer_side_articles_only():
+    got = trends.pick_news(trends.parse_feed(FEED, "테스트매체"), CFG, today=date(2026, 11, 9))
+    assert [g["title"] for g in got] == ["수분크림 품절 대란, 겨울 루틴 바꾼 2030"], "매출 기사·7일 넘은 기사는 뺀다"
+    assert "수분크림" in got[0]["matched"]
+
+
+def test_register_news_keeps_keyword_doc_and_archives_only_previous_news(session, naver, monkeypatch):
+    monkeypatch.setattr(trends, "google_series", lambda *a, **k: {})
+    kd, _ = trends.register(session, trends.collect(naver, CFG, today=date(2026, 11, 6), profiles=False), embedder=fake_embed)
+    items = trends.pick_news(trends.parse_feed(FEED, "테스트매체"), CFG, today=date(2026, 11, 9))
+    n1, _ = trends.register_news(session, {"items": items, "source_id": "trend_news_2026-W45", "label": "a"}, embedder=fake_embed)
+    n2, cnt = trends.register_news(session, {"items": items, "source_id": "trend_news_2026-W46", "label": "b"}, embedder=fake_embed)
+    docs = {d.id: d for d in session.scalars(select(models.KnowledgeDoc).where(models.KnowledgeDoc.layer == "트렌드"))}
+    assert docs[kd].status == "사용", "기사 등록이 검색 키워드 문서를 보관하지 않는다"
+    assert docs[n1].status == "보관" and docs[n2].status == "사용" and cnt == 1
+    assert trends.register_news(session, {"items": [], "source_id": "x", "label": "c"}) == (None, 0)

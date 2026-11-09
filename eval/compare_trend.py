@@ -5,6 +5,9 @@
     backend/.venv/bin/python eval/compare_trend.py [--base http://127.0.0.1:8000] [--brand 에스트라] [--presets 1]
 - 브리프는 BRIEFS(지식에 있는 제품). 반환: eval/reports/trend_ab_<날짜_시각>.json + markdown 표
 - '트렌드 키워드 반영': 트렌드 있음 쪽이 본 트렌드 조각의 키워드(section)가 세 안의 제목·본문에 하나라도 쓰였는가. 없음 쪽도 같은 키워드로 센다
+- '새 말 반영'(11/09 A3, 판정 기준): 트렌드 조각에 든 말(키워드 시드·업계 기사 단어) 중 브리프와 제품·브랜드 지식 조각에 **없는** 말만 센다.
+  제품 자료에도 있는 말은 트렌드가 없어도 쓰일 수 있어 효과로 치지 않는다(1·2차 측정에서 차이가 안 난 원인)
+- --local: 서버 없이 앱을 프로세스 안에서 불러 돌린다(같은 DB)
 """
 import argparse
 import json
@@ -32,9 +35,19 @@ def main() -> int:
     ap.add_argument("--base", default="http://127.0.0.1:8000")
     ap.add_argument("--brand", default="에스트라")
     ap.add_argument("--presets", default="1")
+    ap.add_argument("--local", action="store_true")
     a = ap.parse_args()
     presets = [int(x) for x in a.presets.split(",") if x]
-    c = httpx.Client(base_url=a.base, timeout=300)
+    if a.local:
+        sys.path.insert(0, str(ROOT / "backend"))
+        from fastapi.testclient import TestClient
+        from app.main import app
+        c = TestClient(app)
+    else:
+        c = httpx.Client(base_url=a.base, timeout=300)
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app import trends
+    seeds = [k for k, _ in trends.all_keywords(trends.load_keywords())] + trends.NEWS_WORDS
     brand = next((b for b in c.get("/api/brands").json() if b["name"] == a.brand), None)
     if not brand:
         print(f"브랜드 '{a.brand}' 가 없습니다", file=sys.stderr); return 2
@@ -50,7 +63,10 @@ def main() -> int:
             ev = c.get(f"/api/designs/{d['id']}/evidence").json()
             variants = r["groups"][0]["variants"] if r.get("groups") else []
             text = _norm(" ".join(f"{v['headline']} {v['body']} {v.get('long_body') or ''}" for v in variants))
+            known = _norm(" ".join([product, desc, key, target] + [g.get("text", "") for g in ev.get("guide", [])]))
+            trend_words = sorted({w for t in ev.get("trend", []) for w in seeds if _norm(w) in _norm(t.get("text", ""))})
             pair[use_trend] = {"design_id": d["id"], "trend_sections": [t["section"] for t in ev.get("trend", [])], "trend_mode": ev.get("trend_mode"),
+                               "novel": [w for w in trend_words if _norm(w) not in known],
                                "text": text, "headlines": [v["headline"] for v in variants],
                                "evidence": [x.get("evidence", "") for x in ev.get("variants", [])],
                                "must": sum(1 for v in variants for x in v["violations"] if x.get("severity") == "필수"),
@@ -62,8 +78,10 @@ def main() -> int:
             p = pair[use_trend]
             p["hits"] = [k for k in kws if _norm(k) in p["text"]]
             p["in_evidence"] = [k for k in kws if any(_norm(k) in _norm(e) for e in p["evidence"])]
+            p["novel_hits"] = [w for w in pair[True]["novel"] if _norm(w) in p["text"]]
         rows.append({"brief": product, "trend_keywords": kws, "with": {k: v for k, v in pair[True].items() if k != "text"},
                      "without": {k: v for k, v in pair[False].items() if k != "text"}})
+        print(f"   새 말 {pair[True]['novel']} → 있음 {pair[True]['novel_hits']} · 없음 {pair[False]['novel_hits']}")
         print(f"{product[:16]:16} 트렌드 {kws} → 있음 반영 {pair[True]['hits']} (evidence {pair[True]['in_evidence']}) 위반 {pair[True]['must']}/{pair[True]['warn']}"
               f" · 없음 반영 {pair[False]['hits']} 위반 {pair[False]['must']}/{pair[False]['warn']}")
     out = ROOT / "eval" / "reports" / f"trend_ab_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
@@ -74,6 +92,11 @@ def main() -> int:
         w, wo = r["with"], r["without"]
         print(f"| {r['brief']} | {', '.join(r['trend_keywords'])} | {len(w['hits'])}/{len(r['trend_keywords'])} ({', '.join(w['hits']) or '-'}) / {w['must']}·{w['warn']} "
               f"| {len(wo['hits'])}/{len(r['trend_keywords'])} ({', '.join(wo['hits']) or '-'}) / {wo['must']}·{wo['warn']} |")
+    print("\n| 브리프 | 새 말(제품 자료에 없음) | 있음 쪽 반영 | 없음 쪽 반영 |")
+    print("|---|---|---|---|")
+    for r in rows:
+        w, wo = r["with"], r["without"]
+        print(f"| {r['brief']} | {', '.join(w['novel']) or '-'} | {', '.join(w['novel_hits']) or '-'} | {', '.join(wo['novel_hits']) or '-'} |")
     print(f"\n보고서: {out.relative_to(ROOT)}")
     return 0
 
