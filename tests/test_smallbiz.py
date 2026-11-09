@@ -383,3 +383,16 @@ def test_smallbiz_image_direction_follows_tone_not_common_options():
     b = {"product_name": "수분 장벽 크림 50ml", "key_message": "겨울 건조함에 맞서는 보습"}
     assert imagegen.pick_direction("실사 제품·공간", b) != imagegen.SMALLBIZ_DIRECTION
     assert imagegen.pick_direction("실사 제품·공간", {**b, "smallbiz": {"preset_id": "x"}}) == imagegen.SMALLBIZ_DIRECTION
+
+
+def test_image_judge_skipped_when_model_redraws_product(img_env, monkeypatch):
+    """누끼 없이 제품을 참조 이미지로 다시 그리는 방식은 라벨 글자 때문에 채점이 늘 미달이라 건너뛴다."""
+    from app import routers_images
+    real = routers_images._bg_prompt
+    def ref_mode(*a, **k):
+        bp = real(*a, **k)
+        from PIL import Image
+        return {**bp, "product_img": Image.new("RGBA", (10, 10)), "composite": False}
+    monkeypatch.setattr(routers_images, "_bg_prompt", ref_mode)
+    seen, lay, js = _smallbiz_image(img_env, monkeypatch, [_judged(1, text=1)])
+    assert not seen and "judge" not in lay

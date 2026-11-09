@@ -375,7 +375,9 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
 
     bg, extra, plain = make()
     judged = None
-    if image_judging(d):      # 소상공인: 비전 채점 → 기준 미달이면 1회 다시 만들어 overall 이 높은 쪽을 쓴다
+    # 소상공인: 비전 채점 → 기준 미달이면 1회 다시 만들어 overall 이 높은 쪽을 쓴다.
+    # 누끼 없이 제품을 모델이 다시 그린 경우(참조 방식)는 그림 속 제품 라벨을 '글자'로 감점해 매번 미달이 되므로 건너뛴다(11/09 표본 비교)
+    if image_judging(d) and (composite or product_img is None):
         bg, extra, judged = _judge_and_retry(db, d, bv, style, bg, extra, plain, make)
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     if judged is not None:

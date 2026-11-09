@@ -1,0 +1,138 @@
+[
+  {
+    "file": "A00000024316212ko.webp",
+    "asset": 87,
+    "cutout": false,
+    "read": {
+      "ok": true,
+      "product_name": "Anua Pore Care Pad (HEARTLEAF 77 CLEAR PAD)",
+      "category": "패드",
+      "is_cosmetic": true,
+      "label_claims": [
+        "Pore Care",
+        "HEARTLEAF 77 + PHA",
+        "70패 / 70 PADS (205 ML)",
+        "REFILL"
+      ],
+      "suggested_message": "아누아 포어 케어 패드, 히트리프 77과 PHA 함유"
+    },
+    "off": {
+      "design": 75,
+      "t_copy": 29,
+      "t_img": 20,
+      "auto_fix": [],
+      "copy1": {
+        "headline": "히트리프 77과 PHA를 담은 포어 케어 패드",
+        "body": "아누아 포어 케어 패드는 히트리프 77과 PHA를 함유했습니다. 70매 구성이라 넉넉하게 쓰실 수 있어요.",
+        "cta": "자세히 보기"
+      },
+      "viol": 0,
+      "img_auto": null,
+      "mode": "reference",
+      "img_metric": {
+        "overall": 2,
+        "톤 일치": 4,
+        "내용 일치": 5,
+        "표현 방식 일치": 5,
+        "금지 요소 없음": 3,
+        "글자·로고 없음": 1,
+        "summary": "자연광, 흰색·초록 톤, 실사 표현과 상품 연상은 매우 좋지만 제품 라벨에 로고와 글자가 그대로 보여 배경으로 쓰기에는 부적합하다. 라벨을 제거하거나 가린 컷이 필요하며 소품도 줄이는 편이 좋다."
+      }
+    },
+    "on": {
+      "design": 76,
+      "t_copy": 52,
+      "t_img": 44,
+      "auto_fix": [],
+      "copy1": {
+        "headline": "한 장에 무엇을 담았을까요?",
+        "body": "라벨에는 히트리프 77 + PHA라고 적혀 있어요. 70매 리필 구성이에요.",
+        "cta": "자세히 보기"
+      },
+      "viol": 0,
+      "img_auto": {
+        "overall": 2,
+        "summary": "분위기와 실사 표현, 상품 연상은 훌륭하지만 용기 라벨에 브랜드 로고와 문구가 그대로 보이고 소품도 많아 배경으로 그대로 쓰기 어렵다. 라벨이 없는 용기로 다시 촬영하거나 소품을 줄여야 한다.",
+        "tries": 2,
+        "first_overall": 2
+      },
+      "mode": "reference",
+      "img_metric": {
+        "overall": 2,
+        "톤 일치": 4,
+        "내용 일치": 5,
+        "표현 방식 일치": 5,
+        "금지 요소 없음": 2,
+        "글자·로고 없음": 1,
+        "summary": "분위기와 실사 표현, 상품 연관성은 좋지만 라벨의 브랜드 로고와 문구가 그대로 보이고 소품도 많아 배경으로 그대로 쓰기 어렵다. 라벨이 가려지거나 지워진 버전이나 소품을 줄인 컷이 필요하다."
+      }
+    }
+  },
+  {
+    "file": "A00000024777004ko.webp",
+    "asset": 88,
+    "cutout": true,
+    "read": {
+      "ok": true,
+      "product_name": "Anua PDRN Hyaluronic Acid Capsule 100 Serum",
+      "category": "세럼",
+      "is_cosmetic": true,
+      "label_claims": [
+        "PDRN + HYALURON",
+        "Slow Aging"
+      ],
+      "suggested_message": "아누아 PDRN 히알루론산 캡슐 세럼, 30ml"
+    },
+    "off": {
+      "design": 77,
+      "t_copy": 36,
+      "t_img": 19,
+      "auto_fix": [],
+      "copy1": {
+        "headline": "아누아 PDRN 히알루론산 캡슐 세럼 30ml",
+        "body": "PDRN과 히알루론산을 담은 캡슐 세럼이에요. 라벨에는 Slow Aging이라고 적혀 있어요.",
+        "cta": "자세히 보기"
+      },
+      "viol": 0,
+      "img_auto": null,
+      "mode": "composite",
+      "img_metric": {
+        "overall": 4,
+        "톤 일치": 5,
+        "내용 일치": 3,
+        "표현 방식 일치": 5,
+        "금지 요소 없음": 3,
+        "글자·로고 없음": 5,
+        "summary": "깨끗한 자연광과 흰색·연한 초록 톤이 브랜드 가이드에 잘 맞고 대리석 상판의 빈 공간이 넓어 제품 합성용 배경으로 쓰기 좋다. 다만 가장자리 소품이 다소 많으니 일부를 정리하면 더 좋다."
+      }
+    },
+    "on": {
+      "design": 78,
+      "t_copy": 42,
+      "t_img": 24,
+      "auto_fix": [],
+      "copy1": {
+        "headline": "아침 세안 후 한 단계 더해요",
+        "body": "바쁜 아침에도 세럼 한 병이면 루틴이 간단해져요. 아누아 캡슐 세럼은 30ml 용량이라 챙기기 좋아요.",
+        "cta": "세럼 보기"
+      },
+      "viol": 0,
+      "img_auto": {
+        "overall": 4,
+        "summary": "밝은 자연광과 깨끗한 흰색·연초록 톤이 브랜드 분위기에 잘 맞고, 넓은 대리석 면이 비어 있어 제품 합성 배경으로 쓰기 좋다. 다만 좌우 가장자리 소품이 다소 많아 합성 시 정리가 필요할 수 있다.",
+        "tries": 1,
+        "first_overall": 4
+      },
+      "mode": "composite",
+      "img_metric": {
+        "overall": 4,
+        "톤 일치": 4,
+        "내용 일치": 3,
+        "표현 방식 일치": 5,
+        "금지 요소 없음": 3,
+        "글자·로고 없음": 5,
+        "summary": "밝은 자연광과 흰색·연초록 톤, 넓은 대리석 여백이 있어 제품 합성용 배경으로 쓰기 좋다. 다만 오른쪽 소품이 다소 많으니 정리하거나 제품 배치 시 가려 쓰는 것이 좋다."
+      }
+    }
+  }
+]
