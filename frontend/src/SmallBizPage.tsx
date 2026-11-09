@@ -97,7 +97,29 @@ const store = {
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* 저장 실패는 무시 */ } },
   del(k: string) { try { localStorage.removeItem(k) } catch { /* 무시 */ } },
 }
-type Draft = { what: string; message: string; shop: string; presetId: string | null; photo: { id: number; warnings: string[]; cutout?: boolean } | null }
+type Photo = { id: number; warnings: string[]; cutout?: boolean; cut_id?: number; original_id?: number | null; url: string }
+type Draft = { what: string; message: string; shop: string; presetId: string | null; photo: Omit<Photo, 'url'> | null }
+type Uploaded = { id: number; warnings: string[]; cutout: boolean; original_id: number | null }
+const asPhoto = (d: Uploaded): Photo => ({ id: d.id, warnings: d.warnings, cutout: d.cutout, cut_id: d.id, original_id: d.original_id, url: `/api/assets/${d.id}/file` })
+
+/* 올린 사진 미리보기. 배경을 지웠으면 지운 결과를 격자 배경 위에 보여 주고, 이상하면 원본으로 바꿀 수 있다
+   (원본을 고르면 합성 대신 AI 가 제품을 참고해 다시 그린다). */
+function PhotoPreview({ photo, setPhoto }: { photo: Photo; setPhoto: (p: Photo) => void }) {
+  const useOriginal = () => photo.original_id && setPhoto({ ...photo, id: photo.original_id, cutout: false, url: `/api/assets/${photo.original_id}/file` })
+  const useCut = () => photo.cut_id && setPhoto({ ...photo, id: photo.cut_id, cutout: true, url: `/api/assets/${photo.cut_id}/file` })
+  return (
+    <div className={`sb-photo${photo.cutout ? ' cut' : ''}`}>
+      <img src={photo.url} alt="올린 사진" />
+      {photo.cutout && <p className="sb-ok">사진 속 배경을 지웠어요. 상품 모양은 그대로 광고에 넣어요</p>}
+      {photo.cutout && photo.original_id && <button type="button" className="link" onClick={useOriginal}>배경이 덜 지워졌나요? 원본 그대로 쓰기</button>}
+      {!photo.cutout && photo.cut_id && photo.original_id && (
+        <><p className="muted">원본 사진을 써요. 상품은 AI 가 사진을 참고해 다시 그려서 모양이 조금 다를 수 있어요</p>
+          <button type="button" className="link" onClick={useCut}>배경 지운 사진으로 돌아가기</button></>
+      )}
+      {photo.warnings.map((w) => <p key={w} className="sb-warn">{w}</p>)}
+    </div>
+  )
+}
 
 // 이미지 크게 보기: 배경을 누르면 닫히고, ←/→ 로 다른 규격, Esc 로 닫는다.
 function Lightbox({ items, index, onIndex, onClose }: { items: Item[]; index: number; onIndex: (i: number) => void; onClose: () => void }) {
@@ -134,7 +156,7 @@ export default function SmallBizPage() {
   const [message, setMessage] = useState(draft?.message ?? '')
   const [shop, setShop] = useState(draft?.shop ?? '')
   const [presetId, setPresetId] = useState<string | null>(draft?.presetId ?? null)
-  const [photo, setPhoto] = useState<{ id: number; warnings: string[]; cutout?: boolean; url: string } | null>(
+  const [photo, setPhoto] = useState<Photo | null>(
     draft?.photo ? { ...draft.photo, url: `/api/assets/${draft.photo.id}/file` } : null)
   const [camp, setCamp] = useState<Campaign | null>(null)
   const [zoom, setZoom] = useState<number | null>(null)
@@ -166,7 +188,7 @@ export default function SmallBizPage() {
   // 입력이 바뀌면 자동 임시저장(비어 있으면 지움)
   useEffect(() => {
     if (!what && !message && !shop && !photo && !presetId) { store.del(DRAFT_KEY); setSaved(false); return }
-    store.set(DRAFT_KEY, { what, message, shop, presetId, photo: photo ? { id: photo.id, warnings: photo.warnings, cutout: photo.cutout } : null } satisfies Draft)
+    store.set(DRAFT_KEY, { what, message, shop, presetId, photo: photo ? { id: photo.id, warnings: photo.warnings, cutout: photo.cutout, cut_id: photo.cut_id, original_id: photo.original_id } : null } satisfies Draft)
     setSaved(true)
   }, [what, message, shop, presetId, photo])
   // 마지막 캠페인이 있으면 새로고침 뒤에도 결과 화면을 연다
@@ -187,8 +209,8 @@ export default function SmallBizPage() {
     if (!f) return
     await run('사진을 올리는 중…', async () => {
       const form = new FormData(); form.append('file', f)
-      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<{ id: number; warnings: string[]; cutout: boolean }>(r))
-      setPhoto({ id: d.id, warnings: d.warnings, cutout: d.cutout, url: URL.createObjectURL(f) })
+      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<Uploaded>(r))
+      setPhoto(asPhoto(d))
     })
   }
 
@@ -197,8 +219,8 @@ export default function SmallBizPage() {
     if (!f) return
     await run('사진을 읽는 중…', async () => {
       const form = new FormData(); form.append('file', f)
-      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<{ id: number; warnings: string[]; cutout: boolean }>(r))
-      setPhoto({ id: d.id, warnings: d.warnings, cutout: d.cutout, url: URL.createObjectURL(f) })
+      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<Uploaded>(r))
+      setPhoto(asPhoto(d))
       const r = await post('/api/smallbiz/read-photo', { photo_asset_id: d.id })
       setProduct(r.product_name || ''); setMessage(r.suggested_message || '')
       setClaims((r.label_claims as string[]).map((t) => ({ text: t, on: true })))
@@ -303,12 +325,7 @@ export default function SmallBizPage() {
         <h2>이대로 만들까요?</h2>
         {err && <p className="sb-err">{err}</p>}
         {readNote && <p className="sb-warn">{readNote}</p>}
-        {photo && (
-          <div className="sb-photo">
-            <img src={photo.url} alt="올린 사진" />
-            {photo.warnings.map((w) => <p key={w} className="sb-warn">{w}</p>)}
-          </div>
-        )}
+        {photo && <PhotoPreview photo={photo} setPhoto={setPhoto} />}
         <label>제품 이름
           <input value={product} onChange={(e) => setProduct(e.target.value)} maxLength={100} />
         </label>
@@ -369,13 +386,7 @@ export default function SmallBizPage() {
       <label>상품 사진 (선택)
         <input type="file" accept="image/*" onChange={(e) => onPhoto(e.target.files?.[0])} />
       </label>
-      {photo && (
-        <div className="sb-photo">
-          <img src={photo.url} alt="올린 사진" />
-          {photo.cutout && <p className="sb-ok">사진 속 배경을 지웠어요. 상품 모양은 그대로 광고에 넣어요</p>}
-          {photo.warnings.map((w) => <p key={w} className="sb-warn">{w}</p>)}
-        </div>
-      )}
+      {photo && <PhotoPreview photo={photo} setPhoto={setPhoto} />}
       <label>한마디 (선택, 비우면 AI 가 제안해요)
         <input value={message} onChange={(e) => setMessage(e.target.value)} maxLength={200} />
       </label>

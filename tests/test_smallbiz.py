@@ -121,12 +121,15 @@ def test_photo_upload_saves_cutout_png_when_background_removed(env, monkeypatch)
     r = client.post("/api/smallbiz/photo", files={"file": ("a.jpg", _png((400, 300), (120, 120, 120)), "image/png")})
     assert r.status_code == 200 and r.json()["cutout"] is True
     assert client.get(f"/api/assets/{r.json()['id']}/file").headers["content-type"] == "image/png"
+    # 누끼가 이상할 때 고를 원본도 함께 저장한다(불투명 JPEG → 이미지 생성은 참조 방식)
+    oid = r.json()["original_id"]
+    assert oid and oid != r.json()["id"] and client.get(f"/api/assets/{oid}/file").headers["content-type"] == "image/jpeg"
 
 
 def test_photo_upload_keeps_original_when_cutout_unavailable(env):
     client, _ = env
     r = client.post("/api/smallbiz/photo", files={"file": ("a.png", _png((400, 300), (120, 120, 120)), "image/png")})
-    assert r.json()["cutout"] is False
+    assert r.json()["cutout"] is False and r.json()["original_id"] is None
     assert client.get(f"/api/assets/{r.json()['id']}/file").headers["content-type"] == "image/jpeg"
 
 

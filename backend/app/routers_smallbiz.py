@@ -199,8 +199,20 @@ async def upload_photo(file: UploadFile = File(...), db: Session = Depends(get_d
     key = storage.put(f"product_{uuid.uuid4().hex[:10]}.{ext}", buf.getvalue(), mime)
     a = Asset(kind="product", file_path=key, mime=mime, bytes=buf.tell(), width=im.width, height=im.height)
     db.add(a)
+    original_id = None
+    if cut is not None:
+        # 누끼가 이상할 때(쇼핑몰 사진의 제형 텍스처 컷이 병에 붙어 남는 등) 사용자가 원본으로 바꿀 수 있게 원본도 둔다.
+        # 원본(불투명)을 고르면 합성 대신 이미지 모델이 제품을 참조해 다시 그린다(imagegen.product_mode 'reference')
+        ob = io.BytesIO()
+        im.convert("RGB").save(ob, format="JPEG", quality=88, optimize=True)
+        okey = storage.put(f"product_{uuid.uuid4().hex[:10]}.jpg", ob.getvalue(), "image/jpeg")
+        o = Asset(kind="product", file_path=okey, mime="image/jpeg", bytes=ob.tell(), width=im.width, height=im.height)
+        db.add(o)
+        db.flush()
+        original_id = o.id
     db.commit()
-    return {"id": a.id, "width": a.width, "height": a.height, "warnings": warns, "cutout": cut is not None}
+    return {"id": a.id, "width": a.width, "height": a.height, "warnings": warns, "cutout": cut is not None,
+            "original_id": original_id}
 
 
 def _suggest_message(what: str) -> str:
