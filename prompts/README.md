@@ -12,6 +12,8 @@
 | `copy/_functional.md` · `_functional_none.md` | 카피 User 의 기능성 문단 (partial): 캠페인에 입력한 기능성(식약처 심사·보고 범위) / '기능성 아님'. 입력하지 않으면 붙지 않는다 | `copywriter.knowledge_vars` |
 | `copy/_law.md` | 카피 User 의 법령 원문 문단 (partial): 품목에서 감지한 업종으로 표시한 규제 조문·별표를 **검색 없이 전부** (`knowledge.law_rows`) | `copywriter.knowledge_vars` |
 | `copy/_guide.md` | 카피 User 의 브랜드 지식 문단 (partial): 브리프로 검색한 제품 2 · 브랜드 2 · 그룹 1 조각(RAG, `knowledge.for_copy`). 지식이 없는 브랜드는 붙지 않는다 | `copywriter.knowledge_vars` |
+| `smallbiz/read_photo_system.md` · `read_photo_user.md` | 소상공인 "제품 사진으로 시작": 사진 한 장에서 제품명·종류·화장품 여부·라벨 문구·한마디만 읽는 비전 호출(`photo_read`). 보이지 않는 것은 지어내지 않는다 | `routers_smallbiz.read_photo` |
+| `copy/_candidates.md` · `copy/judge_system.md` · `copy/judge_user.md` | 소상공인 카피 다안+심사(3.5단계): 후보 6안을 요청하는 문단(partial)과, 5개 기준으로 채점하는 작은 모델 호출(`copy_judge`). `COPY_JUDGE=0` 이면 쓰지 않는다 | `copywriter.generate_checked` · `pick_best` |
 | `icons/propose3d_system.md` · `propose3d_user.md` | **3D(기본)** 기능명 10개 + 렌더할 오브젝트 묘사 | `icons.propose3d` |
 | `icons/more3d_system.md` · `more3d_user.md` | 3D 부족한 기능 추가 제안 | `icons.propose3d_more` |
 | `icons/render3d.md` | 3D 아이콘 1개 이미지 프롬프트(투명 PNG). 다시 그리기도 같은 문장 | `icons.render_prompt` |

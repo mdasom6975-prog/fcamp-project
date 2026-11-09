@@ -5,6 +5,7 @@ import { KIND_LABEL, type ApiCalls } from './DevStats'
 type Preset = { id: string; name: string; desc: string; tags: string[]; colors: string[] }
 type Item = { preset_id: number; name: string; image: { id: number; file: string } | null }
 type LegalHit = { phrase: string; reason: string; law: string; suggest: string; grounded: boolean; severity: string }
+type Angle = { keyword: string; group: string; rise: number | null }
 type Campaign = { design_id: number; legal: LegalHit[]; key_message: string; preset_id: string | null; has_photo: boolean; items: Item[] }
 
 async function j<T>(r: Response): Promise<T> {
@@ -140,7 +141,21 @@ export default function SmallBizPage() {
   const [saved, setSaved] = useState(!!draft)
   const [err, setErr] = useState('')
   const [rec, setRec] = useState<string[]>([])
+  // 제품 사진으로 시작(화장품): photo(사진 올리기) → sheet(확인 시트) → 결과. 기존 글 입력은 text
+  const [mode, setMode] = useState<'photo' | 'sheet' | 'text'>(draft ? 'text' : 'photo')
+  const [cosPresets, setCosPresets] = useState<Preset[]>([])
+  const [cosPick, setCosPick] = useState<string | null>(null)
+  const [angles, setAngles] = useState<Angle[]>([])
+  const [pickedAngles, setPickedAngles] = useState<string[]>([])
+  const [product, setProduct] = useState('')
+  const [claims, setClaims] = useState<{ text: string; on: boolean }[]>([])
+  const [readNote, setReadNote] = useState('')
+  const [fixNote, setFixNote] = useState('')
 
+  useEffect(() => {
+    fetch('/api/smallbiz/presets?industry=화장품').then((r) => j<{ presets: Preset[] }>(r)).then((d) => setCosPresets(d.presets)).catch(() => {})
+    fetch('/api/smallbiz/trend-angles').then((r) => j<{ angles: Angle[] }>(r)).then((d) => setAngles(d.angles)).catch(() => {})
+  }, [])
   useEffect(() => { fetch('/api/smallbiz/presets').then((r) => j<{ presets: Preset[] }>(r)).then((d) => setPresets(d.presets)).catch((e) => setErr(e.message)) }, [])
   useEffect(() => {
     if (what.trim().length < 2) { setRec([]); return }
@@ -177,6 +192,34 @@ export default function SmallBizPage() {
     })
   }
 
+  // 화면 1: 사진 한 장 → 업로드 + 비전 읽기 → 확인 시트. 화장품이 아니면 일반 스타일 입력으로 이어 간다
+  const startFromPhoto = async (f: File | undefined) => {
+    if (!f) return
+    await run('사진을 읽는 중…', async () => {
+      const form = new FormData(); form.append('file', f)
+      const d = await fetch('/api/smallbiz/photo', { method: 'POST', body: form }).then((r) => j<{ id: number; warnings: string[]; cutout: boolean }>(r))
+      setPhoto({ id: d.id, warnings: d.warnings, cutout: d.cutout, url: URL.createObjectURL(f) })
+      const r = await post('/api/smallbiz/read-photo', { photo_asset_id: d.id })
+      setProduct(r.product_name || ''); setMessage(r.suggested_message || '')
+      setClaims((r.label_claims as string[]).map((t) => ({ text: t, on: true })))
+      if (r.ok && !r.is_cosmetic) {
+        setWhat([r.product_name, r.category].filter(Boolean).join(' ')); setReadNote('화장품이 아닌 것 같아요. 일반 스타일로 이어갑니다'); setMode('text'); return
+      }
+      setReadNote(r.ok ? '' : '사진을 읽지 못했어요. 제품 이름을 직접 적어 주세요')
+      setMode('sheet')
+    })
+  }
+  // 화면 2: 확인 시트의 제품명·한마디·남긴 라벨 문구·톤·고른 각도로 캠페인을 만든다
+  const createFromSheet = () => run('광고 이미지를 만드는 중… (1~2분)', async () => {
+    const c = await post('/api/smallbiz/campaigns', {
+      what: product, message, photo_asset_id: photo?.id ?? null, preset_id: cosPick ?? cosPresets[0]?.id ?? null,
+      label_claims: claims.filter((x) => x.on).map((x) => x.text), trend_angles: pickedAngles })
+    setFixNote((c.auto_fix as { adopted: boolean }[]).some((x) => x.adopted) ? '광고에 쓰기 어려운 표현이 있어 자동으로 한 번 고쳤어요' : '')
+    await post(`/api/smallbiz/campaigns/${c.design_id}/images`, { new_background: false })
+    await refresh(c.design_id)
+  })
+  const toggleAngle = (k: string) => setPickedAngles((cur) => cur.includes(k) ? cur.filter((x) => x !== k) : cur.length < 3 ? [...cur, k] : cur)
+
   const create = () => run('광고 이미지를 만드는 중… (1~2분)', async () => {
     const c = await post('/api/smallbiz/campaigns', { what, message, shop_name: shop, photo_asset_id: photo?.id ?? null, preset_id: chosen })
     await post(`/api/smallbiz/campaigns/${c.design_id}/images`, { new_background: false })
@@ -195,11 +238,13 @@ export default function SmallBizPage() {
   })
 
   if (camp) {
-    const others = presets.filter((p) => p.id !== camp.preset_id)
+    const pool = cosPresets.some((p) => p.id === camp.preset_id) ? cosPresets : presets      // 화장품 캠페인은 화장품 톤끼리 바꿔 본다
+    const others = pool.filter((p) => p.id !== camp.preset_id)
     return (
       <main className="sb-wrap">
         <h2>광고 이미지가 만들어졌어요</h2>
         {err && <p className="sb-err">{err}</p>}
+        {fixNote && <p className="sb-ok">{fixNote}</p>}
         <p className="muted">문구: {camp.key_message}</p>
         {camp.legal.length === 0
           ? <p className="muted" title="표시·광고법 등 법적 금지·주의 표현 사전 기준의 참고용 자동 검사입니다. 법률 자문이 아닙니다.">✓ 법적 표현 점검 통과 (참고용 자동 검사)</p>
@@ -238,9 +283,85 @@ export default function SmallBizPage() {
     )
   }
 
+  if (mode === 'photo') {
+    return (
+      <main className="sb-wrap">
+        <h2>제품 사진으로 시작</h2>
+        <p className="muted">사진 한 장이면 제품 이름과 문구를 읽어 광고 초안을 만들어요. 입력은 필요 없어요</p>
+        {err && <p className="sb-err">{err}</p>}
+        <label className="sb-drop">사진을 눌러 올리기 (JPG·PNG·WEBP)
+          <input type="file" accept="image/*" onChange={(e) => startFromPhoto(e.target.files?.[0])} />
+        </label>
+        <p><button className="link" onClick={() => setMode('text')}>사진 없이 글로 시작</button></p>
+      </main>
+    )
+  }
+
+  if (mode === 'sheet') {
+    return (
+      <main className="sb-wrap">
+        <h2>이대로 만들까요?</h2>
+        {err && <p className="sb-err">{err}</p>}
+        {readNote && <p className="sb-warn">{readNote}</p>}
+        {photo && (
+          <div className="sb-photo">
+            <img src={photo.url} alt="올린 사진" />
+            {photo.warnings.map((w) => <p key={w} className="sb-warn">{w}</p>)}
+          </div>
+        )}
+        <label>제품 이름
+          <input value={product} onChange={(e) => setProduct(e.target.value)} maxLength={100} />
+        </label>
+        <label>핵심 메시지 (비우면 AI 가 제안해요)
+          <input value={message} onChange={(e) => setMessage(e.target.value)} maxLength={200} />
+        </label>
+        {claims.length > 0 && (
+          <fieldset className="sb-claims">
+            <legend>라벨에서 읽은 문구</legend>
+            {claims.map((c, i) => (
+              <label key={c.text} className="sb-check">
+                <input type="checkbox" checked={c.on} onChange={() => setClaims((cur) => cur.map((x, k) => (k === i ? { ...x, on: !x.on } : x)))} /> {c.text}
+              </label>
+            ))}
+            <small className="muted">체크한 문구는 카피에 쓰여요. 광고에 쓰기 어려운 표현은 만든 뒤 검수가 확인하고 한 번 고쳐 줘요</small>
+          </fieldset>
+        )}
+        <h3>분위기</h3>
+        <div className="sb-presets">
+          {cosPresets.map((p) => (
+            <button key={p.id} className={`sb-preset${(cosPick ?? cosPresets[0]?.id) === p.id ? ' on' : ''}`} onClick={() => setCosPick(p.id)}>
+              <span className="sb-sw">{p.colors.slice(0, 3).map((c) => <i key={c} style={{ background: c }} />)}</span>
+              <strong>{p.name}</strong><small>{p.desc}</small>
+            </button>
+          ))}
+        </div>
+        {angles.length > 0 && (
+          <>
+            <h3>이번 주 각도 (선택, 최대 3개)</h3>
+            <div className="sb-chips">
+              {angles.map((a) => (
+                <button key={a.keyword} className={`sb-chip${pickedAngles.includes(a.keyword) ? ' on' : ''}`} onClick={() => toggleAngle(a.keyword)}>
+                  {a.keyword}{a.rise != null && <small> 검색 {a.rise >= 0 ? '+' : ''}{Math.round(a.rise * 100)}%</small>}
+                </button>
+              ))}
+            </div>
+            <p className="muted">고른 키워드만 카피에 반영해요. 고르지 않으면 트렌드는 쓰지 않아요</p>
+          </>
+        )}
+        <div className="sb-actions">
+          <button className="primary" disabled={!product.trim() || !cosPresets.length} onClick={createFromSheet}>광고 만들기</button>
+          <button onClick={() => setMode('photo')}>다른 사진으로</button>
+        </div>
+        <CallInfo />
+      </main>
+    )
+  }
+
   return (
     <main className="sb-wrap">
       <h2>우리 가게 광고 이미지 만들기</h2>
+      <p><button className="link" onClick={() => setMode('photo')}>← 제품 사진으로 시작</button></p>
+      {readNote && <p className="sb-warn">{readNote}</p>}
       {err && <p className="sb-err">{err}</p>}
       <label>무엇을 홍보하나요? (가격·행사가 있으면 함께 적어 주세요)
         <textarea value={what} onChange={(e) => setWhat(e.target.value)} rows={3} placeholder="예) 동네 수제 딸기 케이크, 오늘만 1만원" />

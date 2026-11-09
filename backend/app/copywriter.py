@@ -15,6 +15,7 @@ VARIANTS = 3
 # 글자 수 위반 시 자동 재생성: 기본 끔(COPY_AUTO_RETRY=1 이면 켬). 두 번째 호출도 위반이 남는 경우가 많아 호출만 늘렸다.
 # 대신 프롬프트에 제한의 90% 이내로 쓰라는 여유분 지시를 두고, 위반이 남으면 사용자가 '카피 다시 생성'을 누른다.
 MAX_ATTEMPTS = 2 if os.getenv("COPY_AUTO_RETRY", "0") == "1" else 1
+CANDIDATES = 6             # 소상공인 경로의 후보 수(심사 호출이 이 중 상위 VARIANTS 개를 고른다)
 ICON_COUNT = 10            # 아이콘 세트 크기
 ICON_CANDIDATES = 15       # 카피 호출에서 함께 받는 기능명 후보 수 (여유분 5개 → 중복·금지 표현 제외 뒤에도 추가 요청이 거의 없다)
 
@@ -189,7 +190,7 @@ def _shared_vars(brand_name: str, brand: dict, brief: dict, knowledge: dict | No
 
 
 def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
-            knowledge: dict | None = None) -> tuple[str, str]:
+            knowledge: dict | None = None, n: int = VARIANTS) -> tuple[str, str]:
     """knowledge: knowledge.for_copy 결과(규제 원문·브랜드 지식). 없으면 지금처럼 브랜드 규칙과 브리프만으로 만든다."""
     def rule(slot, label):
         l = limits.get(slot)
@@ -205,7 +206,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         return f"- {label}: {', '.join(rng) or '제한 없음'} ({how}, 매체 필드명 '{l['field']}')"
 
     # 문장은 prompts/copy/system.md · user.md 에 있다. 여기서는 분기(없음/지정 없음)와 제한 줄만 계산해 넘긴다.
-    system = prompts.render("copy/system", variants=VARIANTS)
+    system = prompts.render("copy/system", variants=n)
     user = prompts.render(
         "copy/user",
         **_shared_vars(brand_name, brand, brief, knowledge),
@@ -215,6 +216,7 @@ def _prompt(brand_name: str, brand: dict, brief: dict, placement: dict, limits: 
         limit_body=rule("body", "body(본문)"),
         limit_cta=rule("cta", "cta(행동 유도)"),
         long_body=_long_block(limits.get("long")),
+        candidates="\n" + prompts.render("copy/_candidates", n=n) if n != VARIANTS else "",
     )
     return system, user
 
@@ -285,26 +287,60 @@ def parse_assets(data: dict, spec: list[dict]) -> dict:
     return out
 
 
+def judging(brief: dict) -> bool:
+    """다안+심사를 쓰는가: 소상공인 경로이고 COPY_JUDGE 가 0 이 아닐 때(0 이면 지금처럼 3안만)."""
+    return bool(brief.get("smallbiz")) and os.getenv("COPY_JUDGE", "1") != "0"
+
+
 def generate(brand_name: str, brand: dict, brief: dict, placement: dict, limits: dict,
-             knowledge: dict | None = None) -> list[dict]:
+             knowledge: dict | None = None, n: int = VARIANTS) -> list[dict]:
     """카피 변형을 만든다. angle·evidence 는 어떤 각도로 어떤 사실을 썼는지의 기록(분석 화면)."""
-    system, user = _prompt(brand_name, brand, brief, placement, limits, knowledge)
+    system, user = _prompt(brand_name, brand, brief, placement, limits, knowledge, n)
     from . import llm       # 공급자(Claude/OpenAI) 전환은 llm.py 가 맡는다. 순환 import 를 피해 함수 안에서 가져온다
     data = llm.chat_json(system, user, "copy", llm.copy_schema())
     out = []
-    for item in (data.get("variants") or [])[:VARIANTS]:
+    for item in (data.get("variants") or [])[:n]:
         out.append({k: str(item.get(k, "")).strip() for k in ("headline", "body", "cta", "angle", "evidence", "long_body")})
     return out
+
+
+JUDGE_KEYS = ("brand", "fact", "concrete", "trend", "feed")
+
+
+def pick_best(brand_name: str, brand: dict, brief: dict, variants: list[dict], keep: int = VARIANTS) -> list[dict]:
+    """후보 중 상위 keep 안을 고른다. 코드 검사 위반이 없는 안이 먼저, 차단 표현이 든 안은 심사에서 뺀다.
+    심사(작은 모델)가 실패하면 원래 순서대로 앞의 keep 안을 쓴다. 고른 안에는 score(합계)·judge(한 줄 사유)를 붙인다."""
+    from . import copyfix, llm
+    pool = [v for v in variants if not copyfix.blocking_violations(v, brand)] or variants
+    pool = sorted(pool, key=lambda v: bool(v.get("violations")))      # 글자 수 등 위반이 있는 안은 뒤로(정렬은 안정적)
+    try:
+        lines = "\n".join(f"{i}. 제목: {v['headline']} / 본문: {v['body']} / CTA: {v['cta']}" for i, v in enumerate(pool, 1))
+        angles = ", ".join(brief.get("trend_angles") or []) or "없음"
+        voice = (brand.get("voice") or {}).get("description") or "지정 없음"
+        data = llm.chat_json(prompts.render("copy/judge_system"), prompts.render(
+            "copy/judge_user", brand_name=brand_name, voice=voice, product_name=brief.get("product_name"),
+            description=brief.get("description") or "없음", key_message=brief.get("key_message") or "없음",
+            angles=angles, candidates=lines), "copy_judge", llm.judge_schema())
+        for s in data.get("scores") or []:
+            no = int(s.get("no", 0))
+            if 1 <= no <= len(pool):
+                pool[no - 1]["score"] = sum(int(s.get(k) or 0) for k in JUDGE_KEYS)
+                pool[no - 1]["judge"] = str(s.get("reason") or "").strip()
+    except Exception:
+        return pool[:keep]
+    ranked = sorted(pool, key=lambda v: (bool(v.get("violations")), -v.get("score", 0)))
+    return ranked[:keep]
 
 
 def generate_checked(brand_name, brand, brief, placement, limits, knowledge: dict | None = None) -> tuple[list[dict], int]:
     """생성 → 코드 검사. 반환: (변형, 시도 수). 기본은 1회 호출.
     COPY_AUTO_RETRY=1 이면 통과한 변형이 하나도 없을 때만 1회 더 생성해 위반이 적은 쪽을 채택한다(사용자는 변형 하나를
-    고르므로 깨끗한 변형이 하나면 충분하다)."""
+    고르므로 깨끗한 변형이 하나면 충분하다). 소상공인 경로(judging)는 후보 CANDIDATES 개를 받아 심사로 상위 3안만 돌려준다."""
+    n = CANDIDATES if judging(brief) else VARIANTS
     best, best_bad, attempts = None, 10**9, 0
     for _ in range(MAX_ATTEMPTS):
         attempts += 1
-        variants = generate(brand_name, brand, brief, placement, limits, knowledge=knowledge)
+        variants = generate(brand_name, brand, brief, placement, limits, knowledge=knowledge, **({} if n == VARIANTS else {"n": n}))
         for v in variants:
             v["violations"] = check(v, limits, brand)
         bad = sum(1 for v in variants if v["violations"])
@@ -312,4 +348,6 @@ def generate_checked(brand_name, brand, brief, placement, limits, knowledge: dic
             best, best_bad = variants, bad
         if best is not None and any(not v["violations"] for v in best):
             break
+    if best and n != VARIANTS:
+        best = pick_best(brand_name, brand, brief, best)
     return best or [], attempts

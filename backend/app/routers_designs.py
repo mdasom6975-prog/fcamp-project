@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from . import phrases
-from .models import Asset, Brand, BrandVersion, Design, PresetVersion
+from .models import Asset, Brand, BrandVersion, Design, Placement, PresetVersion
 from .routers_assets import get_db
 from .routers_review import ensure_unlocked, invalidate_reviews
 
@@ -25,6 +25,7 @@ class BriefIn(BaseModel):
     layout: str = "기본"                            # 레이아웃(배치): compose.LAYOUTS 의 이름. 배경 구도·제품 구역·문구 자리가 따른다
     image_model: str | None = None                  # 생성 설정: 이미지 모델(imagegen.MODELS). None 이면 기존 값 유지/기본
     bg_mode: str | None = None                      # 생성 설정: 배경 방식 per_ratio | single. None 이면 기존 값 유지/기본
+    use_trend: bool = True                          # 카피에 이번 주 검색 트렌드를 넣는지(false 면 끔: eval/compare_trend.py 의 없음 쪽)
     # 캠페인 필수·금지 표현. 비어 있으면 브랜드 규칙 값을 쓴다 (phrases.effective)
     required_phrases: list[str] = Field(default=[], max_length=50)
     forbidden_phrases: list[str] = Field(default=[], max_length=50)
@@ -220,7 +221,26 @@ def list_designs(brand_id: int | None = None, db: Session = Depends(get_db)):
     q = select(Design).order_by(Design.id.desc())
     if brand_id is not None:
         q = q.where(Design.brand_id == brand_id)
-    return [_out(d, db) for d in db.scalars(q).all()]
+    designs = db.scalars(q).all()
+    keep = _prefetch(designs, db)      # 세션은 행을 약한 참조로만 들고 있으므로, 응답을 만드는 동안 keep 으로 붙잡아 둔다
+    out = [_out(d, db) for d in designs]
+    del keep
+    return out
+
+
+def _prefetch(designs: list[Design], db: Session) -> list:
+    """목록 조회용: _out 이 시안마다 db.get 으로 부르는 행(브랜드·브랜드 버전·규격 버전과 그 지면·플랫폼)을 한 번에 읽어 세션에 올린다.
+    db.get 은 세션에 있는 행은 DB 를 다시 부르지 않으므로, 시안 N개 × 수 번의 왕복이 쿼리 몇 번으로 줄어든다. _out 의 결과는 그대로다.
+    돌려주는 목록은 읽은 행을 살려 두기 위한 것이다(버리면 세션에서 사라져 db.get 이 다시 DB 를 부른다)."""
+    if not designs:
+        return []
+    brands = db.scalars(select(Brand).where(Brand.id.in_({d.brand_id for d in designs}))).all()
+    bv_ids = {d.brand_version_id for d in designs} | {b.current_version_id for b in brands if b.current_version_id}
+    bvs = db.scalars(select(BrandVersion).where(BrandVersion.id.in_(bv_ids))).all()
+    pv_ids = {pid for d in designs for pid in (d.preset_version_ids or [])}
+    pvs = db.scalars(select(PresetVersion).where(PresetVersion.id.in_(pv_ids))
+                     .options(joinedload(PresetVersion.placement).joinedload(Placement.platform))).all() if pv_ids else []
+    return [brands, bvs, pvs]
 
 
 @router.get("/designs/{design_id}")

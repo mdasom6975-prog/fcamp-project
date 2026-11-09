@@ -108,7 +108,8 @@ def create_copy(design_id: int, db: Session = Depends(get_db)):
         failures.append(f"아이콘 후보·추가 문구: {type(e).__name__}")
     # 이번 카피에 넣은 규제·지식 조각과 시안별 각도·근거(분석 화면 '참고한 자료')
     extra = {"knowledge": {**knowledge.refs(k), "variants": [
-        {"variant_no": i, "angle": v.get("angle", ""), "evidence": v.get("evidence", "")} for i, v in enumerate(variants, 1)]}}
+        {"variant_no": i, "angle": v.get("angle", ""), "evidence": v.get("evidence", ""),
+         **({"score": v["score"], "judge": v.get("judge", "")} if "score" in v else {})} for i, v in enumerate(variants, 1)]}}
     if icon_candidates:
         # 같은 호출에서 받은 아이콘 기능명 후보를 브리프에 두면 아이콘 세트 생성이 기능명 제안 호출 없이 이것을 쓴다
         extra["icon_candidates"] = icon_candidates

@@ -178,13 +178,9 @@ def chunk_text(week_label: str, row: dict) -> str:
         parts.append(f", 네이버 쇼핑(화장품/미용) 클릭 관심 {_pct(row['naver_shopping'])}")
     if row.get("google") is not None:
         parts.append(f", 구글 검색 관심 {_pct(row['google'])}")
-    prof = row.get("profile") or {}
-    if prof.get("age"):
-        top_age = max(prof["age"].items(), key=lambda x: x[1])
-        parts.append(f". 쇼핑 관심은 {top_age[0]}({top_age[1]:.0f}%)")
-        if prof.get("gender"):
-            tg = max(prof["gender"].items(), key=lambda x: x[1])
-            parts.append(f"·{tg[0]}({tg[1]:.0f}%) 우세")
+    if row.get("naver_shopping") is not None:      # 연령 우세는 거의 모든 키워드가 같아(40대) 구분력이 없어 뺐다. 대신 검색·쇼핑이 같이 오르는지로 단계를 풀어 쓴다
+        parts.append(". 검색과 쇼핑 클릭이 함께 올라 구매 직전에 찾는 키워드" if row["naver_shopping"] > 0
+                     else ". 검색만 늘고 쇼핑 클릭은 늘지 않아 정보를 찾는 단계의 키워드")
     return "".join(parts) + "."
 
 

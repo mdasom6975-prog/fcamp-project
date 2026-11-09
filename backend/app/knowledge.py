@@ -410,25 +410,26 @@ def brand_directions(db: Session, brand_id: int | None) -> list[str]:
     return next(((d.visual or {}).get("directions") for d in docs if (d.visual or {}).get("directions")), [])
 
 
-TREND_GROUP_PRIORITY = {"효능·상황": 0, "성분": 1, "품목": 2}     # 새 정보가 되는 순서(품목명은 브리프에 이미 있기 쉽다)
+TREND_GROUP_PRIORITY = {"무드·질감": 0, "루틴·상황": 0, "효능·상황": 0, "성분": 1, "품목": 2}     # 새 정보가 되는 순서(품목명은 브리프에 이미 있기 쉽다)
+TREND_SKIP_GROUPS = {"주의", "품목"}   # 수집은 하되 카피에는 넣지 않는 묶음. 주의 = 효능·질환 표현(위반 위험), 품목 = 다른 제품 이름(소재가 아니다)
 TREND_CANDIDATES = 3                                              # 후보 = TREND_K × 이 배수(브리프와 가까운 순)
 
 
 def pick_trend(rows: list[dict], brief: dict, metas: dict[str, dict], k: int = TREND_K) -> list[dict]:
     """트렌드 조각 선택 규칙(05 비교표의 원인 → 11/06 개선):
     ① 브리프(상품명·설명·핵심 메시지)에 이미 있는 키워드는 뺀다(새 정보가 아니다)
-    ② 묶음 우선순위 효능·상황 > 성분 > 품목, 같은 묶음에서는 쇼핑 클릭도 함께 오른 키워드가 앞, 그다음 브리프 유사도
+    ② 브리프 유사도가 높은 순(제품과 어울리지 않는 키워드가 묶음 순서 때문에 앞서지 않게), 같으면 쇼핑 클릭도 함께 오른 키워드, 그다음 묶음 우선순위
     ③ 상위 k. 걸러져 k 가 안 되면 있는 만큼. 각 조각에 why(고른 이유)를 붙인다."""
     norm = lambda t: re.sub(r"\s+", "", t or "").lower()
     brief_text = norm(" ".join(str(brief.get(x) or "") for x in ("product_name", "description", "key_message")))
     cands = []
     for r in rows:
         kw = r["section"]
-        if kw == "요약" or norm(kw) in brief_text:
-            continue
         m = metas.get(kw) or {}
+        if kw == "요약" or norm(kw) in brief_text or m.get("group") in TREND_SKIP_GROUPS:
+            continue
         shop_up = (m.get("shopping") or 0) > 0
-        cands.append((TREND_GROUP_PRIORITY.get(m.get("group"), 3), 0 if shop_up else 1, -(r.get("score") or 0), r, m, shop_up))
+        cands.append((-(r.get("score") or 0), 0 if shop_up else 1, TREND_GROUP_PRIORITY.get(m.get("group"), 3), r, m, shop_up))
     cands.sort(key=lambda x: x[:3])
     out = []
     for pri, _, _, r, m, shop_up in cands[:k]:
@@ -437,6 +438,14 @@ def pick_trend(rows: list[dict], brief: dict, metas: dict[str, dict], k: int = T
             why.append(f"쇼핑 클릭도 +{round(m['shopping'] * 100):d}%")
         out.append({**r, "trend_group": m.get("group"), "trend_shopping": m.get("shopping"), "trend_naver": m.get("naver"), "why": " · ".join(why)})
     return out
+
+
+def chosen_trend(db: Session, angles: list[str]) -> list[dict]:
+    """사용자가 '이번 주 각도'로 고른 키워드의 조각을 그대로 돌려준다(자동 선택 규칙·검색 없이). 고른 순서를 지키고 최대 TREND_K 개."""
+    rows = {ch.section: _row(ch, doc) for ch, doc in db.execute(
+        select(KnowledgeChunk, KnowledgeDoc).join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+        .where(KnowledgeDoc.layer == "트렌드", KnowledgeDoc.status == "사용", KnowledgeChunk.section.in_(angles))).all()}
+    return [{**rows[a], "why": "사용자가 고른 각도"} for a in angles if a in rows][:TREND_K]
 
 
 def trend_metas(db: Session) -> dict[str, dict]:
@@ -465,8 +474,9 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
     - 임베딩 호출이 실패하면 guide 없이 진행하고 error 에 오류 이름만 남긴다(카피 생성을 막지 않는다)"""
     from . import legal
     industries = legal.detect(legal.source_text(brief))
-    if group_id is None:
+    if group_id is None and not (brief or {}).get("smallbiz"):
         # 타 브랜드(그룹 없음) = 대조군: 규제를 포함한 지식을 전혀 넣지 않는다(00 정의서 v2.2, 2026-11-05 결정).
+        # 소상공인 캠페인(brief["smallbiz"])은 그룹이 없어도 규제와 트렌드를 넣는다(2026-11-06 방향 전환)
         # 검수의 법적 표현 사전(legal.violations)은 공통이라 대조군 카피가 거기서 잡히는 것이 S3 비교다
         return {"industries": industries, "law": [], "guide": [], "trend": [], "trend_mode": "off", "error": None,
                 "functional_mismatch": functional_mismatch([], brief.get("functional")),
@@ -503,7 +513,8 @@ def for_copy(db: Session, brand_id: int | None, group_id: int | None, brief: dic
                                        "참고했습니다. 같은 제품이면 sources.json 의 aliases 에 이 이름을 추가하세요")
             out["guide"] = products + [r for layer in ("브랜드", "그룹") for r in res.get(layer, [])]
             if use_trend:
-                out["trend"] = pick_trend(res.get("트렌드", []), brief, trend_metas(db))
+                out["trend"] = (chosen_trend(db, brief["trend_angles"]) if brief.get("trend_angles")
+                                else pick_trend(res.get("트렌드", []), brief, trend_metas(db)))
         except Exception as e:      # 키·네트워크 오류 등. 메시지에 민감 정보가 있을 수 있어 이름만 남긴다
             out["error"] = type(e).__name__
     out["functional_mismatch"] = functional_mismatch(out["guide"], brief.get("functional"))

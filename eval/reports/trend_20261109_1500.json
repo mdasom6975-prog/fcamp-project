@@ -1,0 +1,134 @@
+{
+  "rows": [
+    {
+      "keyword": "연말",
+      "group": "루틴·상황",
+      "naver_search": 1.1079999977758788,
+      "naver_shopping": null,
+      "google": 0.028322440087146017,
+      "recent_ratio": 4.73895
+    },
+    {
+      "keyword": "핸드크림",
+      "group": "품목",
+      "naver_search": 0.827442971663813,
+      "naver_shopping": 0.5162690141237494,
+      "google": 0.05263157894736836,
+      "recent_ratio": 76.7248825
+    },
+    {
+      "keyword": "속광",
+      "group": "무드·질감",
+      "naver_search": 0.7307694082841603,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 7.499995
+    },
+    {
+      "keyword": "여드름피부",
+      "group": "주의",
+      "naver_search": 0.6695494565319711,
+      "naver_shopping": -0.3863636735537217,
+      "google": -0.11199999999999999,
+      "recent_ratio": 93.002025
+    },
+    {
+      "keyword": "바쿠치올",
+      "group": "성분",
+      "naver_search": 0.5924001019412781,
+      "naver_shopping": 0.4744804439336354,
+      "google": -0.5384615384615384,
+      "recent_ratio": 14.722565
+    },
+    {
+      "keyword": "아이크림",
+      "group": "품목",
+      "naver_search": 0.5894674723835196,
+      "naver_shopping": 0.03438715581697771,
+      "google": -0.04166666666666663,
+      "recent_ratio": 21.503819999999997
+    },
+    {
+      "keyword": "토너",
+      "group": "품목",
+      "naver_search": 0.5525960316423928,
+      "naver_shopping": -0.2873929239861315,
+      "google": -0.11549295774647883,
+      "recent_ratio": 31.0019775
+    },
+    {
+      "keyword": "수분크림",
+      "group": "품목",
+      "naver_search": 0.4113761453573539,
+      "naver_shopping": -0.10322864211267702,
+      "google": -0.02608695652173909,
+      "recent_ratio": 81.40029
+    },
+    {
+      "keyword": "물광",
+      "group": "무드·질감",
+      "naver_search": 0.40681367990490425,
+      "naver_shopping": -0.30000000000000004,
+      "google": 0.005649717514124353,
+      "recent_ratio": 58.4999975
+    },
+    {
+      "keyword": "건조한피부",
+      "group": "효능·상황",
+      "naver_search": 0.38753975414173913,
+      "naver_shopping": 0.0,
+      "google": -0.7777777777777778,
+      "recent_ratio": 1.72061
+    },
+    {
+      "keyword": "앰플",
+      "group": "품목",
+      "naver_search": 0.35005273385375757,
+      "naver_shopping": 0.11063604811576488,
+      "google": -0.10179640718562877,
+      "recent_ratio": 26.96932
+    },
+    {
+      "keyword": "세럼",
+      "group": "품목",
+      "naver_search": 0.3392942966792696,
+      "naver_shopping": 0.22851375944698016,
+      "google": -0.06666666666666665,
+      "recent_ratio": 27.793167500000003
+    },
+    {
+      "keyword": "보습",
+      "group": "효능·상황",
+      "naver_search": 0.32204896782912473,
+      "naver_shopping": 1.142857546938989,
+      "google": 0.022222222222222143,
+      "recent_ratio": 41.5453475
+    },
+    {
+      "keyword": "속건조",
+      "group": "효능·상황",
+      "naver_search": 0.3117317766861114,
+      "naver_shopping": 0.16129035348595844,
+      "google": -0.48571428571428577,
+      "recent_ratio": 32.866735
+    },
+    {
+      "keyword": "올인원",
+      "group": "루틴·상황",
+      "naver_search": 0.2900968868670981,
+      "naver_shopping": 0.09836065189465182,
+      "google": -0.1032448377581121,
+      "recent_ratio": 70.224605
+    }
+  ],
+  "google_error": null,
+  "shopping_error": null,
+  "naver_api": "ncp",
+  "period": [
+    "2026-08-16",
+    "2026-11-08"
+  ],
+  "source_id": "trend_2026-W46",
+  "label": "2026-11-09 기준 주",
+  "keywords": 76
+}

@@ -4,7 +4,8 @@ import { api, type KnowledgeSummary } from './api'
 /* 첫 화면: 진입점 둘.
    - 아모레퍼시픽 입장(#/group): 지식이 등록된 그룹. 1단계 브랜드 탭으로 들어간다(지식 브라우저는 '지식' 탭, 00 정의서 v2).
    - 타 브랜드 생성(#/studio): 브랜드를 직접 등록하고 지식 검색 없이 시안을 만든다(RAG 유무 비교용 대조군, 기존 스튜디오 화면 그대로).
-   소상공인(#/smallbiz)·RAG 진화 시연(#/evolution)은 주소로는 열리지만 첫 화면 카드에서는 뺐다(2026-11 재기획). */
+   - 제품 사진으로 시작(#/smallbiz): 소상공인 화장품 마케터용. 11/09 방향 전환으로 다시 넣었다(사진 1장 → 인스타 피드 카피·이미지).
+   RAG 진화 시연(#/evolution)은 주소로는 열리지만 첫 화면 카드에서는 뺐다(2026-11 재기획). */
 export default function Landing() {
   const [k, setK] = useState<KnowledgeSummary | null>(null)
   const [groupName, setGroupName] = useState<string>('')
@@ -36,8 +37,14 @@ export default function Landing() {
           <div className="entry-chips"><em>RAG 없음</em><em>테스트용</em><em>기존 스튜디오 화면</em></div>
           <b>브랜드 등록으로 →</b>
         </a>
+        <a className="landing-card entry-smallbiz" href="#/smallbiz">
+          <strong>제품 사진으로 시작</strong>
+          <span>소상공인 화장품 브랜드용. 제품 사진 한 장을 올리면 제품 이름과 라벨 문구를 읽어 인스타그램 피드용 카피와 이미지를 만듭니다.</span>
+          <div className="entry-chips"><em>사진 1장</em><em>화장품법 검수</em><em>Instagram 피드</em></div>
+          <b>사진 올리러 가기 →</b>
+        </a>
       </div>
-      <p className="muted">왼쪽은 지식이 있는 쪽, 오른쪽은 없는 쪽. 같은 브리프를 양쪽에 넣으면 검색이 카피와 검수를 어떻게 바꾸는지 비교할 수 있습니다.</p>
+      <p className="muted">앞의 두 카드: 왼쪽은 지식이 있는 쪽, 오른쪽은 없는 쪽. 같은 브리프를 양쪽에 넣으면 검색이 카피와 검수를 어떻게 바꾸는지 비교할 수 있습니다.</p>
     </main>
   )
 }

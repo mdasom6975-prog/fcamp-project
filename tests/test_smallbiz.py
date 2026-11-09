@@ -172,3 +172,113 @@ def test_pricing_info_lists_plan_and_prices(env):
     assert [p["calls"] for p in d["plan"]][2] == "2"
     assert d["image_total_usd"] == pytest.approx(sum(p["usd"] for p in d["image_prices"]), abs=1e-4)
     assert d["restyle"]["calls"] == 2
+
+
+def test_cosmetic_presets_are_listed_only_for_the_industry_and_not_recommended():
+    cos = [p["id"] for p in smallbiz.for_industry("화장품")]
+    assert len(cos) == 3 and not set(cos) & set(smallbiz.recommend("크림 세럼 화장품", limit=20))
+    assert all(p.get("industry") is None for p in smallbiz.for_industry(None))
+
+
+def test_list_presets_filters_by_industry(env):
+    client, _ = env
+    assert len(client.get("/api/smallbiz/presets", params={"industry": "화장품"}).json()["presets"]) == 3
+    assert not any(p["industry"] for p in client.get("/api/smallbiz/presets").json()["presets"])
+
+
+def test_read_photo_returns_fields_and_survives_vision_failure(env, monkeypatch):
+    client, _ = env
+    pid = client.post("/api/smallbiz/photo", files={"file": ("a.png", _png((400, 300), (120, 120, 120)), "image/png")}).json()["id"]
+    monkeypatch.setattr("app.routers_smallbiz.llm.vision_json", lambda *a, **k: {
+        "product_name": "수분 크림", "category": "크림", "is_cosmetic": True, "label_claims": ["주름개선", " ", "수분 보습"], "suggested_message": "촉촉한 하루"})
+    r = client.post("/api/smallbiz/read-photo", json={"photo_asset_id": pid}).json()
+    assert r["ok"] and r["is_cosmetic"] and r["label_claims"] == ["주름개선", "수분 보습"] and r["product_name"] == "수분 크림"
+    def boom(*a, **k):
+        raise RuntimeError("vision down")
+    monkeypatch.setattr("app.routers_smallbiz.llm.vision_json", boom)
+    r2 = client.post("/api/smallbiz/read-photo", json={"photo_asset_id": pid}).json()
+    assert r2["ok"] is False and r2["product_name"] == "" and r2["label_claims"] == []
+    assert client.post("/api/smallbiz/read-photo", json={"photo_asset_id": 999}).status_code == 400
+
+
+def test_cosmetic_campaign_uses_feed_label_claims_and_chosen_angles(env):
+    client, Local = env
+    from app.models import Design
+    r = client.post("/api/smallbiz/campaigns", json={"what": "수분 크림", "preset_id": "cosmetic_natural",
+                                                      "label_claims": ["주름개선"], "trend_angles": ["연말"]})
+    assert r.status_code == 200, r.text
+    with Local() as db:
+        d = db.get(Design, r.json()["design_id"])
+        assert len(d.preset_version_ids) == 1, "화장품 프리셋의 기본 지면은 Instagram 피드 하나"
+        assert "라벨 문구: 주름개선" in d.brief["description"] and d.brief["use_trend"] is True and d.brief["trend_angles"] == ["연말"]
+    plain = client.post("/api/smallbiz/campaigns", json={"what": "수분 크림", "preset_id": "cosmetic_natural"}).json()["design_id"]
+    with Local() as db:
+        assert db.get(Design, plain).brief["use_trend"] is False, "각도를 고르지 않으면 트렌드를 쓰지 않는다"
+
+
+def test_trend_angles_is_empty_without_trend_document(env):
+    client, _ = env
+    assert client.get("/api/smallbiz/trend-angles").json() == {"angles": []}
+
+
+def test_campaign_auto_runs_fix_once_when_copy_has_blocking_phrase(env, monkeypatch):
+    from app import copywriter, copyfix
+    client, _ = env
+    monkeypatch.setattr(copywriter, "generate_checked", lambda *a, **k: ([{"headline": "최고의 수분 크림", "body": "본문", "cta": "보기", "violations": []}] * 3, 1))
+    monkeypatch.setattr(copyfix.llm, "chat_json", lambda *a, **k: {"headline": "촉촉한 수분 크림", "body": "본문", "cta": "보기"})
+    r = client.post("/api/smallbiz/campaigns", json={"what": "수분 크림", "preset_id": "cosmetic_natural"})
+    assert r.status_code == 200, r.text
+    fixes = r.json()["auto_fix"]
+    assert len(fixes) == 1 and fixes[0]["adopted"] is True, "금지어 '최고'가 든 제목을 자동으로 한 번 고친다"
+
+
+def test_campaign_without_blocking_phrase_makes_no_auto_fix(env):
+    client, _ = env
+    r = client.post("/api/smallbiz/campaigns", json={"what": "수분 크림", "preset_id": "cosmetic_natural"})
+    assert r.status_code == 200 and r.json()["auto_fix"] == []
+
+
+# ---- 3.5 카피 다안 + 심사 ----
+def _cands(n):
+    return [{"headline": f"제목{i}", "body": f"본문{i}", "cta": "보기", "angle": "", "evidence": "", "long_body": ""} for i in range(1, n + 1)]
+
+
+def test_judging_only_for_smallbiz_and_switch(monkeypatch):
+    from app import copywriter
+    assert copywriter.judging({"smallbiz": True}) and not copywriter.judging({})
+    monkeypatch.setenv("COPY_JUDGE", "0")
+    assert not copywriter.judging({"smallbiz": True})
+
+
+def test_pick_best_returns_top3_by_score_and_keeps_blocked_out(monkeypatch):
+    from app import copywriter
+    vs = _cands(6)
+    vs[0]["headline"] = "최고의 수분 크림"      # 법적 차단 표현 → 심사에서 제외
+    monkeypatch.setattr("app.llm.chat_json", lambda *a, **k: {"scores": [
+        {"no": i, "brand": s, "fact": s, "concrete": s, "trend": s, "feed": s, "reason": f"r{i}"} for i, s in
+        zip(range(1, 6), (5, 1, 4, 2, 3))]})
+    out = copywriter.pick_best("b", {}, {"product_name": "p"}, vs)
+    assert len(out) == 3
+    assert "최고의 수분 크림" not in [v["headline"] for v in out]
+    assert out[0]["score"] >= out[1]["score"] >= out[2]["score"] and out[0]["judge"]
+
+
+def test_pick_best_falls_back_to_order_when_judge_fails(monkeypatch):
+    from app import copywriter
+    def boom(*a, **k): raise RuntimeError("x")
+    monkeypatch.setattr("app.llm.chat_json", boom)
+    out = copywriter.pick_best("b", {}, {"product_name": "p"}, _cands(6))
+    assert [v["headline"] for v in out] == ["제목1", "제목2", "제목3"]
+
+
+def test_generate_checked_asks_six_for_smallbiz_and_three_otherwise(monkeypatch):
+    from app import copywriter
+    asked = []
+    def fake(*a, n=3, **k):
+        asked.append(n); return _cands(n)
+    monkeypatch.setattr(copywriter, "generate", fake)
+    monkeypatch.setattr(copywriter, "pick_best", lambda b, br, bf, vs, keep=3: vs[:keep])
+    lim = {"headline": None, "body": None, "cta": None}
+    assert len(copywriter.generate_checked("b", {}, {"smallbiz": True}, {}, lim)[0]) == 3
+    assert len(copywriter.generate_checked("b", {}, {}, {}, lim)[0]) == 3
+    assert asked == [6, 3]

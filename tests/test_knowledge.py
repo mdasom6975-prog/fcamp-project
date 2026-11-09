@@ -229,6 +229,16 @@ def test_for_copy_without_knowledge_makes_no_embedding_call(session):
     assert k["law"] == [] and k["guide"] == [] and k["error"] is None and k["functional_mismatch"] is None
 
 
+def test_for_copy_smallbiz_gets_law_without_group(session):
+    from app import knowledge
+    _seed_copy_knowledge(session)
+    def boom(texts):
+        raise AssertionError("규제 조각이 적고 그룹 지식이 없으면 임베딩을 호출하지 않는다")
+    brief = {"product_name": "수분 크림", "description": "세라마이드 보습 크림", "smallbiz": {"preset_id": "x"}}
+    k = knowledge.for_copy(session, 99, None, brief, embedder=boom)
+    assert k["law_mode"] == "all" and len(k["law"]) == 3, "소상공인은 그룹이 없어도 화장품 규제가 들어간다(대조군은 0)"
+
+
 def test_for_copy_survives_embedding_failure(session):
     from app import knowledge
     _seed_copy_knowledge(session)
@@ -464,10 +474,26 @@ def test_pick_trend_drops_brief_keywords_and_prefers_situation_and_shopping():
              "보습": {"group": "효능·상황", "shopping": 0.92}, "바쿠치올": {"group": "성분", "shopping": 0.36}, "아이크림": {"group": "품목", "shopping": -0.09}}
     brief = {"product_name": "아토베리어365 하이드로 수분 크림", "description": "장벽 캡슐크림", "key_message": "속수분"}
     out = knowledge.pick_trend(rows, brief, metas, k=3)
-    assert [r["section"] for r in out] == ["보습", "바쿠치올", "핸드크림"]      # 요약·브리프에 있는 '수분크림' 제외, 효능 > 성분 > 품목(쇼핑 상승 우선)
-    assert out[0]["why"] == "효능·상황 · 쇼핑 클릭도 +92%" and out[2]["why"] == "품목 · 쇼핑 클릭도 +35%"
+    assert [r["section"] for r in out] == ["보습", "바쿠치올"]      # 요약·품목 묶음(다른 제품 이름) 제외, 브리프 유사도(score) 높은 순
+    assert out[0]["why"] == "효능·상황 · 쇼핑 클릭도 +92%" and out[1]["why"] == "성분 · 쇼핑 클릭도 +36%"
     assert knowledge.pick_trend(rows, brief, metas, k=1)[0]["section"] == "보습"
+    tie = [{"section": "바쿠치올", "score": 0.5}, {"section": "보습", "score": 0.5}]
+    assert [r["section"] for r in knowledge.pick_trend(tie, brief, metas)] == ["보습", "바쿠치올"], "유사도가 같으면 쇼핑 상승이 앞, 그다음 효능 > 성분"
     assert knowledge.pick_trend([{"section": "수분크림", "score": 0.8}], brief, metas) == []     # 억지로 채우지 않는다
+    risky = [{"section": "주름", "score": 0.9}, {"section": "보습", "score": 0.4}]
+    assert [r["section"] for r in knowledge.pick_trend(risky, brief, {**metas, "주름": {"group": "주의", "shopping": 0.9}})] == ["보습"], "주의 묶음은 카피에 넣지 않는다"
+
+
+def test_chosen_trend_keeps_user_order_and_ignores_unknown(session):
+    from app import knowledge
+    _trend_doc(session)
+    out = knowledge.chosen_trend(session, ["보습", "없는키워드", "핸드크림"])
+    assert [r["section"] for r in out] == ["보습", "핸드크림"] and out[0]["why"] == "사용자가 고른 각도", "고른 순서를 지키고 없는 키워드는 뺀다"
+    brief = {"product_name": "수분 크림", "description": "크림", "smallbiz": {"preset_id": "x"}, "use_trend": True, "trend_angles": ["핸드크림"]}
+    k = knowledge.for_copy(session, 99, None, brief, embedder=fake_embed)
+    assert k["trend_mode"] == "on" and [r["section"] for r in k["trend"]] == ["핸드크림"], "품목 묶음도 사용자가 고르면 그대로 쓴다"
+    k2 = knowledge.for_copy(session, 99, None, {**brief, "use_trend": False, "trend_angles": []}, embedder=fake_embed)
+    assert k2["trend_mode"] == "off" and k2["trend"] == []
 
 
 def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, monkeypatch):
@@ -479,7 +505,7 @@ def test_for_copy_adds_trend_chunks_without_summary_and_records_refs(session, mo
     k = knowledge.for_copy(session, 1, 7, brief, embedder=fake_embed)
     assert k["trend_mode"] == "on" and 1 <= len(k["trend"]) <= knowledge.TREND_K
     assert all(r["layer"] == "트렌드" and r["section"] != "요약" for r in k["trend"])
-    assert "수분크림" not in [r["section"] for r in k["trend"]] and k["trend"][0]["section"] == "보습" and k["trend"][0]["why"].startswith("효능·상황")   # 브리프에 있는 품목은 빠지고 효능·상황이 앞
+    assert "수분크림" not in [r["section"] for r in k["trend"]] and "보습" in [r["section"] for r in k["trend"]]   # 브리프에 있는 품목은 빠지고 브리프에 없는 보습이 들어온다(순서는 유사도)
     # 프롬프트에 문단이 붙고 규제·브랜드 문단 뒤에 온다
     v = copywriter.knowledge_vars(k, brief)
     assert "[이번 주 검색 트렌드 — 참고]" in v["trend"] and "'보습'" in v["trend"] and "'수분크림'" not in v["trend"]

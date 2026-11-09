@@ -49,6 +49,22 @@ PRESETS = [
      "colors": ["#2A9D8F", "#E9C46A", "#F4A261", "#FFFDF7", "#264653"], "image_style": "플랫 일러스트", "headline_max": 16,
      "tone": "밝은 민트·노랑·주황의 플랫 일러스트. 가게 외관·깃발·풍선 같은 축하 소품, 둥근 형태, 경쾌하고 환영하는 분위기.",
      "voice": "경쾌하고 반가운 존댓말. 위치·날짜는 사용자가 쓴 것만 쓴다."},
+    # 화장품 톤 프리셋(업종 표시 industry): 제품 사진으로 시작하는 흐름에서만 보인다. 일반 추천(recommend)에는 끼지 않는다
+    {"id": "cosmetic_natural", "name": "깨끗한 자연광", "industry": "화장품", "desc": "밝은 자연광 아래 깨끗하게 놓인 제품",
+     "tags": ["화장품", "스킨케어", "크림", "세럼", "토너", "로션", "립밤", "비누", "선크림", "마스크팩"],
+     "colors": ["#5C8A72", "#C7D9C9", "#E8F0E6", "#FBFCF8", "#2B3A33"], "image_style": "실사 제품·공간", "headline_max": 20,
+     "tone": "창가의 밝은 자연광, 흰색·연한 초록 톤의 깨끗한 배경에 제품 하나가 놓인 사진. 물방울·잎사귀 같은 소품은 한두 개만, 그림자는 부드럽게.",
+     "voice": "맑고 담백한 존댓말. 제품이 가진 특징을 짧게 전하고, 효능을 단정하거나 과장하지 않는다."},
+    {"id": "cosmetic_minimal", "name": "미니멀 스튜디오", "industry": "화장품", "desc": "단색 배경 위에 제품만 또렷하게",
+     "tags": ["화장품", "스킨케어", "크림", "세럼", "토너", "로션", "립밤", "비누", "선크림", "마스크팩"],
+     "colors": ["#2B2B2B", "#BFBFBF", "#E9E4DC", "#F7F7F5", "#1A1A1A"], "image_style": "실사 제품·공간", "headline_max": 18,
+     "tone": "회색·베이지 단색 배경과 스튜디오 조명, 제품 하나를 중앙에 크게 둔 정돈된 제품 사진. 소품 없음, 넓은 여백, 또렷한 윤곽.",
+     "voice": "절제된 짧은 문장. 성분과 사용감을 담담하게 말하고 과장하지 않는다."},
+    {"id": "cosmetic_cozy", "name": "포근한 감성", "industry": "화장품", "desc": "따뜻한 색감의 감성적인 분위기",
+     "tags": ["화장품", "스킨케어", "크림", "세럼", "토너", "로션", "립밤", "비누", "선크림", "마스크팩"],
+     "colors": ["#C98B7B", "#F1D7CB", "#8C6A5D", "#FFF7F2", "#4A3731"], "image_style": "실사 제품·공간", "headline_max": 20,
+     "tone": "따뜻한 베이지·살구 톤, 리넨·도자기 같은 부드러운 질감 위에 제품이 놓인 포근한 사진. 은은한 빛, 얕은 피사계 심도, 여백이 넉넉한 구도.",
+     "voice": "다정하고 차분한 존댓말. 하루의 장면을 그리듯 쓰고 효능은 단정하지 않는다."},
 ]
 _BY_ID = {p["id"]: p for p in PRESETS}
 
@@ -59,14 +75,20 @@ def get(preset_id: str) -> dict | None:
 
 def public(p: dict) -> dict:
     return {"id": p["id"], "name": p["name"], "desc": p["desc"], "colors": p["colors"], "image_style": p["image_style"],
-            "tags": p["tags"][:6]}
+            "tags": p["tags"][:6], "industry": p.get("industry")}
+
+
+def for_industry(industry: str | None) -> list[dict]:
+    """업종을 주면 그 업종 프리셋만, 안 주면 업종 표시가 없는 일반 프리셋만."""
+    return [p for p in PRESETS if p.get("industry") == industry]
 
 
 def recommend(text: str, limit: int = 3) -> list[str]:
-    """입력 문장에 들어 있는 업종·상황 단어로 프리셋 점수를 매긴다(가중: 긴 단어일수록 높게). 일치가 없으면 기본 순서."""
+    """입력 문장에 들어 있는 업종·상황 단어로 일반 프리셋(업종 표시 없는 것) 점수를 매긴다(가중: 긴 단어일수록 높게). 일치가 없으면 기본 순서."""
     t = (text or "").replace(" ", "")
-    score = {p["id"]: sum(len(k) for k in p["tags"] if k.replace(" ", "") in t) for p in PRESETS}
-    ranked = sorted(PRESETS, key=lambda p: (-score[p["id"]], PRESETS.index(p)))
+    pool = for_industry(None)
+    score = {p["id"]: sum(len(k) for k in p["tags"] if k.replace(" ", "") in t) for p in pool}
+    ranked = sorted(pool, key=lambda p: (-score[p["id"]], pool.index(p)))
     return [p["id"] for p in ranked][:limit]
 
 

@@ -57,13 +57,13 @@ def test_rank_orders_by_naver_rise_and_keeps_group():
 
 
 def test_chunk_text_states_numbers_only():
-    row = {"keyword": "수분크림", "group": "품목", "naver_search": 0.42, "naver_shopping": 0.3, "google": 0.18,
-           "profile": {"age": {"20대": 41.0, "30대": 35.0}, "gender": {"여성": 78.0, "남성": 22.0}}}
+    row = {"keyword": "수분크림", "group": "품목", "naver_search": 0.42, "naver_shopping": 0.3, "google": 0.18}
     t = trends.chunk_text("2026-11-06 기준 주", row)
     assert t.startswith("[화장품 검색 트렌드 2026-11-06 기준 주] '수분크림' (품목 키워드)")
-    assert "+42%" in t and "쇼핑(화장품/미용) 클릭 관심 +30%" in t and "구글 검색 관심 +18%" in t and "20대(41%)·여성(78%) 우세" in t
-    t2 = trends.chunk_text("w", {**row, "google": None, "profile": None})
-    assert "구글" not in t2 and "우세" not in t2
+    assert "+42%" in t and "쇼핑(화장품/미용) 클릭 관심 +30%" in t and "구글 검색 관심 +18%" in t and "구매 직전에 찾는 키워드" in t
+    t2 = trends.chunk_text("w", {**row, "google": None, "naver_shopping": -0.1})
+    assert "구글" not in t2 and "정보를 찾는 단계의 키워드" in t2 and "구매 직전" not in t2
+    assert "단계" not in trends.chunk_text("w", {**row, "naver_shopping": None}), "쇼핑 자료가 없으면 해석을 붙이지 않는다"
 
 
 def test_collect_with_fake_naver_and_google_failure(naver, monkeypatch):
@@ -96,10 +96,10 @@ def test_register_makes_trend_layer_doc_and_archives_previous(session, naver, mo
     assert "트렌드" in knowledge.LAYERS
 
 
-def test_keywords_file_has_three_groups_and_unique_entries():
+def test_keywords_file_has_groups_and_unique_entries():
     cfg = trends.load_keywords()
     kws = [k for k, _ in trends.all_keywords(cfg)]
-    assert set(cfg["groups"]) == {"품목", "성분", "효능·상황"} and len(kws) == len(set(kws)) >= 50 and cfg["naver_shopping_category"] == "50000002"
+    assert set(cfg["groups"]) == {"품목", "성분", "효능·상황", "무드·질감", "루틴·상황", "주의"} and len(kws) == len(set(kws)) >= 50 and cfg["naver_shopping_category"] == "50000002"
 
 
 def test_naver_mode_picks_api_hub_by_secret_length_or_env(monkeypatch):

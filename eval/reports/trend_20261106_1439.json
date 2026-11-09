@@ -1,0 +1,134 @@
+{
+  "rows": [
+    {
+      "keyword": "핸드크림",
+      "group": "품목",
+      "naver_search": 0.5770719790243244,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 77.1420875
+    },
+    {
+      "keyword": "여드름피부",
+      "group": "효능·상황",
+      "naver_search": 0.45380237603422513,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 4.182375
+    },
+    {
+      "keyword": "바쿠치올",
+      "group": "성분",
+      "naver_search": 0.4308234462236096,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 13.228705
+    },
+    {
+      "keyword": "아이크림",
+      "group": "품목",
+      "naver_search": 0.41791678712597435,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 19.18292
+    },
+    {
+      "keyword": "수분크림",
+      "group": "품목",
+      "naver_search": 0.26582880233066963,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 73.0059325
+    },
+    {
+      "keyword": "건조한피부",
+      "group": "효능·상황",
+      "naver_search": 0.2544879968952709,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 1.55562
+    },
+    {
+      "keyword": "보습",
+      "group": "효능·상황",
+      "naver_search": 0.22316255286650044,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 38.437844999999996
+    },
+    {
+      "keyword": "앰플",
+      "group": "품목",
+      "naver_search": 0.19573974286653795,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 23.8866875
+    },
+    {
+      "keyword": "세럼",
+      "group": "품목",
+      "naver_search": 0.19563665819583664,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 24.811970000000002
+    },
+    {
+      "keyword": "토너",
+      "group": "품목",
+      "naver_search": 0.17705376885548296,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 23.5032125
+    },
+    {
+      "keyword": "속건조",
+      "group": "효능·상황",
+      "naver_search": 0.15977648057175964,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 29.059345
+    },
+    {
+      "keyword": "판테놀",
+      "group": "성분",
+      "naver_search": 0.08384573708249454,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 15.3586875
+    },
+    {
+      "keyword": "바디로션",
+      "group": "품목",
+      "naver_search": 0.07307550781358807,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 54.897765
+    },
+    {
+      "keyword": "립밤",
+      "group": "품목",
+      "naver_search": 0.06017190656573823,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 43.1332875
+    },
+    {
+      "keyword": "미스트",
+      "group": "품목",
+      "naver_search": 0.05939525408821389,
+      "naver_shopping": null,
+      "google": null,
+      "recent_ratio": 26.30607
+    }
+  ],
+  "google_error": "TypeError",
+  "shopping_error": "HTTP 404",
+  "naver_api": "ncp",
+  "period": [
+    "2026-08-13",
+    "2026-11-05"
+  ],
+  "source_id": "trend_2026-W45",
+  "label": "2026-11-06 기준 주",
+  "keywords": 62
+}

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import calllog, cutout, imagegen, llm, pricing, smallbiz, storage
+from . import calllog, cutout, imagegen, knowledge, llm, pricing, prompts, smallbiz, storage
 from .models import Asset, Brand, BrandVersion, CopyVariant, Design, Placement, PresetVersion
 from .routers_assets import get_db, get_design, latest_image
 from .routers_brands import _version_from
@@ -26,13 +26,55 @@ class CampaignIn(BaseModel):
     shop_name: str = Field(default="", max_length=60)       # 가게 이름(선택)
     photo_asset_id: int | None = None
     preset_id: str | None = None                            # 비우면 추천 1순위
-    placements: list[str] | None = None                     # 비우면 기본 규격
+    placements: list[str] | None = None                     # 비우면 기본 규격(화장품 프리셋은 Instagram 피드)
+    label_claims: list[str] = Field(default=[], max_length=6)   # 사진 라벨에서 읽어 사용자가 남긴 문구(설명에 "라벨 문구"로 넣는다)
+    trend_angles: list[str] = Field(default=[], max_length=3)   # 사용자가 고른 '이번 주 각도' 키워드. 비우면 트렌드를 쓰지 않는다
 
 
 @router.get("/presets")
-def list_presets():
-    return {"presets": [smallbiz.public(p) for p in smallbiz.PRESETS], "default_placements": smallbiz.DEFAULT_PLACEMENTS,
+def list_presets(industry: str | None = None):
+    """industry 를 주면(예: 화장품) 그 업종 프리셋만, 안 주면 일반 프리셋만."""
+    return {"presets": [smallbiz.public(p) for p in smallbiz.for_industry(industry)], "default_placements": smallbiz.DEFAULT_PLACEMENTS,
             "common_forbidden": smallbiz.COMMON_FORBIDDEN}
+
+
+PHOTO_READ_SCHEMA = llm._obj({"product_name": llm.STR, "category": llm.STR, "is_cosmetic": {"type": "boolean"},
+                              "label_claims": {"type": "array", "items": llm.STR}, "suggested_message": llm.STR},
+                             ["product_name", "category", "is_cosmetic", "label_claims", "suggested_message"])
+
+
+@router.post("/read-photo")
+def read_photo(photo_asset_id: int = Body(..., embed=True), db: Session = Depends(get_db)):
+    """올린 제품 사진 한 장을 비전 모델로 읽어 입력 칸 초안을 돌려준다(제품명·종류·라벨 문구·한마디·화장품 여부).
+    읽기에 실패해도 오류로 막지 않는다: ok=false 와 빈 값을 돌려 주고 화면이 직접 적게 한다."""
+    a = db.get(Asset, photo_asset_id)
+    if not a or a.kind != "product":
+        raise HTTPException(400, "사진을 찾을 수 없습니다. 다시 올려 주세요")
+    out = {"ok": False, "product_name": "", "category": "", "is_cosmetic": False, "label_claims": [], "suggested_message": ""}
+    try:
+        im = Image.open(io.BytesIO(storage.read_bytes(a.file_path))).convert("RGBA")
+        flat = Image.new("RGB", im.size, "white")
+        flat.paste(im, mask=im.split()[3])       # 누끼(투명 배경)는 흰 바탕에 올려 읽는다
+        buf = io.BytesIO()
+        flat.save(buf, format="PNG")
+        data = llm.vision_json(prompts.render("smallbiz/read_photo_system"), prompts.render("smallbiz/read_photo_user"),
+                               [buf.getvalue()], "photo_read", PHOTO_READ_SCHEMA)
+    except Exception:
+        return out
+    claims = [str(c).strip()[:120] for c in (data.get("label_claims") or []) if str(c).strip()][:6]
+    return {"ok": True, "product_name": str(data.get("product_name") or "").strip()[:100], "category": str(data.get("category") or "").strip()[:30],
+            "is_cosmetic": bool(data.get("is_cosmetic")), "label_claims": claims,
+            "suggested_message": str(data.get("suggested_message") or "").strip()[:60]}
+
+
+@router.get("/trend-angles")
+def trend_angles(db: Session = Depends(get_db)):
+    """'이번 주 각도' 칩 후보: 이번 주 검색이 오른 키워드 상위 6개(주의·품목 묶음 제외). 트렌드 문서가 없으면 빈 목록."""
+    metas = knowledge.trend_metas(db)
+    rows = [{"keyword": k, "group": m.get("group"), "rise": m.get("naver"), "shopping": m.get("shopping")} for k, m in metas.items()
+            if m.get("group") not in knowledge.TREND_SKIP_GROUPS and (m.get("naver") or 0) > 0]
+    rows.sort(key=lambda r: r["rise"], reverse=True)
+    return {"angles": rows[:6]}
 
 
 def _image_price(model: str, size: str) -> float | None:
@@ -185,17 +227,19 @@ def create_campaign(body: CampaignIn, db: Session = Depends(get_db)):
         a = db.get(Asset, body.photo_asset_id)
         if not a or a.kind != "product":
             raise HTTPException(400, "사진을 찾을 수 없습니다. 다시 올려 주세요")
-    pids = _placement_ids(db, body.placements or smallbiz.DEFAULT_PLACEMENTS)
+    pids = _placement_ids(db, body.placements or (["Instagram 피드"] if preset.get("industry") else smallbiz.DEFAULT_PLACEMENTS))
     if not pids:
         raise HTTPException(400, "선택할 수 있는 규격이 없습니다")
     brand = _hidden_brand(db, preset)
     what = body.what.strip()
-    desc = (f"가게: {body.shop_name.strip()}. " if body.shop_name.strip() else "") + what
+    claims = [c.strip() for c in body.label_claims if c.strip()]
+    desc = (f"가게: {body.shop_name.strip()}. " if body.shop_name.strip() else "") + what + (f" 라벨 문구: {', '.join(claims)}." if claims else "")
     first = what.splitlines()[0].strip()
     brief = {"product_name": first[:100], "description": desc[:1000],
              "key_message": body.message.strip() or _suggest_message(what), "target": "",
              "product_image_asset_id": body.photo_asset_id, "image_style": preset["image_style"],
-             "required_phrases": [], "forbidden_phrases": [], "smallbiz": {"preset_id": preset["id"]}}
+             "required_phrases": [], "forbidden_phrases": [], "smallbiz": {"preset_id": preset["id"]},
+             "use_trend": bool(body.trend_angles), "trend_angles": [a.strip() for a in body.trend_angles if a.strip()]}      # 각도를 고른 때만 트렌드를 쓴다
     d = Design(brand_id=brand.id, brand_version_id=brand.current_version_id, preset_version_ids=pids, brief=brief,
                kind="광고 이미지", status="미검수")
     db.add(d)
@@ -209,7 +253,15 @@ def create_campaign(body: CampaignIn, db: Session = Depends(get_db)):
         routers_copy.select_variant(d.id, 1, db)
     except HTTPException:
         raise HTTPException(502, {"message": "카피 시안이 비어 있습니다. 다시 시도해 주세요", "design_id": d.id})
-    return {"design_id": d.id, "preset_id": preset["id"], "key_message": brief["key_message"]}
+    from . import routers_edit
+    auto_fix = []
+    for pid in pids:     # 카피 직후 차단 표현(법적·기능성·금지)이 있으면 고쳐 보기를 지면마다 1회 자동 실행한다. 실패·위반 없음은 건너뛴다
+        try:
+            r = routers_edit.fix_copy_violations(d.id, pid, db)
+            auto_fix.append({"preset_id": pid, "adopted": r["adopted"], "note": r["note"]})
+        except Exception:
+            db.rollback()
+    return {"design_id": d.id, "preset_id": preset["id"], "key_message": brief["key_message"], "auto_fix": auto_fix}
 
 
 @router.get("/campaigns/{design_id}")

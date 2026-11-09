@@ -829,6 +829,13 @@ mark.var { background: #fef08a; color: inherit; border-radius: 2px; padding: 0 1
 .sb-wrap textarea, .sb-wrap input:not([type=file]) { font: inherit; padding: 8px 10px; }
 .sb-err { color: #b3261e; } .sb-warn { color: #b26a00; margin: 4px 0; } .sb-ok { color: #1b7a43; margin: 4px 0; }
 .sb-photo img { max-width: 160px; border-radius: 8px; }
+.sb-wrap label.sb-drop { align-items: center; justify-content: center; min-height: 180px; padding: 24px; border: 2px dashed var(--line-strong); border-radius: 14px; background: var(--surface); cursor: pointer; text-align: center; }
+.sb-claims { border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.sb-wrap label.sb-check { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.sb-wrap label.sb-check input { padding: 0; }
+.sb-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.sb-chip { padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
+.sb-chip.on { border-color: var(--leaf); box-shadow: 0 0 0 3px var(--accent-soft); }
 .sb-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }      /* 스타일 6개를 3×2 로 */
 @media (max-width: 520px) { .sb-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sb-preset { text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); cursor: pointer; }

@@ -25,7 +25,7 @@ class ChatRefused(RuntimeError):
 # 종류별 기본 모델: 짧은 구조화 생성은 Haiku(Sonnet 과 같은 시험 통과율, 비용 약 1/8 — CHANGELOG 참조). judge 등 나머지는 CLAUDE_MODEL
 # copy 는 글의 품질이 결과물이라 Sonnet(시험 통과율은 같아도 근거를 살린 문장은 작은 모델로는 부족했다). 아이콘 후보·추가 문구는 copy_extras
 KIND_DEFAULTS = {"copy": "claude-sonnet-5-5", "copy_fit": "claude-haiku-5-5", "copy_fix": "claude-haiku-5-5", "copy_brief": "claude-haiku-5-5", "copy_extras": "claude-haiku-5-5",
-                 "icon_names": "claude-haiku-5-5"}
+                 "icon_names": "claude-haiku-5-5", "photo_read": "claude-haiku-5-5", "copy_judge": "claude-haiku-5-5"}
 
 
 def model_for(kind: str | None = None) -> str:
@@ -162,6 +162,12 @@ ICONS_SVG_SCHEMA = _obj({"icons": _arr(ICON_SVG)})
 def copy_schema() -> dict:
     """카피 응답: variants(각도·근거·제목·본문·CTA)."""
     return _obj({"variants": _arr(_obj({"angle": STR, "evidence": STR, "headline": STR, "body": STR, "cta": STR, "long_body": STR}))})
+
+
+def judge_schema() -> dict:
+    """카피 심사 응답: 후보별 5개 기준 점수(1~5)와 한 줄 사유."""
+    num = {"type": "integer"}
+    return _obj({"scores": _arr(_obj({"no": num, "brand": num, "fact": num, "concrete": num, "trend": num, "feed": num, "reason": STR}))})
 
 
 def extras_schema(asset_fields: list[str], want_icons: bool = True) -> dict:
