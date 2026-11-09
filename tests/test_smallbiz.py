@@ -349,3 +349,19 @@ def test_image_judge_off_by_switch(img_env, monkeypatch):
     monkeypatch.setenv("IMAGE_JUDGE", "0")
     seen, lay, js = _smallbiz_image(img_env, monkeypatch, [_judged(1)])
     assert not seen and len(img_env["calls"]) == 1
+
+
+def test_image_judge_looks_at_background_before_product_paste(monkeypatch):
+    """합성본(제품 라벨 글자 포함)이 아니라 제품을 붙이기 전 빈 배경을 채점한다(시안 70 실측: 라벨 글자로 매번 재생성)."""
+    from PIL import Image
+    from app import analysis, routers_images
+    seen = []
+    monkeypatch.setattr(analysis, "judge_image", lambda im, vars: seen.append(im) or _judged(4))
+    monkeypatch.setattr(analysis, "judge_vars", lambda *a: {})
+
+    class DB:
+        def get(self, *a): return None
+    final, plain = Image.new("RGB", (8, 8), "red"), Image.new("RGB", (8, 8), "white")
+    bg, extra, j = routers_images._judge_and_retry(DB(), type("D", (), {"brand_id": 1, "brief": {}})(), None, "실사 제품·공간",
+                                                   final, {}, plain, lambda: (_ for _ in ()).throw(AssertionError("재생성 없음")))
+    assert seen == [plain] and bg is final and extra["judge"]["overall"] == 4

@@ -352,7 +352,9 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
     bp = _bg_prompt(db, d, template, force_ratio=force_ratio, variant=ref_img is not None)
     prompt, style, reason, single = bp["prompt"], bp["style"], bp["reason"], bp["single"]
     product_img, product_id, pmode, composite, bv = bp["product_img"], bp["product_id"], bp["pmode"], bp["composite"], bp["bv"]
-    def make() -> tuple[Image.Image, dict]:
+    def make() -> tuple[Image.Image, dict, Image.Image]:
+        """반환: (최종 배경, layout 추가분, 채점할 이미지). 합성이면 채점은 제품을 붙이기 전 빈 배경으로 한다
+        (붙인 제품 라벨의 글자를 '글자·로고'로 감점해 매번 재생성되던 문제, 시안 70 실측)."""
         try:
             if composite:        # 제품 없는 빈 배경만 생성(참조는 장면 하나) → 아래에서 원본 누끼를 붙인다
                 bg = (imagegen.generate_variant(prompt, gw, gh, ref_img, quality, model=st["model"]) if ref_img is not None
@@ -366,15 +368,15 @@ def _generate_one(db: Session, d: Design, template: str, reference: GeneratedIma
         except Exception as e:
             raise HTTPException(502, _gen_error(e))
         if not composite:
-            return bg, {}
-        clean_key = storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
+            return bg, {}, bg
+        clean, clean_key = bg, storage.put_image(f"bgclean_{uuid.uuid4().hex[:10]}.png", bg)
         bg, placed = compose.paste_product(bg, product_img, template, product_scale(d), layout_name(d))
-        return bg, {"clean_file": clean_key, "product_placed": placed}
+        return bg, {"clean_file": clean_key, "product_placed": placed}, clean
 
-    bg, extra = make()
+    bg, extra, plain = make()
     judged = None
     if image_judging(d):      # 소상공인: 비전 채점 → 기준 미달이면 1회 다시 만들어 overall 이 높은 쪽을 쓴다
-        bg, extra, judged = _judge_and_retry(db, d, bv, style, bg, extra, make)
+        bg, extra, judged = _judge_and_retry(db, d, bv, style, bg, extra, plain, make)
     path = storage.put_image(f"bg_{uuid.uuid4().hex[:10]}.png", bg)
     if judged is not None:
         _save_judgment(d, style, path, template, judged)
@@ -418,15 +420,16 @@ def _bad(j: dict | None) -> bool:
     return j["overall"] <= JUDGE_MIN or text <= JUDGE_MIN
 
 
-def _judge_and_retry(db: Session, d: Design, bv: BrandVersion, style: str, bg: Image.Image, extra: dict, make):
+def _judge_and_retry(db: Session, d: Design, bv: BrandVersion, style: str, bg: Image.Image, extra: dict,
+                     plain: Image.Image, make):
     """채점하고 기준 미달이면 1회 재생성. 반환: (이미지, layout 추가분(judge 요약 포함), 고른 쪽 채점)."""
     brand = db.get(Brand, d.brand_id)
-    j = _judge(d, bv, brand, style, bg)
+    j = _judge(d, bv, brand, style, plain)
     tries = [(bg, extra, j)]
     if _bad(j):
         try:
-            bg2, extra2 = make()
-            tries.append((bg2, extra2, _judge(d, bv, brand, style, bg2)))
+            bg2, extra2, plain2 = make()
+            tries.append((bg2, extra2, _judge(d, bv, brand, style, plain2)))
         except HTTPException as e:       # 재생성이 실패하면 첫 이미지를 쓴다
             log.warning("배경 재생성 실패: %s", e.detail)
     bg, extra, j = max(tries, key=lambda t: (not _bad(t[2]), (t[2] or {}).get("overall", 0)))   # 기준 통과 우선, 같으면 먼저 만든 것
