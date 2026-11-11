@@ -341,6 +341,18 @@ class VirtualModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class FeedPost(Base):
+    """피드 세트 게시물 하나: 제품 사진 + 모델 → 장면 3장(hold·use·detail). shots = {장: {asset_id, judge, tries, error}}."""
+    __tablename__ = "feed_posts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    feed_brand_id: Mapped[int] = mapped_column(ForeignKey("feed_brands.id"), index=True)
+    photo_asset_id: Mapped[int] = mapped_column(Integer)
+    gender: Mapped[str] = mapped_column(String(2))
+    product: Mapped[dict] = mapped_column(JSON, default=dict)   # {name, category, label_claims, usage}
+    shots: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class KnowledgeDoc(Base):
     """RAG 로 찾아 쓸 문서 하나(법령 조문 묶음·그룹 페이지·브랜드 소개·제품 정보). knowledge.py 가 조각으로 나눠 저장한다.
     layer: 규제 | 그룹 | 브랜드 | 제품 | 캠페인. 규제는 group_id·brand_id 를 비워 어느 브랜드에나 적용한다."""
